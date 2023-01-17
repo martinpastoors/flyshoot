@@ -1,0 +1,348 @@
+---
+output: 
+  word_document:
+    reference_docx: ../PFA_template.dotx
+---
+
+```{r setup, include=FALSE}
+
+# -------------------------------------------------------------------------------------
+# Jaczon overviews
+#
+# 21/10/2022 first coding
+# -------------------------------------------------------------------------------------
+
+require("knitr")
+knitr::opts_chunk$set(echo = FALSE,	message = FALSE,	warning = FALSE,	comment = "",	crop = TRUE )
+knitr::opts_chunk$set(fig.width=10) 
+knit_hooks$set(crop = hook_pdfcrop)
+
+rm(list=ls())
+
+# Libraries
+library(rmarkdown)
+library(maps)          # world maps
+# library(rgdal)         # read spatial polygons (e.g. EEZ)
+# library(sp)            # spatial data 
+# library(maptools)      # for handling spatial data
+# library(mapproj)       # map projections
+# require(geosphere, quietly=TRUE)           # spatial manipulation
+
+library(pander)        # tables
+# library(kableExtra)    # better tables     # install.packages("kableExtra")
+library(cowplot)       # better for handling multiple plots
+# library(viridis)       # Viridis colour scheme
+# library(ggridges)      # new instead of ggjoy 
+
+library(tidyverse)     # combined package of dplyr, tidyr, ggplot, readr, purrr and tibble
+library(lubridate)     # data handling
+library(reshape2)      # reshaping data; e.g. cast
+library(readxl)        # excel reader
+library(broom)         # clean up statistics
+library(scales)        # pretty scales
+library(stringr)       # string manipulations
+library(magrittr)      # for e.g. set_colnames
+library(RColorBrewer)
+
+# library(captioner)                   # for captions
+# tab_nums <- captioner::captioner(prefix = "Table " , levels=1, type=c("n"), infix=".")
+# fig_nums <- captioner::captioner(prefix = "Figure ", levels=1, type=c("n"), infix=".")
+
+# HCL palettes
+# library(colorspace)    # hcl colours
+# pal_red2blue  <- diverge_hcl   (12, c=100,l=c(50,90), power=1)
+# pal_red       <- sequential_hcl(12, h=10 , c=c(80,10), l=c(30,95), power=1, fixup=TRUE, alpha=1)
+# pal_blue      <- sequential_hcl(12, h=260, c=c(50,10), l=c(30,95), power=1, fixup=TRUE, alpha=1)
+# pal_green     <- sequential_hcl(12, h=135, c=c(80,100),l=c(30,95), power=1, fixup=TRUE, alpha=1)
+
+# default settings for tables
+panderOptions('table.alignment.default', function(df) ifelse(sapply(df, is.numeric), 'right', 'left'))
+
+# Source all the utilities
+source("../../prf/R/my utils.r")
+source("../../gisland/R/geo_inside.R")
+# source("PFA report utils.r")
+
+# set onedrive directory
+onedrive   <- get_onedrive()
+dropboxdir <- file.path(get_dropbox(), "MPFF", "acquisitie","Flyshoot", "data")
+
+  
+# load spatial datasets
+load(file.path(onedrive, "rdata/world.df.RData"))
+load(file.path(onedrive, "rdata/eez.df.RData"))
+load(file.path(onedrive, "rdata/fao.df.RData"))
+
+load(file.path(onedrive, "rdata/fao.RData"))
+
+
+#  Load the Jaczon data
+fn <- "Catch data FS 2011-2021.xlsx"
+sn <- readxl::excel_sheets(file.path(dropboxdir, fn))
+
+df1 <- data.frame(stringsAsFactors = FALSE)
+for (sheetname in sn) {
+  df1 <- 
+    bind_rows(
+      df1, 
+      readxl::read_excel(file.path(dropboxdir, fn),
+                         sheet = sheetname
+                         ) %>% 
+        lowcase() %>% 
+        drop_na(catch, daysatsea) %>% 
+        mutate(catchperday = catch / daysatsea)
+    )
+}
+
+fn <- "Jaczon aanvoer data Flyshooters.xlsx"
+sn <- 
+  readxl::excel_sheets(file.path(dropboxdir, fn)) %>%    
+  grep(pattern='viszones', inv=F, value=T, ignore.case = T) 
+
+df2 <- data.frame(stringsAsFactors = FALSE)
+for (sheetname in sn) {
+  df2 <- 
+    bind_rows(
+      df2, 
+      readxl::read_excel(file.path(dropboxdir, fn),
+                         sheet = sheetname
+                         ) %>% 
+        lowcase() 
+    )
+}
+ 
+
+# Color settings for areas 
+# colourCount               <- length(unique(tripsummary$area))
+# getPalette                <- colorRampPalette(RColorBrewer::brewer.pal(6, "Set1"))
+# myAreaColors              <- getPalette(colourCount)
+# names(myAreaColors)       <- levels(as.factor(tripsummary$area))
+
+
+```
+
+
+**Jaczon Flyshoot overviews**
+
+Martin Pastoors, `r format(Sys.time(), '%d/%m/%Y %X')`
+
+<!--Section 1: introduction ------------------------------------------------------------ -->
+
+
+<!--Section 2 -->
+
+
+<!--Section 3 ------------------------------------------------------------ -->
+
+**Soortensamenstelling van de vangst per gebied**
+
+```{r, echo=FALSE, fig.asp=0.5, fig.align="center", message=FALSE, warning=FALSE}
+
+# Calculate trips from haul database; only for 2018 and beyond
+df1 %>%
+  group_by(species, year, fishground) %>% 
+  summarise(catch=sum(catch, na.rm=TRUE)) %>% 
+  mutate(catch = catch/1000) %>% 
+  
+  ggplot(aes(x=year, y=catch)) +
+  theme_publication() +
+  theme(axis.text.x = element_text(angle=90)) +
+  geom_bar(aes(fill=species), stat="identity") +
+  scale_x_continuous(breaks=seq(min(df1$year), max(df1$year), 1)) +
+  labs(y="catch (tonnes)") +
+  facet_wrap(~fishground)
+
+# unique(tripsummary$trip)
+# df1 %>% filter(species=="CTC", catchperday > 1000) %>% View()
+
+  
+```
+
+**Soortensamenstelling (percentages)**
+
+```{r, echo=FALSE, fig.asp=0.5, fig.align="center", message=FALSE, warning=FALSE}
+
+# Calculate trips from haul database; only for 2018 and beyond
+df1 %>%
+  group_by(species, year, fishground) %>% 
+  summarise(catch=sum(catch, na.rm=TRUE)) %>% 
+  mutate(catch = catch/1000) %>% 
+  
+  ggplot(aes(x=year, y=catch)) +
+  theme_publication() +
+  theme(axis.text.x = element_text(angle=90)) +
+  geom_bar(aes(fill=species), stat="identity", position="fill") +
+  scale_x_continuous(breaks=seq(min(df1$year), max(df1$year), 1)) +
+  scale_y_continuous(labels = scales::percent) +
+  labs(y="catch (percentage)") +
+  facet_wrap(~fishground)
+
+# unique(tripsummary$trip)
+# df1 %>% filter(species=="CTC", catchperday > 1000) %>% View()
+
+  
+```
+
+**Inspanning (visuren)**
+
+```{r, echo=FALSE, fig.asp=0.5, fig.align="center", message=FALSE, warning=FALSE}
+
+# Calculate trips from haul database; only for 2018 and beyond
+df1 %>%
+  distinct(vessel, year, fishground, daysatsea) %>% 
+  group_by(year, fishground) %>% 
+  summarise(daysatsea=sum(daysatsea, na.rm=TRUE)) %>% 
+  
+  ggplot(aes(x=year, y=daysatsea)) +
+  theme_publication() +
+  theme(axis.text.x = element_text(angle=90)) +
+  geom_bar(stat="identity") +
+  scale_x_continuous(breaks=seq(min(df1$year), max(df1$year), 1)) +
+  facet_wrap(~fishground)
+
+# unique(tripsummary$trip)
+# df1 %>% filter(species=="CTC", catchperday > 1000) %>% View()
+
+  
+```
+
+**Vangst per soort en per visdag (CPUE)
+
+```{r, echo=FALSE, fig.asp=1.4, fig.align="center", message=FALSE, warning=FALSE}
+
+# Calculate trips from haul database; only for 2018 and beyond
+
+df1 %>%
+  ggplot(aes(x=year, y=catchperday)) +
+  theme_publication() +
+  theme(axis.text.x = element_text(angle=90)) +
+  geom_point(aes(colour=vessel)) +
+  # geom_line(aes(colour=vessel), size=0.2) +
+  geom_smooth(se=FALSE, colour="darkgray") +
+  scale_x_continuous(breaks=seq(min(df1$year), max(df1$year), 1)) +
+  expand_limits(y=0) +
+  facet_grid(species~fishground, scales="free_y")
+
+# unique(tripsummary$trip)
+# df1 %>% filter(species=="CTC", catchperday > 1000) %>% View()
+
+  
+```
+
+_figuur 2_
+
+\newpage
+
+**Bestand 2: vangst per soort per maand en per gebied (IVc en VIId)**
+
+```{r echo=FALSE, fig.align="center", fig.asp=1.2, message=FALSE, warning=FALSE}
+
+# myarea <- "IVC"
+# distinct(df2, visgrond)
+for (myarea in c("IVC")) {
+  
+  t <-
+    df2 %>%
+    filter(visgrond==myarea) %>% 
+    group_by(vissoort, jaar, maand, visgrond) %>% 
+    summarise(catch=sum(vangst, na.rm=TRUE))
+  
+  # View(t)
+  
+  t2 <-
+    t %>% 
+    group_by(vissoort) %>% 
+    summarise(catch = sum(catch, na.rm=TRUE)) %>% 
+    arrange(desc(catch)) %>% 
+    slice_head(n=10)
+  
+  t %>% 
+    filter(vissoort %in% t2$vissoort) %>% 
+    ggplot(aes(x=maand, y=catch)) +
+    theme_publication() +
+    # theme(axis.text.x = element_text(angle=90)) +
+    geom_bar(aes(fill=vissoort), stat="identity") +
+    scale_x_continuous(breaks=seq(1,12, 1)) +
+    labs(title=myarea) +
+    facet_wrap(~jaar)
+  
+}
+
+# unique(tripsummary$trip)
+# df1 %>% filter(species=="CTC", catchperday > 1000) %>% View()
+
+  
+```
+
+**Vangst per soort per jaar en per gebied**
+
+
+```{r echo=FALSE, fig.align="center", fig.asp=1.2, message=FALSE, warning=FALSE}
+
+# myarea <- "IVC"
+# distinct(df2, visgrond)
+
+t <-
+  df2 %>%
+  filter(grepl("IV|VII|VIII", visgrond)) %>% 
+  group_by(vissoort, jaar, visgrond) %>% 
+  summarise(catch=sum(vangst, na.rm=TRUE)) %>% 
+  mutate(catch = catch/1000)
+
+t2 <-
+  t %>% 
+  group_by(vissoort) %>% 
+  summarise(catch = sum(catch, na.rm=TRUE)) %>% 
+  arrange(desc(catch)) %>% 
+  slice_head(n=10)
+
+t %>% 
+  filter(vissoort %in% t2$vissoort) %>% 
+  
+  ggplot(aes(x=jaar, y=catch)) +
+  theme_publication() +
+  theme(axis.text.x = element_text(angle=90)) +
+  geom_bar(aes(fill=vissoort), stat="identity") +
+  scale_x_continuous(breaks=seq(min(df1$year), max(df1$year), 1)) +
+  facet_wrap(~visgrond)
+  
+
+# unique(tripsummary$trip)
+# df1 %>% filter(species=="CTC", catchperday > 1000) %>% View()
+
+  
+```
+
+
+```{r eval=FALSE, fig.align="center", fig.asp=1.2, message=FALSE, warning=FALSE, include=FALSE}
+
+myspecies = "CTC"
+
+t <-
+  df2 %>%
+  filter(visgrond=="VIID") %>% 
+  group_by(vissoort, jaar, maand, visgrond) %>% 
+  summarise(catch=sum(vangst, na.rm=TRUE))
+
+t2 <-
+  t %>% 
+  group_by(vissoort) %>% 
+  summarise(catch = sum(catch, na.rm=TRUE)) %>% 
+  arrange(desc(catch)) %>% 
+  slice_head(n=10)
+
+t %>% 
+  filter(vissoort %in% t2$vissoort) %>% 
+  ggplot(aes(x=maand, y=catch)) +
+  theme_publication() +
+  # theme(axis.text.x = element_text(angle=90)) +
+  geom_bar(aes(fill=vissoort), stat="identity") +
+  scale_x_continuous(breaks=seq(1,12, 1)) +
+  facet_wrap(~jaar)
+
+# unique(tripsummary$trip)
+# df1 %>% filter(species=="CTC", catchperday > 1000) %>% View()
+
+  
+```
+

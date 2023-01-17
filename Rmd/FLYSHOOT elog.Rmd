@@ -1,0 +1,343 @@
+---
+output:
+  word_document:
+    reference_docx: ../report_template.dotx
+---
+
+
+```{r setup, include=FALSE}
+
+# ==========================================================================================================
+# Generate standard FLYSHOOT tripreport
+# 
+# 11/01/2023 first coding
+# ==========================================================================================================
+
+knitr::opts_chunk$set(echo = FALSE,	message = FALSE,	warning = FALSE,	comment = "",	crop = TRUE )
+knitr::opts_chunk$set(fig.width=10) 
+
+options(dplyr.summarise.inform = FALSE)
+
+# Reset lists
+rm(list=ls())
+
+# Libraries
+library(rmarkdown)                   # note: requires knitr 1.21
+
+require(tidyverse, quietly=TRUE)     # combined package of dplyr, tidyr, ggplot, readr, purrr and tibble
+require(lubridate, quietly=TRUE)     # data handling
+require(reshape2, quietly=TRUE)      # reshaping data; e.g. cast
+require(RColorBrewer)                # colour schemes
+library(viridis)
+library(pander)
+
+library(captioner)                   # for captions
+tab_nums <- captioner::captioner(prefix = "Table " , levels=1, type=c("n"), infix=".")
+fig_nums <- captioner::captioner(prefix = "Figure ", levels=1, type=c("n"), infix=".")
+
+# Source all the utils
+source("../../prf/R/my utils.r")
+
+get_onedrive <- function (team="Martin Pastoors", site="FLYSHOOT - General") {
+  
+  if (Sys.info()['sysname'] == 'Windows') {
+    
+    # set onedrive directory
+    if(dir.exists(file.path(Sys.getenv('USERPROFILE'), team, site))) {
+      onedrive <- file.path(Sys.getenv('USERPROFILE'), team, site)   
+    } else if(dir.exists(file.path('C:/DATA/PFA', team, site))) {
+      onedrive <- file.path('C:/DATA/PFA', team, site)
+    } else if(dir.exists(file.path('D:/DATA/PFA', team, site))) {
+      onedrive <- file.path('D:/DATA/PFA', team, site)
+    } else {
+      stop("Onedrive directory not found")
+    }
+  }
+  
+  return(onedrive)
+}
+
+spatialdir <- "C:/DATA/RDATA"
+
+# spatial data files
+
+load(file.path(spatialdir, "world_lr_sf.RData"))
+load(file.path(spatialdir, "world_hr_sf.RData"))
+# load(file.path(onedrive, "rdata/eez.df.RData"))
+# load(file.path(onedrive, "rdata/fao.df.RData"))
+# load(file.path(onedrive, "rdata/depth200.df.RData"))
+load(file.path(spatialdir, "rect_lr_sf.RData"))
+
+load(file.path(spatialdir, "world_lr_df.RData"))
+
+load(file.path(spatialdir, "afsis.RData"))
+
+# ===============================================================================
+#  Load and filter the trip data
+# ===============================================================================
+
+# set onedrive directory
+onedrive <- get_onedrive(team="Martin Pastoors", site="FLYSHOOT - General")
+
+# load datasets
+load(file.path(onedrive, "rdata/haul.RData"))
+load(file.path(onedrive, "rdata/marelec_lot.RData"))
+
+# setvessel<-"SCH135"   ;settrip<-"2023318" ;
+setvessel<-"Z99"   ;settrip<-"2023063" ;
+
+# making the data selections
+h <- 
+  haul %>%
+  ungroup() %>% 
+  filter(vessel  %in% setvessel,
+         trip    %in% settrip) %>%  
+  ungroup()
+
+ 
+m <-
+  marelec_lot %>% 
+  filter(vessel  %in% setvessel,
+         trip    %in% settrip) %>% 
+  mutate(soorten = tolower(soorten))
+
+if (nrow(h) == 0 & nrow(m) == 0) {stop(paste("No hauls in the selected trip:", setvessel, settrip))}
+
+trip <-
+  bind_rows(
+    distinct(h, 
+             vessel, trip, haul, haultime) %>% mutate(source="trek"),
+    distinct(m,
+             vessel, trip, haul, haultime=datetime) %>% mutate(source="marelec")
+  ) %>% 
+  group_by(vessel, trip, source) %>% 
+  summarise(
+    nhaul = n_distinct(haul),
+    startdate = min(haultime, na.rm=TRUE),
+    enddate   = max(haultime, na.rm=TRUE)
+  )
+
+# calculate the scaling of plots
+
+# xmin <- floor(2 * (min(h$shootlon, na.rm=TRUE)-0.5))/2;   
+# xmax <- ceiling(2 * (max(h$shootlon, na.rm=TRUE)+0.5))/2;
+# ymin <- floor(2 * (min(h$shootlat, na.rm=TRUE)-0.5))/2; 
+# ymax <- ceiling(2* (max(h$shootlat, na.rm=TRUE)+0.5))/2
+
+# xdistance <- geosphere::distGeo(matrix(c(xmin, ymin), ncol=2, byrow=FALSE),
+#                                 matrix(c(xmax, ymin) , ncol=2, byrow=FALSE) )/1000
+# ydistance <- geosphere::distGeo(matrix(c(xmin, ymin), ncol=2, byrow=FALSE),
+#                                 matrix(c(xmin, ymax) , ncol=2, byrow=FALSE) )/1000
+ 
+ 
+ 
+# xdistance <- geo::arcdist(lat=ymin, lon=xmin, lat1 = ymin, lon1 = xmax, scale = "km")
+# ydistance <- geo::arcdist(lat=ymin, lon=xmin, lat1 = ymax, lon1 = xmin, scale = "km") 
+# aspect    <- ydistance/xdistance
+
+# if (aspect < 1.4) {
+#   
+#   projecty  <- ((1.4/aspect * ydistance) - ydistance)/2
+#   ymax      <- as.numeric(geosphere::destPoint(p=c(xmin, ymax), b=0, d=projecty*1000)[,2])
+#   ymin      <- as.numeric(geosphere::destPoint(p=c(xmin, ymin), b=180, d=projecty*1000)[,2])
+#   # ymin      <- floor  (2 * (ymin-0.5))/2 
+#   # ymax      <- ceiling(2* (ymax+0.5))/2
+# 
+# } else {
+# 
+#   projectx  <- ((aspect/1.4 * xdistance) - xdistance)/2
+#   xmin      <- as.numeric(geosphere::destPoint(p=c(xmin, ymin), b=270, d=projectx*1000)[,1])
+#   xmax      <- as.numeric(geosphere::destPoint(p=c(xmax, ymin), b=90,  d=projectx*1000)[,1])
+#   # xmin      <- floor(2 * (xmin-0.5))/2;   
+#   # xmax      <- ceiling(2 * (xmax+0.5))/2;
+# }
+
+
+```
+
+
+# Vessel tripreport `r unique(trip$vessel)`, trip `r as.character(unique(trip$trip))`
+
+### Trip start: `r format(min(trip$startdate), '%d/%m/%Y')`, end: `r format(max(trip$startdate), '%d/%m/%Y')`
+
+Report generated: `r format(Sys.time(), '%d/%m/%Y')`
+
+&nbsp;
+
+
+<!-- ########################################################################################## -->
+<!-- Table: vangst --------------------------- -->
+<!-- ########################################################################################## -->
+
+```{r vangstpersoort, echo=FALSE, message=FALSE, warning=FALSE, comment=NA}
+
+tab_nums(
+  name    = "vangstpersoort", 
+  level = 1, display = FALSE,
+  caption = "Vangst per soort (kg)")
+
+t1 <-
+  m %>% 
+  dplyr::group_by(soorten) %>% 
+  dplyr::summarize(gewicht     = sum(gewicht, na.rm=TRUE)) %>% 
+  dplyr::ungroup() %>% 
+  dplyr::mutate(perc = gewicht/sum(gewicht, na.rm=TRUE)) %>% 
+  tidyr::pivot_longer(names_to = "variable", values_to = "data", gewicht:perc) 
+
+t2 <-
+  t1 %>% 
+  group_by(variable) %>% 
+  summarise(data = sum(data, na.rm=TRUE)) %>% 
+  mutate(soorten="TOTAAL") %>% 
+  pivot_wider(names_from = variable, values_from = data) %>% 
+  mutate(perc = scales::percent(perc, accuracy=0.1)) 
+  
+
+t1 %>% 
+  pivot_wider(names_from = variable, values_from = data) %>% 
+  mutate(perc = scales::percent(perc, accuracy=0.1)) %>% 
+  mutate(soorten = tolower(soorten)) %>% 
+  arrange(desc(gewicht)) %>% 
+  bind_rows(t2 ) %>% 
+
+  pander::pandoc.table(.,
+               style = "simple",
+               split.tables=400, 
+               justify = "right",
+               missing=".",
+               round=c(0,0,0,1,1,1,1,1,1,1,1,1,1,1,0,0,0,0,0,0))
+  
+
+```
+
+_`r tab_nums("vangstpersoort")`_
+
+
+<!-- ########################################################################################## -->
+<!-- trek informatie --------------------------- -->
+<!-- ########################################################################################## -->
+
+```{r trekinformatie, echo=FALSE, message=FALSE, warning=FALSE, comment=NA, time_it=FALSE}
+
+fig_nums(
+  name    = "trekinformatie", level   = 1, display = FALSE,
+  caption = "Beschikbare trekinformatie (treklijst, marelec).")
+
+t1 <- h %>% 
+  group_by(vessel, trip, haul, haultime) %>% 
+  summarise(catch = sum(totalcatch, na.rm=TRUE)) %>% 
+  mutate(source="trek") %>% 
+  dplyr::select(vessel, trip, source, haul, haultime, catch)
+
+t2 <- m %>% 
+  rename(haultime = datetime) %>% 
+  group_by(vessel, trip, haul) %>% 
+  summarise(
+    haultime = min(haultime, na.rm=TRUE),
+    catch    = sum(gewicht, na.rm=TRUE)
+  ) %>% 
+  mutate(source="marelec") %>% 
+  dplyr::select(vessel, trip, source, haul, haultime, catch)
+
+bind_rows(t1, t2) %>% 
+  ggplot(aes(x=haultime, y=source)) +
+  theme_publication() +
+  theme(legend.position = "none") +
+  geom_point(aes(colour=source, size=catch)) 
+
+# tab_nums(name    = "trekinformatie", level = 1, display = FALSE, caption = "Trek informatie")
+
+```
+
+_`r fig_nums("trekinformatie")`_
+
+
+
+
+
+
+
+
+<!-- ########################################################################################## -->
+<!-- Figure: Total Catch per Haul (map)                                                         -->
+<!-- ########################################################################################## -->
+
+```{r catchperhaul, echo=FALSE, fig.asp=1.0, fig.align="center", message=FALSE, warning=FALSE}
+
+fig_nums(
+  name    = "totalcatchperhaul", level   = 1, display = FALSE,
+  caption = "Totale vangst per trek (bij benadering).")
+
+xlim <- c(-2,2); ylim <- c(48,51)
+
+h %>% 
+  arrange(haul) %>% 
+  
+  # ggplot(aes(x=shootlon, y=shootlat)) + 
+  ggplot() + 
+
+  theme_publication() +
+  theme(panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(),
+        text             = element_text(size=12),
+        plot.margin      = unit(c(0,0,0,0), "cm"),
+        panel.background = element_rect(fill = "lightskyblue1")
+        ) +  
+
+  
+  coord_quickmap(xlim=xlim , ylim=ylim) +
+
+  geom_polygon(data=world_lr_df, aes(x=long, y=lat, group=group), fill = "grey75") +
+
+  geom_jitter(aes(x=lon, y=lat, size = totalcatch), alpha = 0.2, colour = "blue", width=0.05, height=0.1) +
+  scale_size(range = c(1,10)) +
+  labs(x = NULL, y = NULL, size = "kg/trek") +
+  guides(size = guide_legend(nrow = 1)) 
+  # + facet_wrap(~source)
+  
+
+```
+
+_`r fig_nums("totalcatchperhaul")`_
+
+
+<!-- ########################################################################################## -->
+<!-- Figure: vangst per soort en klasse --------------------------- -->
+<!-- ########################################################################################## -->
+
+```{r vangstpersoortenklasse, echo=FALSE, fig.asp=1.3, fig.align="center", message=FALSE, warning=FALSE}
+
+fig_nums(
+  name    = "totalcatchperclass", level   = 1, display = FALSE,
+  caption = "Totale vangst per trek, soort en klasse.")
+
+
+# create list of catch by species by haul. From hm, or sph or else species = "oth"
+if (nrow(m) > 0) {
+  myspecies <-
+    m %>% 
+    group_by(soorten) %>% 
+    summarise(gewicht = sum(gewicht, na.rm=TRUE)) %>% 
+    arrange (desc(gewicht)) %>% 
+    slice_head(n=10)
+  
+  t <-
+    m %>% 
+    filter(soorten %in% myspecies$soorten) %>% 
+    group_by(vessel, trip, haul, soorten, maat) %>% 
+    summarise(gewicht=sum(gewicht))
+
+  t %>% 
+    ggplot(aes(x=soorten, y=gewicht)) +
+    theme_publication() +
+    geom_bar(aes(fill=maat), stat="identity") +
+    coord_flip() +
+    facet_wrap(~haul)
+  
+}
+
+```
+
+_`r fig_nums("totalcatchperclass")`_
+
+
