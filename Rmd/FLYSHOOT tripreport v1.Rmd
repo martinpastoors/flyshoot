@@ -94,9 +94,9 @@ load(file.path(onedrive, "rdata/marelec_lot.RData"))
 load(file.path(onedrive, "rdata/elog.RData"))
 load(file.path(onedrive, "rdata/trip.RData"))
 
-# setvessel<-"SCH135"   ;settrip<-"2023320" ;
+setvessel<-"SCH135"   ;settrip<-"2023320" ;
 # setvessel<-"SCH65"   ;settrip<-"2023237" ;
-setvessel<-"Z99"   ;settrip<-"2023064" ;
+# setvessel<-"Z99"   ;settrip<-"2023064" ;
 
 # making the data selections
 h <- 

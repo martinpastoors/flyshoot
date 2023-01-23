@@ -106,225 +106,228 @@ add_tripdata <- function(
     full.names = TRUE)
   
   # i <- 1
-  for (i in 1:length(filelist)) {
+  if(!is_empty(filelist)){
+    
+    for (i in 1:length(filelist)) {
     
     # vessel and trip
-    myvessel <- stringr::word(basename(filelist[i]), 1, sep=" ")
-
-    mytrip <-
-      stringr::word(basename(filelist[i]), 2, sep=" ") %>%
-      str_extract_all(.,"\\(?[0-9]+\\)?") %>%
-      unlist() %>% 
-      paste(., collapse="")
-    
-    # number of used rows    
-    r <-
-      readxl::read_excel(filelist[i],
-                 sheet = "Haul",  col_names=TRUE, col_types="text",
-                 .name_repair =  ~make.names(., unique = TRUE))  %>% 
-      data.frame() %>% 
-      lowcase() %>% 
-      summarise(
-        ndate = max(
-          sum(!is.na(date)),
-          sum(!is.na(tijdeindehalen)),
-          sum(!is.na(tijdbeginuitzetten)),
-          sum(!is.na(tijdeindeuitzetten)),
-          sum(!is.na(shootlat)),
-          sum(!is.na(shootlong)),
-          sum(!is.na(waterdepth)))
-      ) %>% 
-      as.integer()
-
-    
-    if(r > 0) {
+      myvessel <- stringr::word(basename(filelist[i]), 1, sep=" ")
+  
+      mytrip <-
+        stringr::word(basename(filelist[i]), 2, sep=" ") %>%
+        str_extract_all(.,"\\(?[0-9]+\\)?") %>%
+        unlist() %>% 
+        paste(., collapse="")
       
-      h  <-
+      # number of used rows    
+      r <-
         readxl::read_excel(filelist[i],
-                           sheet = "Haul",  col_names=TRUE, col_types="text",
-                           .name_repair =  ~make.names(., unique = TRUE))  %>% 
+                   sheet = "Haul",  col_names=TRUE, col_types="text",
+                   .name_repair =  ~make.names(., unique = TRUE))  %>% 
         data.frame() %>% 
         lowcase() %>% 
-        
-        filter(!is.na(vessel), row_number() <= r ) %>% 
-        dplyr::select(
-          vessel, trip, haul, date, 
-          shoottime     = tijdbeginuitzetten, 
-          haultime      = tijdeindehalen, 
-          shootlat, shootns, shootlong, shootew,  
-          winddirection, 
-          windforce     = windforcebft,
-          waterdepth, 
-          catchheight   = catchhoogtevangstincm, 
-          boxtype       = boxvolledigofkleinvk, 
-          landingweight = marktwaardigeviskg,
-          totalcatch    = totalevangstkgberekend, 
-          bycatchperc   = percentagebijvangst, 
-          skipper,
-          dateembarked = dateembarkedutcdate,
-          portembarked = portofembarkation,
-          datedisembarked = datedisembarkedutcdate,
-          portdisembarked = portofdisembarkation,
-          gear, meshsize, vertopening, 
-          cablelength   = cablelengthm, 
-          cablethickness= cablethicknessmm,
-          lengthgroundrope= lengthgroundropem,
-          escapepanel   = escapepanelyn, 
-          timezone
-        )  %>%  
-        
-        # fill up empty cells
-        mutate(across (c("date","shootlat","shootns", "shootlong", "shootew",
-                         "winddirection","windforce"),
-                       ~zoo::na.locf(.))) %>% 
-        
-        mutate(across (c("vessel"), 
-                       toupper)) %>% 
-        mutate(across (c("haul", "meshsize","date", "windforce", "waterdepth",
-                         "catchheight", "dateembarked","datedisembarked"), 
-                       as.integer)) %>% 
-        mutate(across (c("waterdepth","vertopening", "landingweight", "totalcatch"), 
-                       as.numeric)) %>%
-        mutate(across (c("shoottime","haultime"), 
-                       ~calculate_time_from_string(.))) %>% 
-        
-        mutate(timezone = case_when(
-          timezone == "CET"   ~ "Europe/Amsterdam", 
-          timezone == "UTC+1" ~ "Europe/Amsterdam", 
-          timezone == "UTC-5" ~ "America/Santiago",
-          is.na(timezone)     ~ "UTC",    
-          TRUE                ~ timezone) ) %>% 
-        
-        mutate(date   = as.Date(date, origin="1899-12-30" , tz=unique(timezone))) %>% 
-        
-        mutate(dateembarked   = as.Date(dateembarked, origin="1899-12-30" , tz=unique(timezone))) %>% 
-        mutate(datedisembarked   = as.Date(datedisembarked, origin="1899-12-30" , tz=unique(timezone))) %>% 
-        
-        mutate( 
-          shoottime = force_timezone_to_utc(t=date+shoottime, timezone=unique(timezone)),
-          haultime  = force_timezone_to_utc(t=date+haultime, timezone=unique(timezone)),
-        ) %>%
-        
-        mutate(
-          year       = lubridate::year(date),
-          quarter    = lubridate::quarter(date),
-          month      = lubridate::month(date),
-          week       = lubridate::week(date),
-          yday       = lubridate::yday(date)) %>%
-        dplyr::select(-timezone) %>%
-        
-        # calculate haul duration: haul_time-shoot_time*24 
-        mutate(duration   = as.numeric(as.duration(shoottime %--% haultime))/3600 ) %>% 
-        
-        # calculate positions
-        mutate(
-          lon = calculate_position_from_strings(shootlat, shootns, shootlong, shootew)$lon,
-          lat = calculate_position_from_strings(shootlat, shootns, shootlong, shootew)$lat
-        )  %>% 
-        
-        # wind directions
-        mutate(
-          winddirection = toupper(winddirection),
-          winddirection = gsub("Z","S",winddirection),
-          winddirection = gsub("O","E",winddirection)
+        summarise(
+          ndate = max(
+            sum(!is.na(date)),
+            sum(!is.na(tijdeindehalen)),
+            sum(!is.na(tijdbeginuitzetten)),
+            sum(!is.na(tijdeindeuitzetten)),
+            sum(!is.na(shootlat)),
+            sum(!is.na(shootlong)),
+            sum(!is.na(waterdepth)))
         ) %>% 
+        as.integer()
+  
+      
+      if(r > 0) {
         
-        ungroup()
-      
-      # calculate FAO areas  
-      h_fao <- 
-        h %>%
-        drop_na(lat, lon) %>% 
-        sf::st_as_sf(coords = c("lon", "lat"), crs = 4326, stringsAsFactors = FALSE, remove = TRUE) %>% 
-        sf::st_join(., fao_sf, join = st_within) %>% 
-        sf::st_drop_geometry() %>% 
-        dplyr::select(vessel, trip, haul, F_LEVEL, F_CODE) %>%
-        mutate(F_LEVEL = tolower(F_LEVEL)) %>% 
-        mutate(F_LEVEL = ifelse(F_LEVEL=="major", "area", F_LEVEL)) %>% 
-        tidyr::pivot_wider(names_from = F_LEVEL, values_from = F_CODE)
-      
-      # calculate ICES rectangles
-      h_rect <- 
-        h %>%
-        drop_na(lat, lon) %>% 
-        sf::st_as_sf(coords = c("lon", "lat"), crs = 4326, stringsAsFactors = FALSE, remove = TRUE) %>% 
-        sf::st_join(., rect_sf, join = st_within) %>% 
-        sf::st_drop_geometry() %>% 
-        dplyr::select(vessel, trip, haul, rect=ICESNAME) 
-      
-      h <- 
-        left_join(h, h_fao,  by=c("vessel","trip","haul")) %>% 
-        left_join(., h_rect, by=c("vessel","trip","haul"))
-      
-      # trip
-      tmp <-
-        h %>% 
-        filter(row_number() == 1) %>% 
-        dplyr::select(dateembarked, datedisembarked, portembarked, portdisembarked) %>% 
-        t() %>% 
-        data.frame() %>%
-        setNames("value") %>% 
-        rownames_to_column(var="variable") %>% 
-        mutate(
-          action   = ifelse(grepl("disembarked", variable), "disembarked", "embarked"),
-          variable = gsub("disembarked|embarked","", variable) 
-        )
-      
-      t <- 
-        bind_cols(
-          tmp %>% filter(row_number() <= 2) %>% dplyr::select(action, date=value),
-          tmp %>% filter(row_number() > 2)  %>% dplyr::select(port=value)
-        ) %>% 
-        mutate(date   = as.Date(date, origin="1899-12-30" , tz=unique(timezone))) %>% 
-        mutate(port   = ifelse(port=="Boulogne", "Boulogne sur Mer", port)) %>% 
+        h  <-
+          readxl::read_excel(filelist[i],
+                             sheet = "Haul",  col_names=TRUE, col_types="text",
+                             .name_repair =  ~make.names(., unique = TRUE))  %>% 
+          data.frame() %>% 
+          lowcase() %>% 
+          
+          filter(!is.na(vessel), row_number() <= r ) %>% 
+          dplyr::select(
+            vessel, trip, haul, date, 
+            shoottime     = tijdbeginuitzetten, 
+            haultime      = tijdeindehalen, 
+            shootlat, shootns, shootlong, shootew,  
+            winddirection, 
+            windforce     = windforcebft,
+            waterdepth, 
+            catchheight   = catchhoogtevangstincm, 
+            boxtype       = boxvolledigofkleinvk, 
+            landingweight = marktwaardigeviskg,
+            totalcatch    = totalevangstkgberekend, 
+            bycatchperc   = percentagebijvangst, 
+            skipper,
+            dateembarked = dateembarkedutcdate,
+            portembarked = portofembarkation,
+            datedisembarked = datedisembarkedutcdate,
+            portdisembarked = portofdisembarkation,
+            gear, meshsize, vertopening, 
+            cablelength   = cablelengthm, 
+            cablethickness= cablethicknessmm,
+            lengthgroundrope= lengthgroundropem,
+            escapepanel   = escapepanelyn, 
+            timezone
+          )  %>%  
+          
+          # fill up empty cells
+          mutate(across (c("date","shootlat","shootns", "shootlong", "shootew",
+                           "winddirection","windforce"),
+                         ~zoo::na.locf(.))) %>% 
+          
+          mutate(across (c("vessel"), 
+                         toupper)) %>% 
+          mutate(across (c("haul", "meshsize","date", "windforce", "waterdepth",
+                           "catchheight", "dateembarked","datedisembarked"), 
+                         as.integer)) %>% 
+          mutate(across (c("waterdepth","vertopening", "landingweight", "totalcatch"), 
+                         as.numeric)) %>%
+          mutate(across (c("shoottime","haultime"), 
+                         ~calculate_time_from_string(.))) %>% 
+          
+          mutate(timezone = case_when(
+            timezone == "CET"   ~ "Europe/Amsterdam", 
+            timezone == "UTC+1" ~ "Europe/Amsterdam", 
+            timezone == "UTC-5" ~ "America/Santiago",
+            is.na(timezone)     ~ "UTC",    
+            TRUE                ~ timezone) ) %>% 
+          
+          mutate(date   = as.Date(date, origin="1899-12-30" , tz=unique(timezone))) %>% 
+          
+          mutate(dateembarked   = as.Date(dateembarked, origin="1899-12-30" , tz=unique(timezone))) %>% 
+          mutate(datedisembarked   = as.Date(datedisembarked, origin="1899-12-30" , tz=unique(timezone))) %>% 
+          
+          mutate( 
+            shoottime = force_timezone_to_utc(t=date+shoottime, timezone=unique(timezone)),
+            haultime  = force_timezone_to_utc(t=date+haultime, timezone=unique(timezone)),
+          ) %>%
+          
+          mutate(
+            year       = lubridate::year(date),
+            quarter    = lubridate::quarter(date),
+            month      = lubridate::month(date),
+            week       = lubridate::week(date),
+            yday       = lubridate::yday(date)) %>%
+          dplyr::select(-timezone) %>%
+          
+          # calculate haul duration: haul_time-shoot_time*24 
+          mutate(duration   = as.numeric(as.duration(shoottime %--% haultime))/3600 ) %>% 
+          
+          # calculate positions
+          mutate(
+            lon = calculate_position_from_strings(shootlat, shootns, shootlong, shootew)$lon,
+            lat = calculate_position_from_strings(shootlat, shootns, shootlong, shootew)$lat
+          )  %>% 
+          
+          # wind directions
+          mutate(
+            winddirection = toupper(winddirection),
+            winddirection = gsub("Z","S",winddirection),
+            winddirection = gsub("O","E",winddirection)
+          ) %>% 
+          
+          ungroup()
         
-        geocode(port, method = 'osm', lat = lat , lon = lon) %>% 
-        mutate(haul = ifelse(row_number() == 1, 0, r+1)) %>% 
-        bind_rows(dplyr::select(h,
-                                haul, date, lat, lon)) %>% 
-        arrange(haul) %>% 
+        # calculate FAO areas  
+        h_fao <- 
+          h %>%
+          drop_na(lat, lon) %>% 
+          sf::st_as_sf(coords = c("lon", "lat"), crs = 4326, stringsAsFactors = FALSE, remove = TRUE) %>% 
+          sf::st_join(., fao_sf, join = st_within) %>% 
+          sf::st_drop_geometry() %>% 
+          dplyr::select(vessel, trip, haul, F_LEVEL, F_CODE) %>%
+          mutate(F_LEVEL = tolower(F_LEVEL)) %>% 
+          mutate(F_LEVEL = ifelse(F_LEVEL=="major", "area", F_LEVEL)) %>% 
+          tidyr::pivot_wider(names_from = F_LEVEL, values_from = F_CODE)
         
-        # calculate distance between shoot and haul positions
-        mutate(distance = geosphere::distHaversine(cbind(lon, lat), cbind(lag(lon), lag(lat)))/1852 ) %>% 
+        # calculate ICES rectangles
+        h_rect <- 
+          h %>%
+          drop_na(lat, lon) %>% 
+          sf::st_as_sf(coords = c("lon", "lat"), crs = 4326, stringsAsFactors = FALSE, remove = TRUE) %>% 
+          sf::st_join(., rect_sf, join = st_within) %>% 
+          sf::st_drop_geometry() %>% 
+          dplyr::select(vessel, trip, haul, rect=ICESNAME) 
         
-        # add distance within haul if zero
-        mutate(distance = ifelse(distance == 0, 4.0, distance)) %>% 
+        h <- 
+          left_join(h, h_fao,  by=c("vessel","trip","haul")) %>% 
+          left_join(., h_rect, by=c("vessel","trip","haul"))
         
-        # add vessel and trip
-        mutate(
-          vessel = myvessel, 
-          trip   = mytrip
-        )      
-
-      # add to haul and trip data
-      if(add_data) {
+        # trip
+        tmp <-
+          h %>% 
+          filter(row_number() == 1) %>% 
+          dplyr::select(dateembarked, datedisembarked, portembarked, portdisembarked) %>% 
+          t() %>% 
+          data.frame() %>%
+          setNames("value") %>% 
+          rownames_to_column(var="variable") %>% 
+          mutate(
+            action   = ifelse(grepl("disembarked", variable), "disembarked", "embarked"),
+            variable = gsub("disembarked|embarked","", variable) 
+          )
         
-        haul <- 
-          haul %>% 
-          filter(paste0(vessel, trip) %notin% paste0(h$vessel, h$trip)) %>% 
-          bind_rows(h)
-
-        trip <-
-          trip %>% 
-          filter(paste0(vessel, trip) %notin% paste0(t$vessel, t$trip)) %>% 
-          bind_rows(t)
-
-        # haul <- data.frame(stringsAsFactors = FALSE)
-        save(haul,         file = file.path(my_rdata_drive, "haul.RData"))  
-        save(trip,         file = file.path(my_rdata_drive, "trip.RData"))  
-      }
-      
-      if (move_data) {
-        file.copy(filelist[i], file.path(my_data_drive, myvessel), overwrite = TRUE)        
-        file.remove(filelist[i])        
-      } 
-      
-      
-    } # end of nrow(h) > 0
+        t <- 
+          bind_cols(
+            tmp %>% filter(row_number() <= 2) %>% dplyr::select(action, date=value),
+            tmp %>% filter(row_number() > 2)  %>% dplyr::select(port=value)
+          ) %>% 
+          mutate(date   = as.Date(date, origin="1899-12-30" , tz=unique(timezone))) %>% 
+          mutate(port   = ifelse(port=="Boulogne", "Boulogne sur Mer", port)) %>% 
+          
+          geocode(port, method = 'osm', lat = lat , lon = lon) %>% 
+          mutate(haul = ifelse(row_number() == 1, 0, r+1)) %>% 
+          bind_rows(dplyr::select(h,
+                                  haul, date, lat, lon)) %>% 
+          arrange(haul) %>% 
+          
+          # calculate distance between shoot and haul positions
+          mutate(distance = geosphere::distHaversine(cbind(lon, lat), cbind(lag(lon), lag(lat)))/1852 ) %>% 
+          
+          # add distance within haul if zero
+          mutate(distance = ifelse(distance == 0, 4.0, distance)) %>% 
+          
+          # add vessel and trip
+          mutate(
+            vessel = myvessel, 
+            trip   = mytrip
+          )      
+  
+        # add to haul and trip data
+        if(add_data) {
+          
+          haul <- 
+            haul %>% 
+            filter(paste0(vessel, trip) %notin% paste0(h$vessel, h$trip)) %>% 
+            bind_rows(h)
+  
+          trip <-
+            trip %>% 
+            filter(paste0(vessel, trip) %notin% paste0(t$vessel, t$trip)) %>% 
+            bind_rows(t)
+  
+          # haul <- data.frame(stringsAsFactors = FALSE)
+          save(haul,         file = file.path(my_rdata_drive, "haul.RData"))  
+          save(trip,         file = file.path(my_rdata_drive, "trip.RData"))  
+        }
+        
+        if (move_data) {
+          file.copy(filelist[i], file.path(my_data_drive, myvessel), overwrite = TRUE)        
+          file.remove(filelist[i])        
+        } 
+        
+        
+      } # end of nrow(h) > 0
     
-
-  } # end of treklijst for loop
-
+    } # end of treklijst for loop
+    
+  } # end of not empty filelist
+  
   # haul <- haul %>% filter(vessel != "SCH135")  
   
   # ----------------------------------------------------------------------------
@@ -446,7 +449,7 @@ add_tripdata <- function(
         mutate(datetime = lubridate::dmy_hms(paste(datum, tijd))) %>% 
         mutate(gewicht = as.numeric(gewicht)) %>% 
         
-        arrange(lotnummer) %>% 
+        arrange(datetime) %>% 
         mutate(time_diff = as.numeric(datetime - lag(datetime))/60) %>% 
         mutate(haul = ifelse(time_diff > 15 | is.na(time_diff), 1, 0)) %>% 
         mutate(haul = cumsum(haul)) %>% 
@@ -472,7 +475,7 @@ add_tripdata <- function(
       
     } # end of marelec for loop
     
-  } # end of if statement
+  } # end of not empty filelist
   
   
   
@@ -560,7 +563,7 @@ add_tripdata <- function(
       
     } # end of marelec trek for loop
     
-  } # end of if statement
+  } # end of not empty filelist
   
   
   # ----------------------------------------------------------------------------
@@ -572,70 +575,73 @@ add_tripdata <- function(
     pattern="elog pefa",
     full.names = TRUE)
   
-  # i <- 1
-  for (i in 1:length(filelist)) {
-
-    myvessel <- stringr::word(basename(filelist[i]), 1, sep=" ") %>%
-      unlist()     
-    mytrip <- stringr::word(basename(filelist[i]), 2, sep=" ") %>%
-      gsub("_","",.) %>%
-      unlist()     
+  if(!is_empty(filelist)){
     
-    e  <-
-      readxl::read_excel(filelist[i], col_names=TRUE, col_types="text",
-                         .name_repair =  ~make.names(., unique = TRUE))  %>% 
-      data.frame() %>% 
-      lowcase() %>% 
-      rename(rect = icesrectangle) %>% 
-      rename(vessel = vesselnumber) %>% 
-      mutate(vessel = gsub(" ","", vessel)) %>% 
-
-      mutate(across (c("boxes", "catchdate"),
-                     as.integer)) %>%
-      mutate(across (c("departuredate","arrivaldate", "catchdate", "weight"),
-                     as.numeric)) %>%
-      # mutate(across(c("catchdate"),
-      #               ~as.POSIXct(. * (60*60*24), origin="1899-12-30", tz="UTC"))) %>% 
-      mutate(across (c("departuredate","arrivaldate"), 
-                     ~excel_timezone_to_utc(., timezone="Europe/Amsterdam"))) %>% 
+    # i <- 1
+    for (i in 1:length(filelist)) {
+  
+      myvessel <- stringr::word(basename(filelist[i]), 1, sep=" ") %>%
+        unlist()     
+      mytrip <- stringr::word(basename(filelist[i]), 2, sep=" ") %>%
+        gsub("_","",.) %>%
+        unlist()     
       
-      mutate(date   = as.Date(catchdate, origin="1899-12-30" , tz="Europe/Amsterdam")) %>% 
-      dplyr::select(-catchdate) %>% 
-    
-    mutate(
-      year       = lubridate::year(date),
-      quarter    = lubridate::quarter(date),
-      month      = lubridate::month(date),
-      week       = lubridate::week(date),
-      yday       = lubridate::yday(date)) %>% 
+      e  <-
+        readxl::read_excel(filelist[i], col_names=TRUE, col_types="text",
+                           .name_repair =  ~make.names(., unique = TRUE))  %>% 
+        data.frame() %>% 
+        lowcase() %>% 
+        rename(rect = icesrectangle) %>% 
+        rename(vessel = vesselnumber) %>% 
+        mutate(vessel = gsub(" ","", vessel)) %>% 
+  
+        mutate(across (c("boxes", "catchdate"),
+                       as.integer)) %>%
+        mutate(across (c("departuredate","arrivaldate", "catchdate", "weight"),
+                       as.numeric)) %>%
+        # mutate(across(c("catchdate"),
+        #               ~as.POSIXct(. * (60*60*24), origin="1899-12-30", tz="UTC"))) %>% 
+        mutate(across (c("departuredate","arrivaldate"), 
+                       ~excel_timezone_to_utc(., timezone="Europe/Amsterdam"))) %>% 
+        
+        mutate(date   = as.Date(catchdate, origin="1899-12-30" , tz="Europe/Amsterdam")) %>% 
+        dplyr::select(-catchdate) %>% 
       
-      left_join(rect_df, by="rect") %>% 
       mutate(
-        lat = lat + 0.25,
-        lon = lon + 0.5
-      ) %>% 
-      mutate(trip = mytrip) %>% 
-      mutate(source="pefa")
+        year       = lubridate::year(date),
+        quarter    = lubridate::quarter(date),
+        month      = lubridate::month(date),
+        week       = lubridate::week(date),
+        yday       = lubridate::yday(date)) %>% 
+        
+        left_join(rect_df, by="rect") %>% 
+        mutate(
+          lat = lat + 0.25,
+          lon = lon + 0.5
+        ) %>% 
+        mutate(trip = mytrip) %>% 
+        mutate(source="pefa")
+  
+      # add to database
+      if(add_data) {
+        
+        elog <- 
+          elog %>%
+          filter(paste0(vessel, trip) %notin% paste0(myvessel, mytrip)) %>%
+          bind_rows(e)
+        
+        save(elog,         file = file.path(my_rdata_drive, "elog.RData"))  
+        
+      }
+      
+      if (move_data) {
+        file.copy(filelist[i], file.path(my_data_drive,myvessel), overwrite = TRUE)        
+        file.remove(filelist[i])        
+      } 
+      
+    } # end of pefa elog for loop
 
-    # add to database
-    if(add_data) {
-      
-      elog <- 
-        elog %>%
-        filter(paste0(vessel, tripidentifier) %notin% paste0(e$vessel, e$tripidentifier)) %>%
-        bind_rows(e)
-      
-      save(elog,         file = file.path(my_rdata_drive, "elog.RData"))  
-      
-    }
-    
-    if (move_data) {
-      file.copy(filelist[i], file.path(my_data_drive,myvessel), overwrite = TRUE)        
-      file.remove(filelist[i])        
-    } 
-    
-    
-  } # end of pefa elog for loop
+  } # end of not empty filelist
   
   # ----------------------------------------------------------------------------
   # read the m-catch elog data
@@ -646,88 +652,91 @@ add_tripdata <- function(
     pattern="elog mcatch",
     full.names = TRUE)
   
-  # i <- 1
-  for (i in 1:length(filelist)) {
-
-    myvessel <- stringr::word(basename(filelist[i]), 1, sep=" ") %>%
-      unlist()     
-    mytrip <- stringr::word(basename(filelist[i]), 2, sep=" ") %>%
-      gsub("_","",.) %>%
-      unlist()     
+  if(!is_empty(filelist)){
     
-    e  <-
-      readxl::read_excel(filelist[i], 
-                         sheet = "landed catch details table",
-                         col_names=TRUE, col_types="text",
-                         .name_repair =  ~make.names(., unique = TRUE))  %>% 
-      data.frame() %>% 
-      lowcase() %>% 
-      
-      rename(
-        catchdate=activitydate,
-        rect = icesrectangle,
-        vessel = vesselhullnumber,
-        weight = catchweight,
-        species = fishspecie,
-        economiczone = economicalzone,
-        freshness = fishfreshness,
-        presentation = fishpresentation,
-        preservation = fishpreservation
-      ) %>% 
-      
-      mutate(vessel = gsub("-","", vessel)) %>% 
-      mutate(vessel = gsub("\\.","", vessel)) %>% 
-      
-      mutate(across (c("catchdate"),
-                     as.integer)) %>%
-      mutate(across (c("departuredate","arrivaldate", "landingdate", "catchdate", "weight", "lon","lat"),
-                     as.numeric)) %>%
-      # mutate(across(c("catchdate"),
-      #               ~as.POSIXct(. * (60*60*24), origin="1899-12-30", tz="UTC"))) %>% 
-      mutate(across (c("departuredate","arrivaldate", "landingdate"), 
-                     ~excel_timezone_to_utc(., timezone="Europe/Amsterdam"))) %>% 
-      mutate(across (c("faozone"),
-                     toupper)) %>%
-      
-      mutate(date   = as.Date(catchdate, origin="1899-12-30" , tz="Europe/Amsterdam")) %>% 
-      dplyr::select(-catchdate) %>% 
-      
-      mutate(landingdate = as.character(landingdate)) %>% 
-      
-      mutate(
-        year       = lubridate::year(date),
-        quarter    = lubridate::quarter(date),
-        month      = lubridate::month(date),
-        week       = lubridate::week(date),
-        yday       = lubridate::yday(date)) %>% 
-      
-      dplyr::select_if(names(.) %in% names(elog)) %>% 
-      mutate(trip = mytrip) %>% 
-      mutate(source="m-catch")
-    
-    
-    # add to database
-    if(add_data) {
-      
-      elog <- 
-        elog %>%
-        filter(paste0(vessel, tripidentifier) %notin% paste0(e$vessel, e$tripidentifier)) %>%
-        bind_rows(e)
-      
-      
-      save(elog,         file = file.path(my_rdata_drive, "elog.RData"))  
-      
-    }
-    
-    if (move_data) {
-      file.copy(filelist[i], file.path(my_data_drive,myvessel), overwrite = TRUE)        
-      file.remove(filelist[i])        
-    } 
-
-    
-  } # end of mcatch elog for loop
+    # i <- 1
+    for (i in 1:length(filelist)) {
   
-
+      myvessel <- stringr::word(basename(filelist[i]), 1, sep=" ") %>%
+        unlist()     
+      mytrip <- stringr::word(basename(filelist[i]), 2, sep=" ") %>%
+        gsub("_","",.) %>%
+        unlist()     
+      
+      e  <-
+        readxl::read_excel(filelist[i], 
+                           sheet = "landed catch details table",
+                           col_names=TRUE, col_types="text",
+                           .name_repair =  ~make.names(., unique = TRUE))  %>% 
+        data.frame() %>% 
+        lowcase() %>% 
+        
+        rename(
+          catchdate=activitydate,
+          rect = icesrectangle,
+          vessel = vesselhullnumber,
+          weight = catchweight,
+          species = fishspecie,
+          economiczone = economicalzone,
+          freshness = fishfreshness,
+          presentation = fishpresentation,
+          preservation = fishpreservation
+        ) %>% 
+        
+        mutate(vessel = gsub("-","", vessel)) %>% 
+        mutate(vessel = gsub("\\.","", vessel)) %>% 
+        
+        mutate(across (c("catchdate"),
+                       as.integer)) %>%
+        mutate(across (c("departuredate","arrivaldate", "landingdate", "catchdate", "weight", "lon","lat"),
+                       as.numeric)) %>%
+        # mutate(across(c("catchdate"),
+        #               ~as.POSIXct(. * (60*60*24), origin="1899-12-30", tz="UTC"))) %>% 
+        mutate(across (c("departuredate","arrivaldate", "landingdate"), 
+                       ~excel_timezone_to_utc(., timezone="Europe/Amsterdam"))) %>% 
+        mutate(across (c("faozone"),
+                       toupper)) %>%
+        
+        mutate(date   = as.Date(catchdate, origin="1899-12-30" , tz="Europe/Amsterdam")) %>% 
+        dplyr::select(-catchdate) %>% 
+        
+        mutate(landingdate = as.character(landingdate)) %>% 
+        
+        mutate(
+          year       = lubridate::year(date),
+          quarter    = lubridate::quarter(date),
+          month      = lubridate::month(date),
+          week       = lubridate::week(date),
+          yday       = lubridate::yday(date)) %>% 
+        
+        dplyr::select_if(names(.) %in% names(elog)) %>% 
+        mutate(trip = mytrip) %>% 
+        mutate(source="m-catch")
+      
+      
+      # add to database
+      if(add_data) {
+        
+        elog <- 
+          elog %>%
+          filter(paste0(vessel, trip) %notin% paste0(myvessel, mytrip)) %>%
+          bind_rows(e)
+        
+        
+        save(elog,         file = file.path(my_rdata_drive, "elog.RData"))  
+        
+      }
+      
+      if (move_data) {
+        file.copy(filelist[i], file.path(my_data_drive,myvessel), overwrite = TRUE)        
+        file.remove(filelist[i])        
+      } 
+  
+      
+    } # end of mcatch elog for loop
+  
+  } # end of not empty filelist
+  
 } # End of function
 
 
