@@ -7,10 +7,9 @@
 #
 # 11/01/2023 First coding
 # 20/01/2023 Added elog; added moving files
+# 27/01/2023 Changed marelec lots to kisten; removed other marelec exports
 
 # TO DO: 
-# Add missing data for dates, and positions, wind. 
-# Add harbour in and out and total distance travelled. 
 # 
 # =========================================================================================
 
@@ -46,8 +45,8 @@ add_tripdata <- function(
   library(stringr)       # string manipulation (this is part of tidyverse, but needs to be loaded separately)
   library(sf)            # simple features
   library(tidygeocoder)  # finding positions for harbours
-  # library(cellranger)    # specify regions in excel
-  
+  library(sqldf)         # look up values within a range
+
   # source("../gisland/r/geo_inside.R")
   source("../prf/r/my utils.R")
 
@@ -71,9 +70,9 @@ add_tripdata <- function(
   # load fishery datasets -------------------------
   
   load(file.path(my_rdata_drive, "haul.RData"))
-  load(file.path(my_rdata_drive, "marelec_trip.RData"))
-  load(file.path(my_rdata_drive, "marelec_lot.RData"))
-  load(file.path(my_rdata_drive, "marelec_trek.RData"))
+  load(file.path(my_rdata_drive, "kisten.RData"))
+  # load(file.path(my_rdata_drive, "marelec_trip.RData"))
+  # load(file.path(my_rdata_drive, "marelec_trek.RData"))
   load(file.path(my_rdata_drive, "elog.RData"))
   load(file.path(my_rdata_drive, "trip.RData"))
 
@@ -151,8 +150,10 @@ add_tripdata <- function(
           filter(!is.na(vessel), row_number() <= r ) %>% 
           dplyr::select(
             vessel, trip, haul, date, 
-            shoottime     = tijdbeginuitzetten, 
-            haultime      = tijdeindehalen, 
+            # shoottime     = tijdbeginuitzetten, 
+            # haultime      = tijdeindehalen, 
+            shoottime    = berekentijdbeginuitzetten,
+            haultime     = berekentijdeindehalen,
             shootlat, shootns, shootlong, shootew,  
             winddirection, 
             windforce     = windforcebft,
@@ -185,10 +186,13 @@ add_tripdata <- function(
           mutate(across (c("haul", "meshsize","date", "windforce", "waterdepth",
                            "catchheight", "dateembarked","datedisembarked"), 
                          as.integer)) %>% 
-          mutate(across (c("waterdepth","vertopening", "landingweight", "totalcatch"), 
+          mutate(across (c("waterdepth","vertopening", "landingweight", "totalcatch",
+                           "shoottime", "haultime"), 
                          as.numeric)) %>%
+          # mutate(across (c("shoottime","haultime"), 
+          #                ~calculate_time_from_string(.))) %>% 
           mutate(across (c("shoottime","haultime"), 
-                         ~calculate_time_from_string(.))) %>% 
+                         ~calculate_time(.))) %>% 
           
           mutate(timezone = case_when(
             timezone == "CET"   ~ "Europe/Amsterdam", 
@@ -203,9 +207,24 @@ add_tripdata <- function(
           mutate(datedisembarked   = as.Date(datedisembarked, origin="1899-12-30" , tz=unique(timezone))) %>% 
           
           mutate( 
-            shoottime = force_timezone_to_utc(t=date+shoottime, timezone=unique(timezone)),
-            haultime  = force_timezone_to_utc(t=date+haultime, timezone=unique(timezone)),
+            # shoottime = force_timezone_to_utc(t=date+shoottime, timezone=unique(timezone)),
+            # haultime  = force_timezone_to_utc(t=date+haultime, timezone=unique(timezone)),
+            shoottime = date + shoottime,
+            haultime  = date + haultime
           ) %>%
+          
+          mutate(
+            haultime = ifelse(is.na(haultime) & !is.na(shoottime), 
+                              shoottime+lubridate::hm("1:20"), 
+                              haultime),
+            haultime = lubridate::as_datetime(haultime),
+            
+            # special case for SCH135 2023320 trip
+            haultime = ifelse(trip == "2023320", 
+                              haultime-lubridate::hm("1:00"), 
+                              haultime),
+            haultime = lubridate::as_datetime(haultime)
+          ) %>% 
           
           mutate(
             year       = lubridate::year(date),
@@ -331,80 +350,12 @@ add_tripdata <- function(
   # haul <- haul %>% filter(vessel != "SCH135")  
   
   # ----------------------------------------------------------------------------
-  # read marelec trip data
-  #
-  # TO BE UPDATED WITH SAVE AND MOVE
+  # read marelec lot data = kisten
   # ----------------------------------------------------------------------------
   
   filelist <- list.files(
     path=file.path(my_data_drive, "/_te verwerken"),
-    pattern="marelec_trip.xlsx",
-    full.names = TRUE)
-
-  
-  if(!is_empty(filelist)){
-    
-    # i <- 1
-    for (i in 1:length(filelist)) {
-      
-      mytrip <- 
-        readxl::read_xlsx(
-          path = filelist[i],
-          range = "A1",
-          col_names = FALSE,
-          .name_repair = "unique") %>% 
-        as.character() %>% 
-        stringr::word(., 2, sep=" ") %>%
-        str_extract_all(.,"\\(?[0-9]+\\)?") %>%
-        unlist() %>% 
-        paste0("2023", .)
-      
-      myvessel <-
-        readxl::read_xlsx(
-          path = filelist[i],
-          range = "A4",
-          col_names = FALSE,
-          .name_repair = "unique") %>% 
-        as.character() %>% 
-        stringr::word(., 2, sep=" ") %>%
-        gsub("-","",.) %>%
-        unlist()     
-      
-      m  <-
-        readxl::read_excel(filelist[i],
-                           skip=7,
-                           col_names=TRUE, 
-                           col_types="text",
-                           .name_repair =  ~make.names(., unique = TRUE))  %>% 
-        data.frame() %>% 
-        lowcase() %>% 
-        filter(!grepl("Totaal", soorten)) %>%
-        filter(!grepl("Einde dag", soorten)) %>%
-        tidyr::drop_na(soorten) %>% 
-        tidyr::separate(soorten, into=c("soort", "species"), sep="/", remove=FALSE) %>% 
-        mutate(maat = gsub("KLASSE ","", maat)) %>% 
-        mutate(vessel = myvessel) %>% 
-        mutate(trip = mytrip) %>% 
-        dplyr::select(vessel, trip, soorten, soort, species, maat, kisten, gewicht=totaalgewicht)
-      
-      marelec_trip <- 
-        marelec_trip %>% 
-        filter(paste0(vessel, trip) %notin% paste0(m$vessel, m$trip)) %>% 
-        bind_rows(m)
-      
-      save(marelec_trip, file = file.path(my_rdata_drive, "marelec_trip.RData"))  
-      
-    } # end of marelec for loop
-    
-  }  # end of if statemen t
-
-  # ----------------------------------------------------------------------------
-  # read marelec lot data
-  # ----------------------------------------------------------------------------
-  
-  filelist <- list.files(
-    path=file.path(my_data_drive, "/_te verwerken"),
-    pattern="marelec_lots",
+    pattern="kisten",
     full.names = TRUE)
   
   if(!is_empty(filelist)){
@@ -449,22 +400,24 @@ add_tripdata <- function(
         mutate(datetime = lubridate::dmy_hms(paste(datum, tijd))) %>% 
         mutate(gewicht = as.numeric(gewicht)) %>% 
         
+        # assign haul; could be done with sqldf instead, but time registration is 
+        # currently problematic
         arrange(datetime) %>% 
         mutate(time_diff = as.numeric(datetime - lag(datetime))/60) %>% 
-        mutate(haul = ifelse(time_diff > 15 | is.na(time_diff), 1, 0)) %>% 
+        mutate(haul = ifelse(time_diff > 20 | is.na(time_diff), 1, 0)) %>% 
         mutate(haul = cumsum(haul)) %>% 
         dplyr::select(-datum, -tijd) 
 
       # add to database
       if(add_data) {
         
-        marelec_lot <- 
-          marelec_lot %>% 
+        kisten <- 
+          kisten %>% 
           filter(paste0(vessel, trip) %notin% paste0(m$vessel, m$trip)) %>% 
           bind_rows(m)
         
         # marelec_lot <- marelec_lot %>% dplyr::select(-haul2)
-        save(marelec_lot,  file = file.path(my_rdata_drive, "marelec_lot.RData"))  
+        save(kisten,  file = file.path(my_rdata_drive, "kisten.RData"))  
         
       }
       
@@ -479,93 +432,7 @@ add_tripdata <- function(
   
   
   
-  # ----------------------------------------------------------------------------
-  # read marelec trek data
-  #
-  # TO BE UPDATED WITH SAVE AND MOVE
-  # ----------------------------------------------------------------------------
-  
-  m2 <- data.frame(stringsAsFactors = FALSE)
-  
-  dirlist <- list.dirs(
-    path=file.path(my_data_drive, "/_te verwerken"),
-    full.names = TRUE) 
-  dirlist <- dirlist[  grep("marelec",dirlist)]
-  
-  # print(dirlist)
-  
-  if(!is_empty(dirlist)){
-  
-    for (i in 1:length(dirlist)) {
-      
-      filelist <- list.files(
-        path=dirlist[i],
-        pattern="totalen",
-        full.names = TRUE)
-      
-      # j <- 1
-      for (j in 1:length(filelist)) {
-        
-        tmp <- readxl::read_xlsx(
-          path = filelist[j],
-          range = "A1",
-          col_names = FALSE,
-          .name_repair = "unique"
-        ) %>% as.character()
-        
-        mytrip <-
-          stringr::word(tmp, 2, sep=" ") %>%
-          str_extract_all(.,"\\(?[0-9]+\\)?") %>%
-          unlist() %>% 
-          paste0("2023", .)
-        
-        myhaul <-
-          stringr::word(tmp, 4, sep=" ") %>%
-          str_extract_all(.,"\\(?[0-9]+\\)?") %>%
-          unlist() %>%
-          as.integer()  
-        myhaul = ifelse(myhaul >= 25, myhaul+1, myhaul)
-        
-        myvessel <-
-          readxl::read_xlsx(
-            path = filelist[j],
-            range = "A4",
-            col_names = FALSE,
-            .name_repair = "unique") %>% 
-          as.character() %>% 
-          stringr::word(., 2, sep=" ") %>%
-          gsub("-","",.) %>%
-          unlist()     
-        
-        m2 <-
-          bind_rows(
-            m2,
-            readxl::read_xlsx(
-              path = filelist[j],
-              range = "A8:C100") %>%
-              lowcase() %>%
-              filter(!is.na(soorten)) %>%
-              filter(!grepl("Totaal", soorten)) %>%
-              filter(!grepl("Einde dag", soorten)) %>%
-              mutate(
-                vessel = myvessel,
-                trip = mytrip,
-                haul = myhaul)
-          )
-      } # end of j loop
-      
-      marelec_trek <- 
-        marelec_trek %>% 
-        filter(paste0(vessel, trip) %notin% paste0(m2$vessel, m2$trip)) %>% 
-        bind_rows(m2)
-      
-      save(marelec_trek, file = file.path(my_rdata_drive, "marelec_trek.RData"))  
-      
-    } # end of marelec trek for loop
-    
-  } # end of not empty filelist
-  
-  
+
   # ----------------------------------------------------------------------------
   # read the pefa elog data
   # ----------------------------------------------------------------------------
@@ -665,7 +532,7 @@ add_tripdata <- function(
       
       e  <-
         readxl::read_excel(filelist[i], 
-                           sheet = "landed catch details table",
+                           sheet = "catch details table",
                            col_names=TRUE, col_types="text",
                            .name_repair =  ~make.names(., unique = TRUE))  %>% 
         data.frame() %>% 
@@ -678,13 +545,14 @@ add_tripdata <- function(
           weight = catchweight,
           species = fishspecie,
           economiczone = economicalzone,
-          freshness = fishfreshness,
-          presentation = fishpresentation,
-          preservation = fishpreservation
+          # freshness = fishfreshness,
+          #presentation = fishpresentation,
+          #preservation = fishpreservation
         ) %>% 
         
         mutate(vessel = gsub("-","", vessel)) %>% 
         mutate(vessel = gsub("\\.","", vessel)) %>% 
+        mutate(vessel = ifelse(vessel=="SL09", "SL9", vessel)) %>%  
         
         mutate(across (c("catchdate"),
                        as.integer)) %>%
@@ -709,7 +577,11 @@ add_tripdata <- function(
           week       = lubridate::week(date),
           yday       = lubridate::yday(date)) %>% 
         
-        dplyr::select_if(names(.) %in% names(elog)) %>% 
+        dplyr::select(-lat, -lon) %>% 
+        left_join(rect_df, by="rect") %>% 
+        
+        dplyr::select_if(names(.) %in% names(elog)) %>%
+        
         mutate(trip = mytrip) %>% 
         mutate(source="m-catch")
       

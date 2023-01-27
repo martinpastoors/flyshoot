@@ -90,13 +90,15 @@ onedrive <- get_onedrive(team="Martin Pastoors", site="FLYSHOOT - General")
 
 # load datasets
 load(file.path(onedrive, "rdata/haul.RData"))
-load(file.path(onedrive, "rdata/marelec_lot.RData"))
+
+load(file.path(onedrive, "rdata/kisten.RData"))
 load(file.path(onedrive, "rdata/elog.RData"))
 load(file.path(onedrive, "rdata/trip.RData"))
 
-setvessel<-"SCH135"   ;settrip<-"2023320" ;
-# setvessel<-"SCH65"   ;settrip<-"2023237" ;
-# setvessel<-"Z99"   ;settrip<-"2023064" ;
+# setvessel<-"SCH135"   ;settrip<-"2023321" ;
+# setvessel<-"SCH65"   ;settrip<-"2023238" ;
+# setvessel<-"SL9"   ;settrip<-"2023406" ;
+ setvessel<-"Z99"   ;settrip<-"2023065" ;
 
 # making the data selections
 h <- 
@@ -108,7 +110,7 @@ h <-
 
  
 m <-
-  marelec_lot %>% 
+  kisten %>% 
   filter(vessel  %in% setvessel,
          trip    %in% settrip) %>% 
   mutate(soorten = tolower(soorten))
@@ -184,6 +186,20 @@ aspect    <- ydistance/xdistance
 
 # tmp <- data.frame(port="Boulogne sur Mer")
 # tidygeocoder::geocode(tmp, city=port)
+
+# tmp <-
+#   h %>% 
+#   mutate(nexthaultime = lead(haultime)) %>% 
+#   mutate(nexthaultime = ifelse(is.na(nexthaultime), lubridate::dmy_hm("31/12/2023 23:59"), nexthaultime)) %>% 
+#   mutate(nexthaultime = as_datetime(nexthaultime))
+
+# r2 <-
+#   sqldf::sqldf("select tmp.vessel, tmp.trip, tmp.haul, m.datetime, m.gewicht  from tmp
+#                 join m on m.datetime >= tmp.haultime and 
+#                           m.datetime <  tmp.nexthaultime") %>% 
+#   as_tibble() %>% 
+#   group_by(vessel, trip, haul) %>% 
+#   summarise(aanvoer=sum(gewicht, na.rm=TRUE))
 
 
 ```
@@ -356,55 +372,6 @@ _`r tab_nums("vangstpersoort")`_
 
 
 <!-- ########################################################################################## -->
-<!-- trek informatie --------------------------- -->
-<!-- ########################################################################################## -->
-
-```{r trekinformatie, fig.asp=0.5, echo=FALSE, message=FALSE, warning=FALSE, comment=NA, time_it=FALSE}
-
-
-fig_nums(
-name    = "trekinformatie", level   = 1, display = FALSE,
-caption = "Beschikbare trekinformatie (treklijst, marelec).")
-
-t1 <- 
-  h %>% 
-  group_by(vessel, trip, haul, haultime) %>% 
-  summarise(catch = sum(totalcatch, na.rm=TRUE)) %>% 
-  mutate(source="trek") %>% 
-  dplyr::select(vessel, trip, source, haul, haultime, catch)
-
-t2 <- 
-  m %>% 
-  rename(haultime = datetime) %>% 
-  group_by(vessel, trip, haul) %>% 
-  summarise(
-    haultime = min(haultime, na.rm=TRUE),
-    catch    = sum(gewicht, na.rm=TRUE)
-  ) %>% 
-  mutate(source="marelec") %>% 
-  dplyr::select(vessel, trip, source, haul, haultime, catch)
-
-bind_rows(t1, t2) %>% 
-  ggplot(aes(x=haultime, y=source)) +
-  theme_publication() +
-  theme(legend.position = "none") +
-  geom_point(aes(colour=source, size=catch)) 
-
-
-# tab_nums(name    = "trekinformatie", level = 1, display = FALSE, caption = "Trek informatie")
-
-```
-
-_`r fig_nums("trekinformatie")`_
-
-
-
-
-
-
-
-
-<!-- ########################################################################################## -->
 <!-- Figure: Total Catch per Haul (map)                                                         -->
 <!-- ########################################################################################## -->
 
@@ -435,7 +402,7 @@ if (sum(!is.na(h$totalcatch)) >0 ) {
   
     
     coord_quickmap(xlim=xlim , ylim=ylim) +
-    
+  
     geom_text(data=rect_df, aes(x=lon, y=lat, label=rect), 
               hjust=0, vjust=0, nudge_x=0.05, nudge_y=0.025, colour="white") +
   
@@ -518,11 +485,13 @@ _`r fig_nums("totalcatchperhaul")`_
 <!-- Figure: vangst per soort en klasse --------------------------- -->
 <!-- ########################################################################################## -->
 
-```{r vangstpersoortenklasse, echo=FALSE, fig.asp=1.3, fig.align="center", message=FALSE, warning=FALSE}
+```{r vangstpersoortenklasse, echo=FALSE, fig.asp=1.0, fig.align="center", message=FALSE, warning=FALSE}
+
+nspecies <- 6
 
 fig_nums(
   name    = "totalcatchperclass", level   = 1, display = FALSE,
-  caption = "Totale vangst per trek, soort en klasse.")
+  caption = paste0("Totale vangst per trek, soort en klasse (",nspecies," soorten met hoogste vangst)"))
 
 
 # create list of catch by species by haul. From hm, or sph or else species = "oth"
@@ -532,26 +501,91 @@ if (nrow(m) > 0) {
     group_by(soorten) %>% 
     summarise(gewicht = sum(gewicht, na.rm=TRUE)) %>% 
     arrange (desc(gewicht)) %>% 
-    slice_head(n=8)
+    slice_head(n=nspecies)
   
   t <-
     m %>% 
     filter(soorten %in% myspecies$soorten) %>% 
     group_by(vessel, trip, haul, soorten, maat) %>% 
     summarise(gewicht=sum(gewicht))
+  
+  s <-
+    t %>% 
+    group_by(vessel, trip, soorten) %>% 
+    summarise(totaal=sum(gewicht))  %>% 
+    ungroup() %>% 
+    arrange(desc(totaal)) %>% 
+    dplyr::select(soorten) %>% 
+    unlist()
 
   t %>% 
-    ggplot(aes(x=soorten, y=gewicht)) +
+    ggplot(aes(x=haul, y=gewicht)) +
     theme_publication() +
     geom_bar(aes(fill=maat), stat="identity") +
     coord_flip() +
+    scale_x_reverse(breaks=seq(1, max(t$haul), 1)) +
+    scale_y_continuous(breaks=scales::pretty_breaks(n=3)) +
     labs(y="aanvoer (kg)", title="aanvoer per soort en trek") +
-    facet_wrap(~haul)
+    facet_grid(.~factor(soorten, levels=s))
   
 }
 
 ```
 
 _`r fig_nums("totalcatchperclass")`_
+
+
+<!-- ########################################################################################## -->
+<!-- Figure: vangst per soort en klasse --------------------------- -->
+<!-- ########################################################################################## -->
+
+```{r aanvoerendiscards, echo=FALSE, fig.align="center", fig.asp=0.8, message=FALSE, warning=FALSE}
+
+print_option <- FALSE
+
+# create list of catch by species by haul. From hm, or sph or else species = "oth"
+if (nrow(m) > 0 & sum(!is.na(h$totalcatch))>0) {
+  
+  t1 <-
+    h %>% 
+    group_by(vessel, trip, haul) %>% 
+    summarise(data = sum(totalcatch, na.rm=TRUE)) %>% 
+    mutate(variable = "totale vangst")
+
+  t2 <-
+    m %>% 
+    group_by(vessel, trip, haul) %>% 
+    summarise(data = sum(gewicht, na.rm=TRUE)) %>% 
+    mutate(variable = "aanvoer")
+    
+
+  t1 %>% 
+    ggplot(aes(x=haul, y=data)) +
+    theme_publication() +
+    theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+    geom_bar(aes(fill="totale vangst"),
+             stat="identity", alpha=0.5, width=0.5, just=0.8) +
+    geom_bar(data=t2,
+             aes(fill="aanvoer"),
+             stat="identity", alpha=0.5, width=0.5, just=0.2) +
+    scale_fill_manual(name='',
+                     breaks=c('aanvoer', 'totale vangst'),
+                     values=c('aanvoer'='blue', 'totale vangst'='red')) +
+    scale_x_continuous(breaks=seq(1,max(t1$haul, m$haul), 1)) +
+    labs(x="trek", y="kg", title="totale vangst en aanvoer per trek") 
+
+  print_option <- TRUE
+  fig_nums(
+    name    = "aanvoerentotalevangst", level   = 1, display = FALSE,
+    caption = "Vergelijking van aanvoer (Marelec) en totale vangst (schatting)")
+  
+}
+
+my_caption   <- ifelse(print_option, paste0("_", fig_nums("aanvoerentotalevangst"),"_"), "")
+
+
+```
+
+`r if(print_option){my_caption}`
 
 
