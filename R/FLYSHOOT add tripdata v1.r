@@ -20,21 +20,21 @@ options(dplyr.summarise.inform = FALSE)
 # Reset lists
 rm(list=ls())
 
-# check_data = TRUE
-# add_data = TRUE
-# move_data = TRUE
-# my_data_drive    = "C:/Users/MartinPastoors/Martin Pastoors/FLYSHOOT - General/tripdata"
-# my_rdata_drive   = "C:/Users/MartinPastoors/Martin Pastoors/FLYSHOOT - General/rdata"
-# my_spatial_drive = "C:/DATA/RDATA"
+check_data = TRUE
+add_data = TRUE
+move_data = TRUE
+my_data_drive    = "C:/Users/MartinPastoors/Martin Pastoors/FLYSHOOT - General/tripdata"
+my_rdata_drive   = "C:/Users/MartinPastoors/Martin Pastoors/FLYSHOOT - General/rdata"
+my_spatial_drive = "C:/DATA/RDATA"
   
 # Define function to read, check and add datasets
-add_tripdata <- function(
-    check_data       = TRUE, 
-    add_data         = TRUE,
-    move_data        = TRUE, 
-    my_data_drive    = "C:/Users/MartinPastoors/Martin Pastoors/FLYSHOOT - General/tripdata",
-    my_rdata_drive   = "C:/Users/MartinPastoors/Martin Pastoors/FLYSHOOT - General/rdata",
-    my_spatial_drive = "C:/DATA/RDATA") {
+# add_tripdata <- function(
+#     check_data       = TRUE, 
+#     add_data         = TRUE,
+#     move_data        = TRUE, 
+#     my_data_drive    = "C:/Users/MartinPastoors/Martin Pastoors/FLYSHOOT - General/tripdata",
+#     my_rdata_drive   = "C:/Users/MartinPastoors/Martin Pastoors/FLYSHOOT - General/rdata",
+#     my_spatial_drive = "C:/DATA/RDATA") {
   
   # Open relevant packages 
   library(tidyverse)     # combined package of dplyr, tidyr, ggplot, readr, purrr and tibble
@@ -213,6 +213,7 @@ add_tripdata <- function(
             haultime  = date + haultime
           ) %>%
           
+          # add haultime if missing
           mutate(
             haultime = ifelse(is.na(haultime) & !is.na(shoottime), 
                               shoottime+lubridate::hm("1:20"), 
@@ -225,7 +226,13 @@ add_tripdata <- function(
                               haultime),
             haultime = lubridate::as_datetime(haultime)
           ) %>% 
-          
+        
+          # add next haul time  
+          group_by(vessel, trip) %>% 
+          mutate(nexthaultime = lead(haultime)) %>% 
+          mutate(nexthaultime = ifelse(is.na(nexthaultime), lubridate::dmy_hm("31/12/2023 23:59"), nexthaultime)) %>% 
+          mutate(nexthaultime = as_datetime(nexthaultime)) %>% 
+
           mutate(
             year       = lubridate::year(date),
             quarter    = lubridate::quarter(date),
@@ -404,10 +411,22 @@ add_tripdata <- function(
         # currently problematic
         arrange(datetime) %>% 
         mutate(time_diff = as.numeric(datetime - lag(datetime))/60) %>% 
-        mutate(haul = ifelse(time_diff > 20 | is.na(time_diff), 1, 0)) %>% 
-        mutate(haul = cumsum(haul)) %>% 
+        mutate(haul2 = ifelse(time_diff > 20 | is.na(time_diff), 1, 0)) %>% 
+        mutate(haul2 = cumsum(haul2)) %>% 
         dplyr::select(-datum, -tijd) 
-
+      
+      # add calculated hauls from haul list
+      if(exists(h)) {
+        m <-
+          sqldf::sqldf("select m.vessel, m.trip, m.lotnummer, m.soorten, m.maat, m.gewicht, 
+          m.datetime, m.haul2, h.haul from m
+                join h on m.vessel   == h.vessel and
+                          m.trip     == h.trip and
+                          m.datetime >= h.haultime and
+                          m.datetime <  h.nexthaultime") %>%
+          as_tibble() 
+      }
+      
       # add to database
       if(add_data) {
         
@@ -609,15 +628,12 @@ add_tripdata <- function(
   
   } # end of not empty filelist
   
-} # End of function
+# } # End of function
 
-
-
-
-add_tripdata (check_data = TRUE, 
-              add_data = TRUE,
-              move_data = TRUE,
-              my_data_drive    = "C:/Users/MartinPastoors/Martin Pastoors/FLYSHOOT - General/tripdata",
-              my_rdata_drive   = "C:/Users/MartinPastoors/Martin Pastoors/FLYSHOOT - General/rdata",
-              my_spatial_drive = "C:/DATA/RDATA")
+# add_tripdata (check_data = TRUE, 
+#               add_data = TRUE,
+#               move_data = TRUE,
+#               my_data_drive    = "C:/Users/MartinPastoors/Martin Pastoors/FLYSHOOT - General/tripdata",
+#               my_rdata_drive   = "C:/Users/MartinPastoors/Martin Pastoors/FLYSHOOT - General/rdata",
+#               my_spatial_drive = "C:/DATA/RDATA")
   

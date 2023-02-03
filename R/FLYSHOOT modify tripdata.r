@@ -32,7 +32,7 @@ tab_nums <- captioner::captioner(prefix = "Table " , levels=1, type=c("n"), infi
 fig_nums <- captioner::captioner(prefix = "Figure ", levels=1, type=c("n"), infix=".")
 
 # Source all the utils
-source("../../prf/R/my utils.r")
+source("../prf/R/my utils.r")
 
 get_onedrive <- function (team="Martin Pastoors", site="FLYSHOOT - General") {
   
@@ -95,25 +95,43 @@ kisten <-
 save(kisten, file=file.path(onedrive, "rdata/kisten.RData"))
 
 # --------------------------------------------------------------------------------
+# Redoing link between marelec and hauls
+# --------------------------------------------------------------------------------
 h <-
   haul %>% 
-  filter(trip %in% c("2023320", "2023237","2023064")) %>% 
+  filter(date >= lubridate::dmy("9/1/2023")) %>% 
   group_by(vessel, trip) %>% 
   mutate(nexthaultime = lead(haultime)) %>% 
   mutate(nexthaultime = ifelse(is.na(nexthaultime), lubridate::dmy_hm("31/12/2023 23:59"), nexthaultime)) %>% 
   mutate(nexthaultime = as_datetime(nexthaultime))
 
 m <- 
-  marelec_lot %>% 
-  filter(trip %in% c("2023320", "2023237","2023064"))
-  
+  kisten %>% 
+  filter(datetime >= lubridate::dmy("9/1/2023")) %>% 
+  rename(haul2=haul)
+
 t <-
-  sqldf::sqldf("select h.vessel, h.trip, h.haul, m.datetime, m.gewicht  from h
-                join m on m.vessel   == h.vessel and
+  sqldf::sqldf("select m.vessel, m.trip, m.lotnummer, m.soorten, m.maat, m.gewicht, m.datetime, 
+  m.haul2, h.haul from m
+                join h on m.vessel   == h.vessel and
                           m.trip     == h.trip and
-                          m.datetime >= h.haultime and 
-                          m.datetime <  h.nexthaultime") %>% 
+                          m.datetime >= h.haultime and
+                          m.datetime <  h.nexthaultime") %>%
   as_tibble() 
+
+
+kisten <-
+  kisten %>% 
+  rename(haul2=haul) %>% 
+  left_join(dplyr::select(t,
+                          vessel, trip, datetime, haul),
+            by=c("vessel","trip", "datetime")) 
+
+save(kisten,  file = file.path(onedrive, "rdata/kisten.RData"))  
+
+
+
+
 
 
 h %>% 
@@ -123,7 +141,7 @@ h %>%
   theme(legend.position = "none") +
   geom_point(aes(colour=ac(haul))) +
   geom_point(data=m,
-             aes(x=datetime, y=1.2, colour=ac(haul)),
+             aes(x=datetime, y=1.2, colour=ac(haul2)),
              size=0.5, alpha=0.5) +
   geom_point(data=t,
              aes(x=datetime, y=0.8, colour=ac(haul)),

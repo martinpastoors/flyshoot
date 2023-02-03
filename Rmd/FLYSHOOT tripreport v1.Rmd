@@ -95,10 +95,10 @@ load(file.path(onedrive, "rdata/kisten.RData"))
 load(file.path(onedrive, "rdata/elog.RData"))
 load(file.path(onedrive, "rdata/trip.RData"))
 
-# setvessel<-"SCH135"   ;settrip<-"2023321" ;
-# setvessel<-"SCH65"   ;settrip<-"2023238" ;
+# setvessel<-"SCH135"   ;settrip<-"2023322" ;
+# setvessel<-"SCH65"   ;settrip<-"2023239" ;
 # setvessel<-"SL9"   ;settrip<-"2023406" ;
- setvessel<-"Z99"   ;settrip<-"2023065" ;
+ setvessel<-"Z99"   ;settrip<-"2023066" ;
 
 # making the data selections
 h <- 
@@ -430,7 +430,7 @@ if (sum(!is.na(h$totalcatch)) >0 ) {
     caption = "Totale aanvoer per trek (vanuit Marelec).")
     
   m %>% 
-    group_by(vessel, trip, haul) %>% 
+    group_by(vessel, trip, haul=haul2) %>% 
     summarise(gewicht = sum(gewicht, na.rm=TRUE)) %>% 
     
     left_join(dplyr::select(h,
@@ -506,7 +506,7 @@ if (nrow(m) > 0) {
   t <-
     m %>% 
     filter(soorten %in% myspecies$soorten) %>% 
-    group_by(vessel, trip, haul, soorten, maat) %>% 
+    group_by(vessel, trip, haul=haul2, soorten, maat) %>% 
     summarise(gewicht=sum(gewicht))
   
   s <-
@@ -545,6 +545,12 @@ print_option <- FALSE
 
 # create list of catch by species by haul. From hm, or sph or else species = "oth"
 if (nrow(m) > 0 & sum(!is.na(h$totalcatch))>0) {
+
+  print_option <- TRUE
+  
+  fig_nums(
+    name    = "aanvoerentotalevangst", level   = 1, display = FALSE,
+    caption = "Vergelijking van aanvoer (Marelec) en totale vangst (schatting)")
   
   t1 <-
     h %>% 
@@ -559,7 +565,8 @@ if (nrow(m) > 0 & sum(!is.na(h$totalcatch))>0) {
     mutate(variable = "aanvoer")
     
 
-  t1 %>% 
+  p <-
+    t1 %>% 
     ggplot(aes(x=haul, y=data)) +
     theme_publication() +
     theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
@@ -573,11 +580,9 @@ if (nrow(m) > 0 & sum(!is.na(h$totalcatch))>0) {
                      values=c('aanvoer'='blue', 'totale vangst'='red')) +
     scale_x_continuous(breaks=seq(1,max(t1$haul, m$haul), 1)) +
     labs(x="trek", y="kg", title="totale vangst en aanvoer per trek") 
-
-  print_option <- TRUE
-  fig_nums(
-    name    = "aanvoerentotalevangst", level   = 1, display = FALSE,
-    caption = "Vergelijking van aanvoer (Marelec) en totale vangst (schatting)")
+    
+  p
+  
   
 }
 
