@@ -8,9 +8,9 @@ output:
 ```{r setup, include=FALSE}
 
 # ==========================================================================================================
-# Generate standard FLYSHOOT tripreport
+# Generate  FLYSHOOT elog overview
 # 
-# 11/01/2023 first coding
+# 03/02/2023 first coding
 # ==========================================================================================================
 
 knitr::opts_chunk$set(echo = FALSE,	message = FALSE,	warning = FALSE,	comment = "",	crop = TRUE )
@@ -84,8 +84,8 @@ load(file.path(onedrive, "rdata/haul.RData"))
 load(file.path(onedrive, "rdata/kisten.RData"))
 load(file.path(onedrive, "rdata/elog.RData"))
 
-yrs     <- 2018:2023
-mnths   <- 1
+yrs     <- 2000:2023
+mnths   <- 1:12
 vessels <- NA
 
 # making the data selections
@@ -143,22 +143,21 @@ ymax <- ceiling(2* (max(e$lat, na.rm=TRUE)+0.5))/2
 #   # xmin      <- floor(2 * (xmin-0.5))/2;   
 #   # xmax      <- ceiling(2 * (xmax+0.5))/2;
 # }
-
 n <- 15
 
 effort <-
   e %>% 
-  dplyr::group_by(vessel, year, month) %>% 
+  dplyr::group_by(source, vessel, year, month) %>% 
   dplyr::summarize(ndays = n_distinct(paste(vessel, date))) 
 
 catch <-
   e %>% 
-  dplyr::group_by(vessel, year, month, species, 
+  dplyr::group_by(source, vessel, year, month, species, 
                   scientific_name, english_name, dutch_name) %>% 
   dplyr::summarize(weight = sum(weight, na.rm=TRUE)) %>% 
-  dplyr::group_by(vessel, year, month) %>% 
+  dplyr::group_by(source, vessel, year, month) %>% 
   dplyr::mutate(perc = weight/sum(weight, na.rm=TRUE)) %>% 
-  left_join(effort, by=c("vessel", "year","month")) %>% 
+  left_join(effort, by=c("source", "vessel", "year","month")) %>% 
   mutate(catch_day = weight / ndays)
 
 top <-
@@ -172,7 +171,7 @@ top <-
 ```
 
 
-# Elog comparisons 
+# Elog overview
 
 ### Vessels `r paste(unique(e$vessel), collapse=", ")`
 
@@ -182,13 +181,15 @@ Report generated: `r format(Sys.time(), '%d/%m/%Y')`
 
 &nbsp;
 
+Een overzicht van de beschikbare elog data. 
+
 <!-- ########################################################################################## -->
 <!-- Table: vangst --------------------------- -->
 <!-- ########################################################################################## -->
 
-Totaal aantal visdagen. Januari 2023 lijkt incompleet te zijn. 
+Aantal visdagen per schip, maand en jaar (kleur geeft aan of het Ecatch of PEFA is)
 
-```{r visdagen, echo=FALSE, message=FALSE, warning=FALSE, comment=NA, fig.asp=0.6}
+```{r visdagen, echo=FALSE, message=FALSE, warning=FALSE, comment=NA, fig.asp=1.0}
 
 tab_nums(
   name    = "visdagen", 
@@ -198,9 +199,11 @@ tab_nums(
 
 effort %>% 
 
-  ggplot(aes(x=year, y=ndays)) +
+  ggplot(aes(x=year, y=month)) +
   theme_publication() +
-  geom_bar(aes(fill=vessel), stat="identity")
+  geom_point(aes(colour=source, size=ndays)) +
+  scale_y_continuous(breaks=seq(1,12,1)) +
+  facet_wrap(~vessel)
 
 
 ```
@@ -209,61 +212,29 @@ _`r tab_nums("visdagen")`_
 
 \newpage
 
-Een vergelijking van de aanvoer per soort vanuit de elog gegevens (`r n` meest aangevoerde soorten). 
+Totale vangst per schip, maand en jaar (kleur geeft aan of het Ecatch of PEFA is)
 
-<!-- ########################################################################################## -->
-<!-- Table: vangst --------------------------- -->
-<!-- ########################################################################################## -->
-
-Totale vangst per soort
-
-```{r vangstpersoort, echo=FALSE, message=FALSE, warning=FALSE, comment=NA, fig.asp=1.0}
+```{r vangst, echo=FALSE, message=FALSE, warning=FALSE, comment=NA, fig.asp=1.0}
 
 tab_nums(
-  name    = "vangstpersoort", 
+  name    = "totale vangst", 
   level = 1, display = FALSE,
-  caption = "Vangst per soort (kg)")
+  caption = "Totale vangst (=aanvoer)")
+
 
 catch %>% 
-  filter(species %in% top$species) %>% 
+  group_by(source, vessel, year, month) %>% 
+  summarise(weight = sum(weight, na.rm=TRUE)) %>% 
   
-  ggplot(aes(x=year, y=weight)) +
+  ggplot(aes(x=year, y=month)) +
   theme_publication() +
-  geom_bar(aes(fill=vessel), stat="identity") +
-  expand_limits(y=0) +
-  facet_wrap(~species)
+  geom_point(aes(colour=source, size=weight)) +
+  scale_y_continuous(breaks=seq(1,12,1)) +
+  facet_wrap(~vessel)
 
 
 ```
 
-_`r tab_nums("vangstpersoort")`_
-
-\newpage
-
-<!-- ########################################################################################## -->
-<!-- cpue informatie --------------------------- -->
-<!-- ########################################################################################## -->
-
-Gemiddelde vangst per soort per dag
-
-```{r cpuepersoort, echo=FALSE, message=FALSE, warning=FALSE, comment=NA, fig.asp=1.0}
-
-tab_nums(
-  name    = "cpuepersoort", 
-  level = 1, display = FALSE,
-  caption = "Vangst per soort en per dag (kg/dag)")
-
-catch %>% 
-  filter(species %in% top$species) %>% 
-  
-  ggplot(aes(x=year, y=catch_day)) +
-  theme_publication() +
-  geom_line(aes(colour=vessel)) +
-  geom_point(aes(colour=vessel)) +
-  expand_limits(y=0) +
-  facet_wrap(~species, scales="free_y")
+_`r tab_nums("visdagen")`_
 
 
-```
-
-_`r tab_nums("cpuepersoort")`_
