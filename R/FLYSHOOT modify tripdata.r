@@ -99,16 +99,35 @@ save(kisten, file=file.path(onedrive, "rdata/kisten.RData"))
 # --------------------------------------------------------------------------------
 h <-
   haul %>% 
-  filter(date >= lubridate::dmy("9/1/2023")) %>% 
-  group_by(vessel, trip) %>% 
-  mutate(nexthaultime = lead(haultime)) %>% 
-  mutate(nexthaultime = ifelse(is.na(nexthaultime), lubridate::dmy_hm("31/12/2023 23:59"), nexthaultime)) %>% 
-  mutate(nexthaultime = as_datetime(nexthaultime))
+  # filter(date >= lubridate::dmy("9/1/2023")) %>% 
+  filter(trip=="2023239") 
+  # group_by(vessel, trip) %>% 
+  # mutate(nexthaultime = lead(haultime)) %>% 
+  # mutate(nexthaultime = ifelse(is.na(nexthaultime), lubridate::dmy_hm("31/12/2023 23:59"), nexthaultime)) %>% 
+  # mutate(nexthaultime = as_datetime(nexthaultime))
 
 m <- 
   kisten %>% 
-  filter(datetime >= lubridate::dmy("9/1/2023")) %>% 
-  rename(haul2=haul)
+  filter(trip == "2023239") %>% 
+  rename(haulm = haul, haul2m=haul2)
+  # filter(datetime >= lubridate::dmy("9/1/2023")) %>% 
+  # rename(haul2=haul)
+
+h %>% 
+  ggplot(aes(x=haultime, y=1)) +
+  theme_publication() +
+  geom_point(colour="red", size=3, shape=21) +
+  geom_point(data=m, aes(x=datetime, y=1.02), colour="blue", size=1) +
+  # geom_point(data=m, aes(x=datetime, y=0.8), colour="blue", size=1)
+  expand_limits(y=0)
+
+h %>% 
+  ggplot(aes(x=haul, y=haulm)) +
+  theme_publication() +
+  geom_point(colour="red", size=3, shape=21) +
+  geom_point(data=m, aes(x=datetime, y=1.02), colour="blue", size=1) +
+  # geom_point(data=m, aes(x=datetime, y=0.8), colour="blue", size=1)
+  expand_limits(y=0)
 
 t <-
   sqldf::sqldf("select m.vessel, m.trip, m.lotnummer, m.soorten, m.maat, m.gewicht, m.datetime, 

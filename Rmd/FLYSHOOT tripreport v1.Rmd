@@ -95,10 +95,10 @@ load(file.path(onedrive, "rdata/kisten.RData"))
 load(file.path(onedrive, "rdata/elog.RData"))
 load(file.path(onedrive, "rdata/trip.RData"))
 
-# setvessel<-"SCH135"   ;settrip<-"2023322" ;
+ setvessel<-"SCH135"   ;settrip<-"2023322" ;
 # setvessel<-"SCH65"   ;settrip<-"2023239" ;
 # setvessel<-"SL9"   ;settrip<-"2023406" ;
- setvessel<-"Z99"   ;settrip<-"2023066" ;
+# setvessel<-"Z99"   ;settrip<-"2023066" ;
 
 # making the data selections
 h <- 
@@ -578,7 +578,7 @@ if (nrow(m) > 0 & sum(!is.na(h$totalcatch))>0) {
     scale_fill_manual(name='',
                      breaks=c('aanvoer', 'totale vangst'),
                      values=c('aanvoer'='blue', 'totale vangst'='red')) +
-    scale_x_continuous(breaks=seq(1,max(t1$haul, m$haul), 1)) +
+    scale_x_continuous(breaks=seq(1,max(t1$haul, m$haul, na.rm=TRUE), 1)) +
     labs(x="trek", y="kg", title="totale vangst en aanvoer per trek") 
     
   p

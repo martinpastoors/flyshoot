@@ -385,7 +385,13 @@ my_spatial_drive = "C:/DATA/RDATA"
         filter(tolower(X) == "lotnummer") %>% 
         dplyr::select(rownumber) %>% 
         as.integer()
-        
+
+      # hauls for this trip
+      # if(!exists("h")) {
+        h <- haul %>% filter(vessel ==myvessel, trip==mytrip)
+        if(!exists("h")) stop(paste("Probleem: treklijst niet beschikbaar voor",myvessel, mytrip))
+      # }
+      
       # print(paste(myvessel, mytrip))
       
       m  <-
@@ -416,17 +422,23 @@ my_spatial_drive = "C:/DATA/RDATA"
         dplyr::select(-datum, -tijd) 
       
       # add calculated hauls from haul list
-      if(exists(h)) {
-        m <-
-          sqldf::sqldf("select m.vessel, m.trip, m.lotnummer, m.soorten, m.maat, m.gewicht, 
-          m.datetime, m.haul2, h.haul from m
-                join h on m.vessel   == h.vessel and
-                          m.trip     == h.trip and
-                          m.datetime >= h.haultime and
-                          m.datetime <  h.nexthaultime") %>%
-          as_tibble() 
-      }
+      t <-
+        sqldf::sqldf("select m.vessel, m.trip, m.lotnummer, m.soorten, m.maat, m.gewicht,
+        m.datetime, m.haul2, h.haul from m
+              join h on m.vessel   == h.vessel and
+                        m.trip     == h.trip and
+                        m.datetime >= h.haultime and
+                        m.datetime <  h.nexthaultime") %>%
+        as_tibble()
       
+      if(nrow(t)==0) stop(paste("Probleem bij toewijzing trekken in m van",myvessel, mytrip))
+      
+      m <- left_join(m, 
+                     dplyr::select(t,
+                                   lotnummer, haul),
+                     by="lotnummer")      
+        
+
       # add to database
       if(add_data) {
         
