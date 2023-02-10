@@ -23,18 +23,19 @@ rm(list=ls())
 check_data = TRUE
 add_data = TRUE
 move_data = TRUE
-my_data_drive    = "C:/Users/MartinPastoors/Martin Pastoors/FLYSHOOT - General/tripdata"
-my_rdata_drive   = "C:/Users/MartinPastoors/Martin Pastoors/FLYSHOOT - General/rdata"
-my_spatial_drive = "C:/DATA/RDATA"
+
+onedrive   = "C:/Users/MartinPastoors/Martin Pastoors/FLYSHOOT - General/rdata"
+tripdir    = "C:/Users/MartinPastoors/Martin Pastoors/FLYSHOOT - General/tripdata"
+spatialdir = "C:/DATA/RDATA"
   
 # Define function to read, check and add datasets
 # add_tripdata <- function(
 #     check_data       = TRUE, 
 #     add_data         = TRUE,
 #     move_data        = TRUE, 
-#     my_data_drive    = "C:/Users/MartinPastoors/Martin Pastoors/FLYSHOOT - General/tripdata",
-#     my_rdata_drive   = "C:/Users/MartinPastoors/Martin Pastoors/FLYSHOOT - General/rdata",
-#     my_spatial_drive = "C:/DATA/RDATA") {
+#     tripdir    = "C:/Users/MartinPastoors/Martin Pastoors/FLYSHOOT - General/tripdata",
+#     onedrive   = "C:/Users/MartinPastoors/Martin Pastoors/FLYSHOOT - General/rdata",
+#     spatialdir = "C:/DATA/RDATA") {
   
   # Open relevant packages 
   library(tidyverse)     # combined package of dplyr, tidyr, ggplot, readr, purrr and tibble
@@ -53,11 +54,11 @@ my_spatial_drive = "C:/DATA/RDATA"
   
   # load spatial datasets -------------------------
   
-  load(file.path(my_spatial_drive, "fao_sf.RData"))
-  load(file.path(my_spatial_drive, "rect_sf.RData"))
+  load(file.path(spatialdir, "fao_sf.RData"))
+  load(file.path(spatialdir, "rect_sf.RData"))
   
   rect_df <-
-    loadRData(file.path(my_spatial_drive, "rect_df.RData")) %>% 
+    loadRData(file.path(spatialdir, "rect_df.RData")) %>% 
     rename(rect=ICESNAME) %>% 
     group_by(rect) %>% 
     filter(row_number() ==1) %>% 
@@ -65,16 +66,16 @@ my_spatial_drive = "C:/DATA/RDATA"
   
   # load fish biology datasets -------------------------
   
-  afsis <- loadRData(file.path(my_spatial_drive, "afsis.RData"))
+  afsis <- loadRData(file.path(spatialdir, "afsis.RData"))
 
   # load fishery datasets -------------------------
   
-  load(file.path(my_rdata_drive, "haul.RData"))
-  load(file.path(my_rdata_drive, "kisten.RData"))
-  # load(file.path(my_rdata_drive, "marelec_trip.RData"))
-  # load(file.path(my_rdata_drive, "marelec_trek.RData"))
-  load(file.path(my_rdata_drive, "elog.RData"))
-  load(file.path(my_rdata_drive, "trip.RData"))
+  load(file.path(onedrive, "haul.RData"))
+  load(file.path(onedrive, "kisten.RData"))
+  # load(file.path(onedrive, "marelec_trip.RData"))
+  # load(file.path(onedrive, "marelec_trek.RData"))
+  load(file.path(onedrive, "elog.RData"))
+  load(file.path(onedrive, "trip.RData"))
 
   # trip <-
   #   trip %>% 
@@ -100,7 +101,7 @@ my_spatial_drive = "C:/DATA/RDATA"
   # ----------------------------------------------------------------------------
   
   filelist <- list.files(
-    path=file.path(my_data_drive, "/_te verwerken"),
+    path=file.path(tripdir, "/_te verwerken"),
     pattern="treklijst",
     full.names = TRUE)
   
@@ -112,11 +113,14 @@ my_spatial_drive = "C:/DATA/RDATA"
     # vessel and trip
       myvessel <- stringr::word(basename(filelist[i]), 1, sep=" ")
   
-      mytrip <-
-        stringr::word(basename(filelist[i]), 2, sep=" ") %>%
-        str_extract_all(.,"\\(?[0-9]+\\)?") %>%
-        unlist() %>% 
-        paste(., collapse="")
+      mytrip <- stringr::word(basename(filelist[i]), 2, sep=" ") %>%
+        gsub("_","",.) %>%
+        unlist()     
+      # mytrip <-
+      #   stringr::word(basename(filelist[i]), 2, sep=" ") %>%
+      #   str_extract_all(.,"\\(?[0-9,\\-]+\\)?") %>%
+      #   unlist() %>% 
+      #   paste(., collapse="")
       
       # number of used rows    
       r <-
@@ -181,7 +185,7 @@ my_spatial_drive = "C:/DATA/RDATA"
                            "winddirection","windforce"),
                          ~zoo::na.locf(.))) %>% 
           
-          mutate(across (c("vessel"), 
+          mutate(across (c("vessel", "shootew", "shootns"), 
                          toupper)) %>% 
           mutate(across (c("haul", "meshsize","date", "windforce", "waterdepth",
                            "catchheight", "dateembarked","datedisembarked"), 
@@ -338,12 +342,12 @@ my_spatial_drive = "C:/DATA/RDATA"
             bind_rows(t)
   
           # haul <- data.frame(stringsAsFactors = FALSE)
-          save(haul,         file = file.path(my_rdata_drive, "haul.RData"))  
-          save(trip,         file = file.path(my_rdata_drive, "trip.RData"))  
+          save(haul,         file = file.path(onedrive, "haul.RData"))  
+          save(trip,         file = file.path(onedrive, "trip.RData"))  
         }
         
         if (move_data) {
-          file.copy(filelist[i], file.path(my_data_drive, myvessel), overwrite = TRUE)        
+          file.copy(filelist[i], file.path(tripdir, myvessel), overwrite = TRUE)        
           file.remove(filelist[i])        
         } 
         
@@ -361,7 +365,7 @@ my_spatial_drive = "C:/DATA/RDATA"
   # ----------------------------------------------------------------------------
   
   filelist <- list.files(
-    path=file.path(my_data_drive, "/_te verwerken"),
+    path=file.path(tripdir, "/_te verwerken"),
     pattern="kisten",
     full.names = TRUE)
   
@@ -448,12 +452,12 @@ my_spatial_drive = "C:/DATA/RDATA"
           bind_rows(m)
         
         # marelec_lot <- marelec_lot %>% dplyr::select(-haul2)
-        save(kisten,  file = file.path(my_rdata_drive, "kisten.RData"))  
+        save(kisten,  file = file.path(onedrive, "kisten.RData"))  
         
       }
       
       if (move_data) {
-        file.copy(filelist[i], file.path(my_data_drive,myvessel), overwrite = TRUE)        
+        file.copy(filelist[i], file.path(tripdir,myvessel), overwrite = TRUE)        
         file.remove(filelist[i])        
       } 
       
@@ -469,7 +473,7 @@ my_spatial_drive = "C:/DATA/RDATA"
   # ----------------------------------------------------------------------------
   
   filelist <- list.files(
-    path=file.path(my_data_drive, "/_te verwerken"),
+    path=file.path(tripdir, "/_te verwerken"),
     pattern="elog pefa",
     full.names = TRUE)
   
@@ -492,7 +496,8 @@ my_spatial_drive = "C:/DATA/RDATA"
         rename(rect = icesrectangle) %>% 
         rename(vessel = vesselnumber) %>% 
         mutate(vessel = gsub(" ","", vessel)) %>% 
-  
+        mutate(vessel = ifelse(vessel=="SL09", "SL9","")) %>% 
+        
         mutate(across (c("boxes", "catchdate"),
                        as.integer)) %>%
         mutate(across (c("departuredate","arrivaldate", "catchdate", "weight"),
@@ -528,12 +533,12 @@ my_spatial_drive = "C:/DATA/RDATA"
           filter(paste0(vessel, trip) %notin% paste0(myvessel, mytrip)) %>%
           bind_rows(e)
         
-        save(elog,         file = file.path(my_rdata_drive, "elog.RData"))  
+        save(elog,         file = file.path(onedrive, "elog.RData"))  
         
       }
       
       if (move_data) {
-        file.copy(filelist[i], file.path(my_data_drive,myvessel), overwrite = TRUE)        
+        file.copy(filelist[i], file.path(tripdir,myvessel), overwrite = TRUE)        
         file.remove(filelist[i])        
       } 
       
@@ -546,7 +551,7 @@ my_spatial_drive = "C:/DATA/RDATA"
   # ----------------------------------------------------------------------------
   
   filelist <- list.files(
-    path=file.path(my_data_drive, "_te verwerken"),
+    path=file.path(tripdir, "_te verwerken"),
     pattern="elog mcatch",
     full.names = TRUE)
   
@@ -626,12 +631,12 @@ my_spatial_drive = "C:/DATA/RDATA"
           bind_rows(e)
         
         
-        save(elog,         file = file.path(my_rdata_drive, "elog.RData"))  
+        save(elog,         file = file.path(onedrive, "elog.RData"))  
         
       }
       
       if (move_data) {
-        file.copy(filelist[i], file.path(my_data_drive,myvessel), overwrite = TRUE)        
+        file.copy(filelist[i], file.path(tripdir,myvessel), overwrite = TRUE)        
         file.remove(filelist[i])        
       } 
   
@@ -645,7 +650,7 @@ my_spatial_drive = "C:/DATA/RDATA"
 # add_tripdata (check_data = TRUE, 
 #               add_data = TRUE,
 #               move_data = TRUE,
-#               my_data_drive    = "C:/Users/MartinPastoors/Martin Pastoors/FLYSHOOT - General/tripdata",
-#               my_rdata_drive   = "C:/Users/MartinPastoors/Martin Pastoors/FLYSHOOT - General/rdata",
-#               my_spatial_drive = "C:/DATA/RDATA")
+#               tripdir    = "C:/Users/MartinPastoors/Martin Pastoors/FLYSHOOT - General/tripdata",
+#               onedrive   = "C:/Users/MartinPastoors/Martin Pastoors/FLYSHOOT - General/rdata",
+#               spatialdir = "C:/DATA/RDATA")
   

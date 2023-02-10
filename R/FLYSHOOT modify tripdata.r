@@ -34,7 +34,7 @@ fig_nums <- captioner::captioner(prefix = "Figure ", levels=1, type=c("n"), infi
 # Source all the utils
 source("../prf/R/my utils.r")
 
-get_onedrive <- function (team="Martin Pastoors", site="FLYSHOOT - General") {
+get_onedrive <- function (team="Martin Pastoors", site="FLYSHOOT - General/rdata") {
   
   if (Sys.info()['sysname'] == 'Windows') {
     
@@ -59,10 +59,10 @@ spatialdir <- "C:/DATA/RDATA"
 
 load(file.path(spatialdir, "world_lr_sf.RData"))
 load(file.path(spatialdir, "world_mr_sf.RData"))
-# load(file.path(onedrive, "rdata/eez.df.RData"))
-# load(file.path(onedrive, "rdata/fao.df.RData"))
-# load(file.path(onedrive, "rdata/depth200.df.RData"))
-# load(file.path(onedrive, "rdata/icesrectangles.df.RData"))
+# load(file.path(onedrive, "eez.df.RData"))
+# load(file.path(onedrive, "fao.df.RData"))
+# load(file.path(onedrive, "depth200.df.RData"))
+# load(file.path(onedrive, "icesrectangles.df.RData"))
 
 load(file.path(spatialdir, "world_lr_df.RData"))
 load(file.path(spatialdir, "world_mr_df.RData"))
@@ -77,13 +77,21 @@ rect_df <-
 load(file.path(spatialdir, "afsis.RData"))
 
 # set onedrive directory
-onedrive <- get_onedrive(team="Martin Pastoors", site="FLYSHOOT - General")
+onedrive <- get_onedrive(team="Martin Pastoors", site="FLYSHOOT - General/rdata")
 
 # load datasets
-load(file.path(onedrive, "rdata/haul.RData"))
-load(file.path(onedrive, "rdata/kisten.RData"))
-load(file.path(onedrive, "rdata/elog.RData"))
-load(file.path(onedrive, "rdata/trip.RData"))
+load(file.path(onedrive, "haul.RData"))
+load(file.path(onedrive, "kisten.RData"))
+load(file.path(onedrive, "elog.RData"))
+load(file.path(onedrive, "trip.RData"))
+
+# --------------------------------------------------------------------------------
+# removing erroneous trips
+# --------------------------------------------------------------------------------
+
+elog %>% filter(vessel=="SL09") %>% distinct(vessel, trip)
+elog <- elog %>% filter(vessel !="SL09") 
+save(elog,  file = file.path(onedrive, "elog.RData"))  
 
 # --------------------------------------------------------------------------------
 # Fix linking between marelec and hauls
@@ -92,7 +100,7 @@ kisten <-
   kisten %>% 
   mutate(haul = ifelse(vessel == "SCH135" & trip=="2023321" & haul >= 28, haul+1, haul))
 
-save(kisten, file=file.path(onedrive, "rdata/kisten.RData"))
+save(kisten, file=file.path(onedrive, "kisten.RData"))
 
 # --------------------------------------------------------------------------------
 # Redoing link between marelec and hauls
@@ -146,7 +154,7 @@ kisten <-
                           vessel, trip, datetime, haul),
             by=c("vessel","trip", "datetime")) 
 
-save(kisten,  file = file.path(onedrive, "rdata/kisten.RData"))  
+save(kisten,  file = file.path(onedrive, "kisten.RData"))  
 
 
 
@@ -216,20 +224,22 @@ t1 <-
   summarise(totalcatch = sum(totalcatch, na.rm=TRUE)) 
 
 t2 <-
-  marelec_lot %>% 
+  kisten %>% 
   group_by(vessel, trip, haul) %>% 
   summarise(aanvoer = sum(gewicht, na.rm=TRUE)) 
 
-cols <- c("red" = "red", "black" = "black")
+cols <- c("negatieve bijvangst" = "red", "bijvangst" = "black")
 
 full_join(t1, t2, by=c("vessel","trip","haul")) %>% 
   filter(!(is.na(totalcatch) | is.na(aanvoer))) %>%
   filter(vessel != "Z99") %>% 
   mutate(berekendebijvangst = aanvoer - totalcatch) %>% 
-  mutate(colour = ifelse(berekendebijvangst < 0, "red", "black")) %>% 
+  mutate(colour = ifelse(berekendebijvangst < 0, "negatieve bijvangst", "bijvangst")) %>% 
   # View()
   group_by(vessel) %>% 
-  mutate(rownumber = row_number()) %>% 
+  # mutate(rownumber = row_number()) %>% 
+  mutate(rownumber = paste(gsub("2023","", trip), 
+                           stringr::str_pad(haul, width=2, pad="0"))) %>% 
   
   ggplot(aes(x=rownumber, y=berekendebijvangst)) +
   theme_publication() +
@@ -238,7 +248,7 @@ full_join(t1, t2, by=c("vessel","trip","haul")) %>%
            stat="identity", alpha=0.5) +
   scale_fill_manual(values=cols) +
   labs(x="trek", y="kg", title="berekende bijvangst per trek") +
-  facet_wrap(~vessel, ncol=1)
+  facet_wrap(~vessel, ncol=1, scales="free_x")
 
 full_join(t1, t2, by=c("vessel","trip","haul")) %>% 
   filter(!(is.na(totalcatch) | is.na(aanvoer))) %>%

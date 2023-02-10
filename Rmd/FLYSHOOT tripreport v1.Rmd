@@ -14,13 +14,25 @@ output:
 # 20/01/2023 v1 with inclusion of elog data
 # ==========================================================================================================
 
+# Reset lists
+rm(list=ls())
+
+# ------------------------------------------------------------
+# Select vessel and trip
+# ------------------------------------------------------------
+
+# setvessel<-"SCH135"   ;settrip<-"2023323" ;
+# setvessel<-"SCH65"   ;settrip<-"2023240" ;
+# setvessel<-"SL9"   ;settrip<-"2023409-412" ;
+setvessel<-"Z99"   ;settrip<-"2023067" ;
+
+# ------------------------------------------------------------
+
 knitr::opts_chunk$set(echo = FALSE,	message = FALSE,	warning = FALSE,	comment = "",	crop = TRUE )
 knitr::opts_chunk$set(fig.width=10) 
 
 options(dplyr.summarise.inform = FALSE)
 
-# Reset lists
-rm(list=ls())
 
 # Libraries
 library(rmarkdown)                   # note: requires knitr 1.21
@@ -64,10 +76,10 @@ spatialdir <- "C:/DATA/RDATA"
 
 load(file.path(spatialdir, "world_lr_sf.RData"))
 load(file.path(spatialdir, "world_mr_sf.RData"))
-# load(file.path(onedrive, "rdata/eez.df.RData"))
-# load(file.path(onedrive, "rdata/fao.df.RData"))
-# load(file.path(onedrive, "rdata/depth200.df.RData"))
-# load(file.path(onedrive, "rdata/icesrectangles.df.RData"))
+# load(file.path(onedrive, "eez.df.RData"))
+# load(file.path(onedrive, "fao.df.RData"))
+# load(file.path(onedrive, "depth200.df.RData"))
+# load(file.path(onedrive, "icesrectangles.df.RData"))
 
 load(file.path(spatialdir, "world_lr_df.RData"))
 load(file.path(spatialdir, "world_mr_df.RData"))
@@ -86,19 +98,15 @@ load(file.path(spatialdir, "afsis.RData"))
 # ===============================================================================
 
 # set onedrive directory
-onedrive <- get_onedrive(team="Martin Pastoors", site="FLYSHOOT - General")
+onedrive <- get_onedrive(team="Martin Pastoors", site="FLYSHOOT - General/rdata")
 
 # load datasets
-load(file.path(onedrive, "rdata/haul.RData"))
+load(file.path(onedrive, "haul.RData"))
 
-load(file.path(onedrive, "rdata/kisten.RData"))
-load(file.path(onedrive, "rdata/elog.RData"))
-load(file.path(onedrive, "rdata/trip.RData"))
+load(file.path(onedrive, "kisten.RData"))
+load(file.path(onedrive, "elog.RData"))
+load(file.path(onedrive, "trip.RData"))
 
- setvessel<-"SCH135"   ;settrip<-"2023322" ;
-# setvessel<-"SCH65"   ;settrip<-"2023239" ;
-# setvessel<-"SL9"   ;settrip<-"2023406" ;
-# setvessel<-"Z99"   ;settrip<-"2023066" ;
 
 # making the data selections
 h <- 
@@ -370,6 +378,36 @@ t1 %>%
 
 _`r tab_nums("vangstpersoort")`_
 
+**Aanvoer per soort en dag (Marelec)**
+
+```{r vangstpersoortendag, echo=FALSE, message=FALSE, warning=FALSE, comment=NA}
+
+tab_nums(
+  name    = "vangstpersoortendag", 
+  level = 1, display = FALSE,
+  caption = "Vangst per soort (kg) per dag")
+
+t1 <-
+  m %>% 
+  mutate(date = as.Date(datetime)) %>% 
+  mutate(soorten = tolower(soorten)) %>% 
+  dplyr::group_by(date, soorten) %>% 
+  dplyr::summarize(gewicht     = sum(gewicht, na.rm=TRUE)) %>% 
+
+  reshape2::dcast(soorten ~ date, value.var = "gewicht", sum, margins = c("date", "soorten")) %>% 
+  pander::pandoc.table(.,
+               style = "simple",
+               split.tables=400, 
+               justify = "right",
+               missing=".",
+               round=c(0,0,0,0,0,0,1,1,1,1,1,1,1,1,0,0,0,0,0,0))
+  
+
+```
+
+_`r tab_nums("vangstpersoortendag")`_
+
+\newpage
 
 <!-- ########################################################################################## -->
 <!-- Figure: Total Catch per Haul (map)                                                         -->
