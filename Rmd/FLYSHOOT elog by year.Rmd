@@ -85,8 +85,8 @@ haul   <- loadRData(file.path(onedrive, "rdata/haul.RData"))
 kisten <- loadRData(file.path(onedrive, "rdata/kisten.RData")) 
 elog   <- loadRData(file.path(onedrive, "rdata/elog.RData")) %>% mutate(species = toupper(species))
 
-yrs     <- 2018:2023
-mnths   <- 1
+yrs     <- 2019:2022
+mnths   <- NA
 vessels <- NA
 
 # making the data selections
@@ -106,6 +106,7 @@ e <-
   {if(!is.na(all(mnths)))   filter(., month %in% mnths) else .} %>% 
   ungroup() %>% 
   mutate(species = tolower(species)) %>% 
+  mutate(species = ifelse(species == "SQR", "SQC", species)) %>% 
   left_join(dplyr::select(afsis,
                           species, scientific_name, english_name, dutch_name),
             by = "species") %>% 
@@ -151,17 +152,17 @@ n <- 15
 
 effort <-
   e %>% 
-  dplyr::group_by(vessel, year, month) %>% 
+  dplyr::group_by(vessel, year) %>% 
   dplyr::summarize(ndays = n_distinct(paste(vessel, date))) 
 
 catch <-
   e %>% 
-  dplyr::group_by(vessel, year, month, species, 
+  dplyr::group_by(vessel, year, species, 
                   scientific_name, english_name, dutch_name) %>% 
   dplyr::summarize(weight = sum(weight, na.rm=TRUE)) %>% 
-  dplyr::group_by(vessel, year, month) %>% 
+  dplyr::group_by(vessel, year) %>% 
   dplyr::mutate(perc = weight/sum(weight, na.rm=TRUE)) %>% 
-  left_join(effort, by=c("vessel", "year","month")) %>% 
+  left_join(effort, by=c("vessel", "year")) %>% 
   mutate(catch_day = weight / ndays)
 
 top <-
@@ -273,9 +274,9 @@ _`r tab_nums("cpuepersoort")`_
 
 \newpage
 
-Totale vangst per soort per maand
+Totale vangst per soort
 
-```{r vangstpersoort2, echo=FALSE, message=FALSE, warning=FALSE, comment=NA, fig.asp=1.0}
+```{r vangstpersoort2, echo=FALSE, message=FALSE, warning=FALSE, comment=NA, fig.asp=1.2}
 
 tab_nums(
   name    = "vangstpersoort2", 
@@ -289,7 +290,7 @@ t <-
     dutch_name = ifelse(species %in% c("SQC","SQR"), "pijlinktvis", dutch_name),
     species    = ifelse(species %in% c("SQC","SQR"), "SQR/SQC", species)
   ) %>% 
-  group_by(year, month, species, dutch_name) %>% 
+  group_by(year, species, dutch_name) %>% 
   summarise(
     catch = sum(weight, na.rm=TRUE),
     n     = n_distinct(vessel)) %>% 
@@ -299,7 +300,7 @@ t <-
 
 t1 <-
   t %>% 
-  group_by(month, species) %>% 
+  group_by(species) %>% 
   summarise(
     catch = sum(catch, na.rm=TRUE),
     n     = n()) %>% 
@@ -316,7 +317,7 @@ t %>%
   coord_flip() +
   expand_limits(y=0) +
   labs(y="catch/vessel") +
-  facet_wrap(~year)
+  facet_wrap(~year, nrow=4)
 
 
 ```

@@ -94,6 +94,22 @@ elog <- elog %>% filter(vessel !="SL09")
 save(elog,  file = file.path(onedrive, "elog.RData"))  
 
 # --------------------------------------------------------------------------------
+# fixing kisten problem
+# --------------------------------------------------------------------------------
+
+tmp <-
+  kisten %>% 
+  filter(trip=="2023409-412") %>% 
+  distinct(datetime, .keep_all = TRUE) 
+
+kisten <-
+  kisten %>% 
+  filter(trip !="2023409-412") %>% 
+  bind_rows(tmp)
+
+save(kisten,  file = file.path(onedrive, "kisten.RData"))  
+
+# --------------------------------------------------------------------------------
 # Fix linking between marelec and hauls
 # --------------------------------------------------------------------------------
 kisten <-

@@ -413,8 +413,9 @@ spatialdir = "C:/DATA/RDATA"
         mutate(maat = gsub("KLASSE ","", maat)) %>% 
         mutate(vessel = myvessel) %>% 
         mutate(trip = mytrip) %>% 
-        mutate(lotnummer = as.integer(lotnummer)) %>% 
         mutate(datetime = lubridate::dmy_hms(paste(datum, tijd))) %>% 
+        arrange(datetime) %>% 
+        mutate(lotnummer = row_number()) %>% 
         mutate(gewicht = as.numeric(gewicht)) %>% 
         
         # assign haul; could be done with sqldf instead, but time registration is 
@@ -428,7 +429,7 @@ spatialdir = "C:/DATA/RDATA"
       # add calculated hauls from haul list
       t <-
         sqldf::sqldf("select m.vessel, m.trip, m.lotnummer, m.soorten, m.maat, m.gewicht,
-        m.datetime, m.haul2, h.haul from m
+                             m.datetime, m.haul2, h.haul from m
               join h on m.vessel   == h.vessel and
                         m.trip     == h.trip and
                         m.datetime >= h.haultime and

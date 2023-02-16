@@ -23,8 +23,8 @@ rm(list=ls())
 
 # setvessel<-"SCH135"   ;settrip<-"2023323" ;
 # setvessel<-"SCH65"   ;settrip<-"2023240" ;
-# setvessel<-"SL9"   ;settrip<-"2023409-412" ;
-setvessel<-"Z99"   ;settrip<-"2023067" ;
+setvessel<-"SL9"   ;settrip<-"2023409-412" ;
+# setvessel<-"Z99"   ;settrip<-"2023067" ;
 
 # ------------------------------------------------------------
 
