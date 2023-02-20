@@ -1,0 +1,304 @@
+---
+output:
+  word_document:
+    reference_docx: ../report_template.dotx
+---
+
+
+```{r setup, include=FALSE}
+
+# ==========================================================================================================
+# FLYSHOOT meta data overview
+# 
+# 11/01/2023 first coding
+# 20/01/2023 v1 with inclusion of elog data
+# ==========================================================================================================
+
+# Reset lists
+rm(list=ls())
+
+knitr::opts_chunk$set(echo = FALSE,	message = FALSE,	warning = FALSE,	comment = "",	crop = TRUE )
+knitr::opts_chunk$set(fig.width=10) 
+
+options(dplyr.summarise.inform = FALSE)
+
+
+# Libraries
+library(rmarkdown)                   # note: requires knitr 1.21
+
+require(tidyverse, quietly=TRUE)     # combined package of dplyr, tidyr, ggplot, readr, purrr and tibble
+require(lubridate, quietly=TRUE)     # data handling
+require(reshape2, quietly=TRUE)      # reshaping data; e.g. cast
+require(RColorBrewer)                # colour schemes
+library(viridis)
+library(pander)
+library(lubridate)
+library(ggalt)  # install.packages("ggalt")
+library(captioner)                   # for captions
+tab_nums <- captioner::captioner(prefix = "Table " , levels=1, type=c("n"), infix=".")
+fig_nums <- captioner::captioner(prefix = "Figure ", levels=1, type=c("n"), infix=".")
+
+# Source all the utils
+source("../R/FLYSHOOT utils.r")
+
+spatialdir <- "C:/DATA/RDATA"
+
+# spatial data files
+
+load(file.path(spatialdir, "world_lr_sf.RData"))
+load(file.path(spatialdir, "world_mr_sf.RData"))
+# load(file.path(onedrive, "eez.df.RData"))
+# load(file.path(onedrive, "fao.df.RData"))
+# load(file.path(onedrive, "depth200.df.RData"))
+# load(file.path(onedrive, "icesrectangles.df.RData"))
+
+load(file.path(spatialdir, "world_lr_df.RData"))
+load(file.path(spatialdir, "world_mr_df.RData"))
+
+rect_df <-
+  loadRData(file.path(spatialdir, "rect_df.RData")) %>% 
+  rename(rect=ICESNAME) %>% 
+  group_by(rect) %>% 
+  filter(row_number() ==1) %>% 
+  dplyr::select(rect, lon=long, lat)
+
+load(file.path(spatialdir, "afsis.RData"))
+
+# ===============================================================================
+#  Load and filter the trip data
+# ===============================================================================
+
+# set onedrive directory
+onedrive <- get_onedrive(team="Martin Pastoors", site="FLYSHOOT - General/rdata")
+
+# load datasets
+load(file.path(onedrive, "haul.RData"))
+load(file.path(onedrive, "kisten.RData"))
+load(file.path(onedrive, "elog.RData"))
+load(file.path(onedrive, "trip.RData"))
+
+myyear <- 2023
+
+# making the data selections
+h <- haul   %>% ungroup() %>% filter(year %in% myyear) 
+m <- kisten %>% ungroup() %>% filter(lubridate::year(datetime) %in% myyear) 
+e <- elog   %>% ungroup() %>% filter(year %in% myyear)
+t <- trip   %>% ungroup() %>% filter(lubridate::year(date) %in% myyear) 
+  
+```
+
+
+# FLYSHOOT meta data overview `r myyear`
+
+Report generated: `r format(Sys.time(), '%d/%m/%Y')`
+
+&nbsp;
+
+# Haul information
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, comment=NA}
+
+tab_nums(
+  name    = "h", 
+  level = 1, display = FALSE,
+  caption = "Samenvatting van de trekgegevens")
+
+# summarize the haul information
+hh <- 
+  h %>%
+  group_by(vessel,trip) %>%
+  summarise(
+    nhauls            = n(),
+    startdate         = min(date, na.rm=TRUE),
+    enddate           = max(date, na.rm=TRUE),
+    weeks             = paste(unique(week), collapse=","),
+    months            = paste(unique(month), collapse=","),
+    divisions         = paste(unique(division), collapse=";"),
+    rects             = paste(unique(rect), collapse=";"),
+  ) %>% 
+  mutate (
+    ndays             = as.numeric(difftime(enddate, startdate, units="days")) + 1,
+    haulsperday       = nhauls/ndays
+  ) 
+
+
+hh %>% 
+  group_by(vessel) %>% 
+  do(add_row(., .after=0)) %>%
+  pandoc.table(.,
+             style = "simple",
+             split.tables=400, 
+             justify = "left",
+             missing=".",
+             round=c(0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0))
+
+```
+
+_`r tab_nums("h")`_
+
+\newpage
+
+# Kisten information
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, comment=NA}
+
+tab_nums(
+  name    = "m", 
+  level = 1, display = FALSE,
+  caption = "Samenvatting van de Marelec gegevens")
+
+# summarize the kisten informatie
+mm <- 
+  m %>%
+  group_by(vessel,trip) %>%
+  summarise(
+    nkisten           = n(),
+    nsoorten          = n_distinct(soorten),
+    startdate         = as.Date(min(datetime, na.rm=TRUE)),
+    enddate           = as.Date(max(datetime, na.rm=TRUE)),
+    weeks             = paste(unique(week(datetime)), collapse=","),
+    months            = paste(unique(month(datetime)), collapse=","),
+    gewicht           = sum(gewicht, na.rm=TRUE)
+  ) %>% 
+  mutate (
+    ndays             = as.numeric(difftime(enddate, startdate, units="days")) + 1
+  ) 
+
+
+mm %>% 
+  group_by(vessel) %>% 
+  do(add_row(., .after=0)) %>%
+  pandoc.table(.,
+             style = "simple",
+             split.tables=400, 
+             justify = "left",
+             missing=".",
+             round=c(0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0))
+
+```
+
+_`r tab_nums("m")`_
+
+\newpage
+
+# elog information
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, comment=NA}
+
+tab_nums(
+  name    = "e", 
+  level = 1, display = FALSE,
+  caption = "Samenvatting van de elog gegevens")
+
+# summarize the elog informatie
+ee <- 
+  e %>%
+  group_by(vessel,trip) %>%
+  summarise(
+    startdate         = min(date, na.rm=TRUE),
+    enddate           = max(date, na.rm=TRUE),
+    weeks             = paste(unique(week), collapse=","),
+    months            = paste(unique(month), collapse=","),
+    divisions         = paste(unique(faozone), collapse=";"),
+    rects             = paste(unique(rect), collapse=";"),
+    nsoorten          = n_distinct(species),
+    gewicht           = sum(weight, na.rm=TRUE)
+  ) %>% 
+  mutate (
+    ndays             = as.numeric(difftime(enddate, startdate, units="days")) + 1
+  ) 
+
+
+ee %>% 
+  group_by(vessel) %>% 
+  do(add_row(., .after=0)) %>%
+  pandoc.table(.,
+             style = "simple",
+             split.tables=400, 
+             justify = "left",
+             missing=".",
+             round=c(0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0))
+
+```
+
+_`r tab_nums("e")`_
+
+\newpage
+
+# trip information
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, comment=NA}
+
+tab_nums(
+  name    = "t", 
+  level = 1, display = FALSE,
+  caption = "Samenvatting van de trip gegevens")
+
+# summarize the trip informatie
+tt <- 
+  t %>%
+  group_by(vessel,trip) %>%
+  summarise(
+    startdate         = min(date, na.rm=TRUE),
+    enddate           = max(date, na.rm=TRUE),
+    weeks             = paste(unique(week(date)), collapse=","),
+    months            = paste(unique(month(date)), collapse=","),
+    harbour           = paste(port, collapse="/"),
+    distance          = sum(distance, na.rm=TRUE)
+  ) %>% 
+  mutate (
+    ndays             = as.numeric(difftime(enddate, startdate, units="days")) + 1,
+    harbour           = gsub("/NA","",harbour)
+  ) 
+
+
+tt %>% 
+  group_by(vessel) %>% 
+  do(add_row(., .after=0)) %>%
+  pandoc.table(.,
+             style = "simple",
+             split.tables=400, 
+             justify = "left",
+             missing=".",
+             round=c(0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0))
+
+```
+
+_`r tab_nums("t")`_
+
+\newpage
+
+# combined
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, comment=NA, fig.asp=1.2}
+
+fig_nums(
+  name    = "c", 
+  level = 1, display = FALSE,
+  caption = "Gecombineerd")
+
+# summarize the trip informatie
+comb <-
+  bind_rows(
+    hh %>% mutate(source="haul"),
+    mm %>% mutate(source="marelec"),
+    ee %>% mutate(source="elog"),
+    tt %>% mutate(source="trip")
+  )
+
+comb %>% 
+  dplyr::select(vessel, trip, startdate, enddate, source) %>% 
+  mutate(trip = gsub("^2023","", trip)) %>% 
+  
+    # selfsampling bars
+  ggplot() +
+  theme_publication() +
+  ggalt::geom_dumbbell(aes(x = startdate, xend = enddate, y=source, group=1, colour=source),
+                       size=3, size_x = 0, size_xend = 0, alpha=0.4) +
+  geom_text(aes(x = startdate, y=source, label=trip), hjust=0) +
+  facet_wrap(~vessel, ncol=1)
+
+
+```
+
+_`r tab_nums("t")`_

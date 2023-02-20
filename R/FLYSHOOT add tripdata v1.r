@@ -49,9 +49,8 @@ spatialdir = "C:/DATA/RDATA"
   library(sqldf)         # look up values within a range
 
   # source("../gisland/r/geo_inside.R")
-  source("../prf/r/my utils.R")
+  source("r/FLYSHOOT utils.R")
 
-  
   # load spatial datasets -------------------------
   
   load(file.path(spatialdir, "fao_sf.RData"))
@@ -288,6 +287,8 @@ spatialdir = "C:/DATA/RDATA"
           left_join(h, h_fao,  by=c("vessel","trip","haul")) %>% 
           left_join(., h_rect, by=c("vessel","trip","haul"))
         
+        if (any(h$year != 2023)) stop ("Error: year not in 2023")
+        
         # trip
         tmp <-
           h %>% 
@@ -390,11 +391,14 @@ spatialdir = "C:/DATA/RDATA"
         dplyr::select(rownumber) %>% 
         as.integer()
 
+      print(paste("kisten", myvessel, mytrip))
+      
       # hauls for this trip
       # if(!exists("h")) {
         h <- haul %>% filter(vessel ==myvessel, trip==mytrip)
         if(!exists("h")) stop(paste("Probleem: treklijst niet beschikbaar voor",myvessel, mytrip))
-      # }
+        if(nrow(h)==0)   stop(paste("Probleem: treklijst leeg",myvessel, mytrip))
+        # }
       
       # print(paste(myvessel, mytrip))
       
@@ -489,6 +493,8 @@ spatialdir = "C:/DATA/RDATA"
         gsub("_","",.) %>%
         unlist()     
       
+      print(paste("elog pefa", myvessel, mytrip))
+      
       e  <-
         readxl::read_excel(filelist[i], col_names=TRUE, col_types="text",
                            .name_repair =  ~make.names(., unique = TRUE))  %>% 
@@ -499,7 +505,7 @@ spatialdir = "C:/DATA/RDATA"
         mutate(vessel = gsub(" ","", vessel)) %>% 
         mutate(vessel = ifelse(vessel=="SL09", "SL9","")) %>% 
         
-        mutate(across (c("boxes", "catchdate"),
+        mutate(across (c("boxes", "catchdate", "meshsize"),
                        as.integer)) %>%
         mutate(across (c("departuredate","arrivaldate", "catchdate", "weight"),
                        as.numeric)) %>%
@@ -567,8 +573,11 @@ spatialdir = "C:/DATA/RDATA"
         gsub("_","",.) %>%
         unlist()     
       
+      print(paste("elog mcatch", myvessel, mytrip))
+      
       e  <-
         readxl::read_excel(filelist[i], 
+                           # sheet = "landed catch details table",
                            sheet = "catch details table",
                            col_names=TRUE, col_types="text",
                            .name_repair =  ~make.names(., unique = TRUE))  %>% 
@@ -589,9 +598,9 @@ spatialdir = "C:/DATA/RDATA"
         
         mutate(vessel = gsub("-","", vessel)) %>% 
         mutate(vessel = gsub("\\.","", vessel)) %>% 
-        mutate(vessel = ifelse(vessel=="SL09", "SL9", vessel)) %>%  
+        # mutate(vessel = ifelse(vessel=="SL09", "SL9", vessel)) %>%  
         
-        mutate(across (c("catchdate"),
+        mutate(across (c("catchdate", "meshsize"),
                        as.integer)) %>%
         mutate(across (c("departuredate","arrivaldate", "landingdate", "catchdate", "weight", "lon","lat"),
                        as.numeric)) %>%

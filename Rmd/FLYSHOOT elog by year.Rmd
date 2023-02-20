@@ -85,7 +85,7 @@ haul   <- loadRData(file.path(onedrive, "rdata/haul.RData"))
 kisten <- loadRData(file.path(onedrive, "rdata/kisten.RData")) 
 elog   <- loadRData(file.path(onedrive, "rdata/elog.RData")) %>% mutate(species = toupper(species))
 
-yrs     <- 2019:2022
+yrs     <- 2012:2022
 mnths   <- NA
 vessels <- NA
 
@@ -194,7 +194,7 @@ Totaal aantal visdagen. Januari 2023 lijkt incompleet te zijn.
 
 ```{r visdagen, echo=FALSE, message=FALSE, warning=FALSE, comment=NA, fig.asp=0.6}
 
-tab_nums(
+fig_nums(
   name    = "visdagen", 
   level = 1, display = FALSE,
   caption = "Totaal aantal visdagen")
@@ -209,7 +209,7 @@ effort %>%
 
 ```
 
-_`r tab_nums("visdagen")`_
+_`r fig_nums("visdagen")`_
 
 \newpage
 
@@ -223,7 +223,7 @@ Totale vangst per soort
 
 ```{r vangstpersoort, echo=FALSE, message=FALSE, warning=FALSE, comment=NA, fig.asp=1.0}
 
-tab_nums(
+fig_nums(
   name    = "vangstpersoort", 
   level = 1, display = FALSE,
   caption = "Vangst per soort (kg)")
@@ -240,7 +240,7 @@ catch %>%
 
 ```
 
-_`r tab_nums("vangstpersoort")`_
+_`r fig_nums("vangstpersoort")`_
 
 \newpage
 
@@ -252,7 +252,7 @@ Gemiddelde vangst per soort per dag
 
 ```{r cpuepersoort, echo=FALSE, message=FALSE, warning=FALSE, comment=NA, fig.asp=1.0}
 
-tab_nums(
+fig_nums(
   name    = "cpuepersoort", 
   level = 1, display = FALSE,
   caption = "Vangst per soort en per dag (kg/dag)")
@@ -270,7 +270,7 @@ catch %>%
 
 ```
 
-_`r tab_nums("cpuepersoort")`_
+_`r fig_nums("cpuepersoort")`_
 
 \newpage
 
@@ -278,7 +278,7 @@ Totale vangst per soort
 
 ```{r vangstpersoort2, echo=FALSE, message=FALSE, warning=FALSE, comment=NA, fig.asp=1.2}
 
-tab_nums(
+fig_nums(
   name    = "vangstpersoort2", 
   level = 1, display = FALSE,
   caption = "Vangst per soort per maand")
@@ -329,7 +329,7 @@ Gemiddelde vangst per soort per dag
 
 ```{r cpuepersoort2, echo=FALSE, message=FALSE, warning=FALSE, comment=NA, fig.asp=1.0}
 
-tab_nums(
+fig_nums(
   name    = "cpuepersoort2", 
   level = 1, display = FALSE,
   caption = "Vangst per soort en per dag (kg/dag)")
@@ -337,12 +337,12 @@ tab_nums(
 t <-
   catch %>% 
   filter(species %in% top$species) %>% 
-  group_by(year, month, species) %>% 
+  group_by(year, species) %>% 
   summarise(catch_day = mean(catch_day, na.rm=TRUE))
 
 t1 <-
   t %>% 
-  group_by(month, species) %>% 
+  group_by(species) %>% 
   summarise(catch_day = mean(catch_day, na.rm=TRUE))
 
 t %>% 
@@ -354,12 +354,171 @@ t %>%
                    y=0, yend=catch_day)) + 
   geom_point() +
   expand_limits(y=0) +
+  coord_flip() +
   facet_wrap(~year)
 
 
 ```
 
-_`r tab_nums("cpuepersoort2")`_
+_`r fig_nums("cpuepersoort2")`_
+
+<!-- ########################################################################################## -->
+<!-- catch by rectangle --------------------------- -->
+<!-- ########################################################################################## -->
+
+Vangst per soort en statistisch vak
+
+```{r catchpersoort, eval=FALSE, fig.asp=1.0, message=FALSE, warning=FALSE, comment=NA, include=FALSE}
+
+fig_nums(
+  name    = "catchperrect", 
+  level = 1, display = FALSE,
+  caption = "Vangst per soort")
+
+t <-
+  e %>% 
+  filter(species %in% slice_head(top, n=6)$species) %>% 
+  drop_na(weight) %>% 
+  group_by(species, rect, year) %>% 
+  summarise(
+    weight = sum(weight, na.rm=TRUE)/1000) %>% 
+  ungroup() %>% 
+  left_join(rect_lr_sf, by=c("rect"= "ICESNAME")) %>% 
+  dplyr::select(-ID, -SOUTH, -NORTH, -WEST, -EAST) %>% 
+  sf::st_as_sf()
+
+tmax <- 100*ceiling(max(t$weight)/100)
+
+ttt <-
+  t %>% 
+  sf::st_drop_geometry() %>% 
+  group_by(species) %>% 
+  summarise(weight = as.integer(sum(weight, na.rm=TRUE))) %>% 
+  arrange(desc(weight)) 
+
+sp <- "MAC"
+for (sp in unique(t$species)) {
+  
+  # print(sp)
+  tt <-
+    t %>%
+    filter(species==sp) %>% 
+    group_by(species, year) %>% 
+    summarise(weight = as.integer(sum(weight, na.rm=TRUE))) %>% 
+    sf::st_drop_geometry()
+  
+  p <- 
+    t %>% 
+    filter(species == sp) %>% 
+    
+    ggplot() +
+    theme_bw() +
+    geom_sf(data=world_mr_sf) +
+    geom_sf(aes(fill=weight)) +
+    geom_text(data=tt, aes(x=xmax, y=ymax, label=paste(weight,"t")), hjust=1) +
+    coord_sf(xlim=c(xmin,xmax), ylim=c(ymin, ymax)) + 
+    scale_fill_gradient2(midpoint=0, low="lightblue", high="darkblue", limits=c(0,tmax)) + 
+    labs(title=paste(sp, "aanvoer. Totaal: ",filter(ttt, species==sp)$weight,"t."), 
+         x="", 
+         y="",
+         fill="aanvoer/rect (t.)") +
+    facet_wrap(~year)
+  
+  jpeg(filename=file.path(onedrive, "reports", "figures", paste(sp, "catchbyrect.jpg", sep="_")),
+       width=10, height=6, units="in", res=300)
+  print(p) 
+  dev.off()
+}
+
+```
+
+_`r fig_nums("catchperrect")`_
+
+\newpage
+
+```{r maccatch, echo=FALSE, message=FALSE, warning=FALSE, comment=NA, fig.asp=1.0}
+
+fig_nums(
+  name    = "maccatch", level = 1, display = FALSE,
+  caption = "Makreel aanvoer per statistisch vak")
+
+knitr::include_graphics(path=file.path(onedrive, "reports", "figures", paste("MAC", "catchbyrect.jpg", sep="_")))
+
+```
+
+_`r fig_nums("maccatch")`_
+
+\newpage
+
+```{r murcatch, echo=FALSE, message=FALSE, warning=FALSE, comment=NA, fig.asp=1.0}
+
+fig_nums(
+  name    = "murcatch", level = 1, display = FALSE,
+  caption = "Rode mul aanvoer per statistisch vak")
+
+knitr::include_graphics(path=file.path(onedrive, "reports", "figures", paste("MUR", "catchbyrect.jpg", sep="_")))
+
+```
+
+_`r fig_nums("murcatch")`_
+
+\newpage
+
+```{r guucatch, echo=FALSE, message=FALSE, warning=FALSE, comment=NA, fig.asp=1.0}
+
+fig_nums(
+  name    = "guucatch", level = 1, display = FALSE,
+  caption = "Rode poon aanvoer per statistisch vak")
+
+knitr::include_graphics(path=file.path(onedrive, "reports", "figures", paste("GUU", "catchbyrect.jpg", sep="_")))
+
+```
+
+_`r fig_nums("guucatch")`_
+
+\newpage
+
+```{r sqrcatch, echo=FALSE, message=FALSE, warning=FALSE, comment=NA, fig.asp=1.0}
+
+fig_nums(
+  name    = "sqrcatch", level = 1, display = FALSE,
+  caption = "Pijlinktvis aanvoer per statistisch vak")
+
+knitr::include_graphics(path=file.path(onedrive, "reports", "figures", paste("SQR", "catchbyrect.jpg", sep="_")))
+
+```
+
+_`r fig_nums("sqrcatch")`_
+
+\newpage
+
+```{r whgcatch, echo=FALSE, message=FALSE, warning=FALSE, comment=NA, fig.asp=1.0}
+
+fig_nums(
+  name    = "whgcatch", level = 1, display = FALSE,
+  caption = "Wijting aanvoer per statistisch vak")
+
+knitr::include_graphics(path=file.path(onedrive, "reports", "figures", paste("WHG", "catchbyrect.jpg", sep="_")))
+
+```
+
+_`r fig_nums("whgcatch")`_
+
+\newpage
+
+\newpage
+
+```{r ctccatch, echo=FALSE, message=FALSE, warning=FALSE, comment=NA, fig.asp=1.0}
+
+fig_nums(
+  name    = "ctccatch", level = 1, display = FALSE,
+  caption = "Inktvis aanvoer per statistisch vak")
+
+knitr::include_graphics(path=file.path(onedrive, "reports", "figures", paste("CTC", "catchbyrect.jpg", sep="_")))
+
+```
+
+_`r fig_nums("ctccatch")`_
 
 \newpage
 
@@ -369,9 +528,9 @@ _`r tab_nums("cpuepersoort2")`_
 
 Vangst afwijking ten opzichte van gemiddelde
 
-```{r cpuepersoort, echo=FALSE, message=FALSE, warning=FALSE, comment=NA, fig.asp=1.0}
+```{r cpuepersoort3, echo=FALSE, message=FALSE, warning=FALSE, comment=NA, fig.asp=1.0}
 
-tab_nums(
+fig_nums(
   name    = "catchdeviation", 
   level = 1, display = FALSE,
   caption = "Vangst afwijking per soort")
@@ -414,4 +573,4 @@ p %>%
 
 ```
 
-_`r tab_nums("cpuepersoort")`_
+_`r fig_nums("catchdeviation")`_

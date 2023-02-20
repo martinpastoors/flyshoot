@@ -1,8 +1,10 @@
 library(xml2)
 library(tidyverse)
+library(lubridate)
 
 rm(list=ls())
 
+source("../prf/r/my utils.R")
 
 filelist <- list.files(
   path=file.path("C:/Users/MartinPastoors/Martin Pastoors/FLYSHOOT - General/data"),
@@ -17,6 +19,10 @@ filename = filelist[1]
 # filename = filelist[2]
 # filename = filelist[3]
 filename = filelist[1371]
+
+filename = filelist[grep("FAR20120706105018-1", filelist)]
+filename = filelist[grep("FAR20120706", filelist)]
+filename = filename[3]
 
 read_olrac <- function(filename) {
   
@@ -132,15 +138,15 @@ read_olrac <- function(filename) {
       far_df %>% 
       filter(is.na(NLERS_id)) %>% 
       
-      mutate(NLERS_id = c("NAD","NFR","RN","RD","RT")) %>% 
+      mutate(NLERS_id = c("NAD","NFR","RNNEW","RD","RT")) %>% 
       pivot_wider(names_from = NLERS_id, values_from = NLERS)
     
     message1 <-
       far_df %>% 
       filter(NLERS_id != "NLLOG") %>% 
       unnest(NLERS) %>% 
-      pivot_wider(names_from = NLERS_id, values_from = NLERS) %>% 
-      rename(RNOLD = RN)
+      pivot_wider(names_from = NLERS_id, values_from = NLERS)  
+      # rename(RNOLD = RN)
     
     tmp <-
       far_df %>% 
@@ -234,15 +240,15 @@ read_olrac <- function(filename) {
 
 }
   
-olrac <- data.frame(stringsAsFactors = FALSE)
+raw <- data.frame(stringsAsFactors = FALSE)
 
 for (i in 1:length(filelist)) {
-# for (i in 1371:2103) {
+# for (i in 1:100) {
   
   print(i)
   
-  olrac <- bind_rows(
-    olrac,
+  raw <- bind_rows(
+    raw,
     read_olrac(filelist[i])  
   )
   
@@ -250,13 +256,39 @@ for (i in 1:length(filelist)) {
   
 }
 
-olrac <- 
-  olrac %>% 
-  unnest(names(.)) %>% 
+raw <- olrac
+
+far <-
+  raw %>% 
+  unnest(cols = names(.)) %>% 
+  filter(is.na(NLERS_id)) %>% 
   mutate(WT   = as.numeric(WT)) %>% 
   mutate(date = lubridate::ymd(RD)) %>% 
   mutate(year = lubridate::year(date))
-  
+
+corr <-
+  raw %>% 
+  unnest(cols = names(.)) %>% 
+  filter(!is.na(NLERS_id)) %>% 
+  group_by(RN) %>% 
+  filter(RD == max(RD), RT == max(RT)) %>% 
+  mutate(WT   = as.numeric(WT)) %>% 
+  mutate(date = lubridate::ymd(RD)) %>% 
+  mutate(year = lubridate::year(date))
+
+
+olrac <-
+  far %>% 
+  filter(RN %notin% corr$RN) %>% 
+  bind_rows(corr) %>% 
+  filter(year >= 2012) 
+
+# ignore
+remains <-
+  corr %>% 
+  filter(RN %notin% far$RN)
+
+
 save(olrac, file="C:/Users/MartinPastoors/Martin Pastoors/FLYSHOOT - General/data/olrac.RData")
 load(file="C:/Users/MartinPastoors/Martin Pastoors/FLYSHOOT - General/data/olrac.RData")
 
@@ -289,7 +321,6 @@ aanvoer <-
 
 # compare
 olrac %>% 
-  filter(year >= 2012) %>% 
   mutate(vessel = gsub("-","", XR)) %>% 
   group_by(vessel, year) %>% 
   summarise(weight = sum(WT, na.rm=TRUE)) %>% 
@@ -300,3 +331,25 @@ olrac %>%
   theme_bw() +
   geom_bar(aes(fill=source), position=position_dodge2(preserve="single" ), stat="identity") +
   facet_wrap(~vessel)
+
+# topspecies
+topspecies <-
+  olrac %>% 
+  group_by(SN) %>% 
+  summarise(WT = sum(WT, na.rm=TRUE)) %>% 
+  arrange(desc(WT)) %>% 
+  slice_head(n=15)
+
+# cpue
+olrac %>% 
+  filter(SN %in% topspecies$SN) %>% 
+  mutate(FO = as.integer(FO)) %>% 
+  filter(FO > 0) %>% 
+  mutate(catchperhaul = WT / FO) %>% 
+  group_by(SN) %>% 
+  mutate(catchperhaul = DescTools::Winsorize(catchperhaul, probs=c(0.05, 0.95))) %>% 
+  
+  ggplot(aes(x=year, y=catchperhaul)) +
+  theme_bw() +
+  geom_boxplot(aes(group=year)) +
+  facet_wrap(~SN, scales="free_y")

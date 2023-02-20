@@ -218,20 +218,20 @@ haul <-
   haul %>% 
   filter(trip %notin% c("2023320", "2023237", "2023064")) 
 
-save(haul, file=file.path(my_rdata_drive, "haul.RData"))
+save(haul, file=file.path(onedrive, "haul.RData"))
 
 trip <-
   trip %>% 
   filter(trip %notin% c("2023320", "2023237", "2023064")) 
 
-save(trip, file=file.path(my_rdata_drive, "trip.RData"))
+save(trip, file=file.path(onedrive, "trip.RData"))
 
 
 # elog vesselname change
 elog <-
   elog %>% 
   mutate(vessel = ifelse(vessel=="SL09", "SL9", vessel)) 
-save(elog, file=file.path(my_rdata_drive, "elog.RData"))
+save(elog, file=file.path(onedrive, "elog.RData"))
 
 # plot of total catch vs aanvoer
 t1 <-
@@ -276,4 +276,71 @@ full_join(t1, t2, by=c("vessel","trip","haul")) %>%
   summarise(n = n()) %>% 
   mutate(prop = 100*n/sum(n))
 
-  
+# --------------------------------------------------------------------------------
+# Allocating vessel and trips to certain datasets
+# --------------------------------------------------------------------------------
+elog <-
+  elog %>% 
+  mutate(
+    vessel = ifelse (year==2023 & vessel=="" & trip=="2023241", "SCH65", vessel),
+    vessel = ifelse (year==2023 & vessel=="" & trip %in% c("2023317", "2023318","2023324"), "SCH135",vessel)
+  )
+
+tmp <-
+  elog %>% 
+  mutate(
+    trip = ifelse (date >= dmy("2/1/2023") & date <= dmy("5/1/2023")  & trip=="" , "2023062", trip),
+    trip = ifelse (date >= dmy("9/1/2023") & date <= dmy("12/1/2023") & trip=="" , "2023063", trip),
+  )
+
+tmp %>% filter(trip=="2023063") %>% View()
+
+elog <-
+  elog %>% 
+  filter(!(vessel=="Z99" & year==2023 & trip==""))
+
+tmp %>% filter(vessel=="Z99", year==2023) %>% group_by(trip) %>% summarise(weight = sum(weight))
+save(elog, file=file.path(onedrive, "elog.RData"))
+
+# --------------------------------------------------------------------------------
+# Allocating vessel and trips to certain datasets
+# --------------------------------------------------------------------------------
+elog <-
+  elog %>% 
+  mutate(species        = ifelse(is.na(species), SN, species)) %>% 
+  mutate(datetime       = ifelse(is.na(datetime), date + lubridate::hm(RT), datetime) ) %>% 
+  mutate(datetime       = as_datetime(datetime)) %>% 
+  mutate(meshsize       = as.integer(ifelse(is.na(meshsize), ME, meshsize))) %>% 
+  mutate(geartype       = ifelse(is.na(geartype),GE,geartype)) %>% 
+  mutate(faozone        = ifelse(is.na(faozone),FA, faozone)) %>% 
+  mutate(economiczone   = ifelse(is.na(economiczone),EZ,economiczone)) %>% 
+  mutate(weight         = as.numeric(ifelse(is.na(weight),WT,weight))) %>% 
+  mutate(rect           = ifelse(is.na(rect),SR,rect)) %>% 
+  mutate(freshness      = ifelse(is.na(freshness),FE,freshness)) %>% 
+  mutate(lon            = ifelse(is.na(lon),longitude,lon)) %>% 
+  mutate(lat            = ifelse(is.na(lat),latitide,lat)) %>% 
+  rename(lat2 = lat, lon2 = lon) %>% 
+  rename(version = VRS) %>% 
+  rename(vesselidentifier = NFR) %>% 
+  rename(vesselidentifier2 = RV) %>% 
+  rename(fishingoperations = FO) %>% 
+  rename(entryidentifier = RN) %>% 
+  mutate(entryidentifier = ifelse(!is.na(RNNEW), RNNEW, entryidentifier)) %>% 
+  mutate(quarter         = lubridate::quarter(date)) %>% 
+  mutate(month           = lubridate::month(date)) %>% 
+  mutate(yday            = lubridate::yday(date)) %>% 
+  left_join(rect_df, by="rect") %>% 
+  dplyr::select(-NAD, -SN, -RT, -XR, -'NA', -RD, -TV, -CVD, -CVO, -MA, -ME, -GE, -FA, -EZ, -WT, -SR, -NLSPN, -RNNEW,
+                -NLERS_id, -FE, -DA, -DD, -ET, -MD, -MV, -SWE, -RE, -NH, -TI, -TN, -VT, -longitude, -latitide)
+
+glimpse(t) 
+
+count_na(t) %>% as.data.frame() %>% setNames("n") %>% rownames_to_column(var="variable") %>% arrange(variable)
+t %>% ungroup() %>% summarise_all(sum(is.na(names(.))))
+t %>% filter(is.na(date)) %>% View()
+t %>% filter(lat==0) %>% View()
+sort(unique(t$lon))
+
+elog_raw <- elog
+save(elog_raw, file=file.path(onedrive, "elog_raw.RData"))
+save(elog, file=file.path(onedrive, "elog.RData"))
