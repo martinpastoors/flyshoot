@@ -89,9 +89,13 @@ load(file.path(onedrive, "trip.RData"))
 # removing erroneous trips
 # --------------------------------------------------------------------------------
 
-elog %>% filter(vessel=="SL09") %>% distinct(vessel, trip)
-elog <- elog %>% filter(vessel !="SL09") 
-save(elog,  file = file.path(onedrive, "elog.RData"))  
+# haul %>% filter(vessel=="SCH135") %>% group_by(vessel, trip) %>% summarise(n=n())
+haul <- haul %>% mutate(trip = ifelse(vessel=="SCH135"& trip=="2023008", "2023325",trip)) 
+save(haul,  file = file.path(onedrive, "haul.RData"))
+
+# elog %>% filter(vessel=="SL09") %>% distinct(vessel, trip)
+# elog <- elog %>% filter(vessel !="SL09") 
+# save(elog,  file = file.path(onedrive, "elog.RData"))  
 
 # --------------------------------------------------------------------------------
 # fixing kisten problem
