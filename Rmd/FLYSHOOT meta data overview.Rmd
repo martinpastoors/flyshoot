@@ -302,3 +302,57 @@ comb %>%
 ```
 
 _`r tab_nums("t")`_
+
+\newpage
+
+```{r aanvoerendiscards, echo=FALSE, fig.align="center", fig.asp=1.2, message=FALSE, warning=FALSE}
+
+fig_nums(
+  name    = "aanvoerentotalevangst", level   = 1, display = FALSE,
+  caption = "Vergelijking van aanvoer (Marelec) en totale vangst (schatting)")
+
+t1 <-
+  h %>% 
+  filter(year == 2023, vessel != "Z99") %>% 
+  group_by(vessel, trip, date) %>% 
+  summarise(totalcatch = sum(totalcatch, na.rm=TRUE)) 
+
+t2 <-
+  m %>% 
+  mutate(date = as.Date(datetime)) %>% 
+  mutate(year = lubridate::year(date)) %>%
+  filter(year == 2023, vessel != "Z99") %>% 
+  group_by(vessel, trip, date) %>% 
+  summarise(aanvoer = sum(gewicht, na.rm=TRUE)) 
+  
+left_join(t1, t2) %>% 
+  drop_na(totalcatch, aanvoer) %>% 
+  mutate(discards = totalcatch-aanvoer) %>% 
+  pivot_longer(names_to = "variable", values_to = "data", c(aanvoer, discards)) %>% 
+  
+  ggplot(aes(x=date, y=data)) +
+  theme_publication() +
+  # theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  geom_bar(aes(fill=variable),
+           stat="identity", position=position_dodge(), alpha=0.8, width=0.5, just=0.8) +
+  # scale_x_continuous(breaks=seq(1,max(t1$haul, m$haul, na.rm=TRUE), 1)) +
+  labs(x="", y="kg", title="aanvoer en discards per dag") +
+  facet_wrap(~vessel, ncol=1)
+    
+left_join(t1, t2) %>% 
+  drop_na(totalcatch, aanvoer) %>% 
+  mutate(discards = totalcatch-aanvoer) %>% 
+  pivot_longer(names_to = "variable", values_to = "data", c(aanvoer, discards)) %>% 
+  group_by(vessel, variable) %>% 
+  summarise(data = sum(data,na.rm=TRUE)) %>% 
+  
+  ggplot(aes(x=vessel, y=data)) +
+  theme_publication() +
+  geom_bar(aes(fill=variable), 
+           stat="identity", position=position_dodge(), alpha=0.8, width=0.5) +
+  # scale_x_continuous(breaks=seq(1,max(t1$haul, m$haul, na.rm=TRUE), 1)) +
+  labs(x="", y="kg", title="aanvoer en discards per schip") 
+    
+
+
+```
