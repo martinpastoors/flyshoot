@@ -164,6 +164,10 @@ if(!is_empty(filelist)){
           escapepanel   = escapepanelyn         
         )  %>%  
         
+        # remove shootns or shootew if empty position
+        mutate(shootns = ifelse(is.na(shootlat), NA, shootns)) %>% 
+        mutate(shootew = ifelse(is.na(shootlong), NA, shootew)) %>% 
+        
         # fill up empty cells
         mutate(across (c("date","shootlat","shootns", "shootlong", "shootew",
                          "winddirection","windforce"),
@@ -640,6 +644,8 @@ if(!is_empty(filelist)){
       
       dplyr::select(-lat, -lon) %>% 
       left_join(rect_df, by="rect") %>% 
+      mutate(lon = lon + 0.5) %>% 
+      mutate(lat = lat + 0.25) %>% 
       
       dplyr::select_if(names(.) %in% names(elog)) %>%
       

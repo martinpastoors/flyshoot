@@ -93,9 +93,10 @@ load(file.path(onedrive, "trip.RData"))
 haul <- haul %>% mutate(trip = ifelse(vessel=="SCH135"& trip=="2023008", "2023325",trip)) 
 save(haul,  file = file.path(onedrive, "haul.RData"))
 
-# elog %>% filter(vessel=="SL09") %>% distinct(vessel, trip)
-# elog <- elog %>% filter(vessel !="SL09") 
-# save(elog,  file = file.path(onedrive, "elog.RData"))  
+# elog %>% filter(grepl("325", trip) & vessel=="") %>% View()
+# elog <- elog %>% filter(!(vessel =="" & trip=="2023325"))
+# elog <- elog %>% distinct()
+# save(elog,  file = file.path(onedrive,  "elog.RData"))
 
 # --------------------------------------------------------------------------------
 # fixing kisten problem
@@ -348,3 +349,65 @@ sort(unique(t$lon))
 elog_raw <- elog
 save(elog_raw, file=file.path(onedrive, "elog_raw.RData"))
 save(elog, file=file.path(onedrive, "elog.RData"))
+
+t <- 
+  read.csv(file=file.path(get_onedrive(team="Martin Pastoors", site="FLYSHOOT - General/data"), 
+                        "WMR Landings_Discards_all_hauls.csv")) %>% 
+  lowcase() %>% 
+  group_by(ship, tripcode) %>% 
+  mutate(haul = row_number()) %>%
+  mutate(date = lubridate::ymd(date)) %>% 
+  rename(vessel=ship, landings = kgland, discards = kgdisc) %>% 
+  mutate(catch = landings + discards) %>% 
+  mutate(percdiscards = discards / catch) 
+
+e <-
+  elog %>% 
+  filter(paste0(vessel, date) %in% paste0(t$vessel, t$date)) %>% 
+  group_by(vessel, trip, date, rect, lat, lon) %>% 
+  summarise(landings = sum(weight, na.rm=TRUE))
+
+comb <-
+  t %>% 
+  group_by(vessel, tripcode, date) %>% 
+  summarise(
+    nhauls       = n_distinct(haul),
+    catch        = sum(catch, na.rm=TRUE),
+    landings_wmr = sum(landings, na.rm=TRUE),
+    discards     = sum(discards, na.rm=TRUE)
+  ) %>% 
+  left_join(e, by=c("vessel", "date")) %>% 
+  mutate(landings_diff = landings - landings_wmr)
+
+# plot of difference in landings in WMR and elog data
+comb %>% 
+  ggplot(aes(x=date, y=landings_diff)) +
+  theme_publication() +
+  geom_bar(stat="identity") +
+  facet_wrap(~tripcode, scales="free_x")
+
+
+t %>% 
+  ggplot(aes(x=haul, y=kg_disc)) +
+  theme_publication() +
+  geom_bar(stat="identity") + 
+  facet_wrap(~trip_code, scales = "free_x")
+
+t %>% 
+  mutate(perc_disc = kg_disc/kg_total) %>% 
+  ggplot(aes(x=haul, y=perc_disc)) +
+  theme_publication() +
+  geom_bar(stat="identity") + 
+  facet_wrap(~trip_code, scales = "free")
+
+t %>% 
+  group_by(ship, trip_code, DATE) %>% 
+  summarise(
+    kg_land = sum(kg_land),
+    kg_disc = sum(kg_disc),
+    kg_total = sum(kg_total),
+  ) %>% 
+  ggplot(aes(x=DATE, y=kg_disc)) +
+  theme_publication() +
+  geom_bar(stat="identity") + 
+  facet_wrap(~trip_code, scales = "free_x")

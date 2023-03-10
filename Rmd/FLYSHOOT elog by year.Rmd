@@ -83,7 +83,11 @@ onedrive <- get_onedrive(team="Martin Pastoors", site="FLYSHOOT - General")
 # load datasets
 haul   <- loadRData(file.path(onedrive, "rdata/haul.RData"))
 kisten <- loadRData(file.path(onedrive, "rdata/kisten.RData")) 
-elog   <- loadRData(file.path(onedrive, "rdata/elog.RData")) %>% mutate(species = toupper(species))
+elog   <- loadRData(file.path(onedrive, "rdata/elog.RData")) %>% 
+  mutate(species = toupper(species)) %>% 
+  mutate(species = ifelse(species=="JAX","HOM",species))
+
+sort(unique(elog$species))
 
 yrs     <- 2012:2022
 mnths   <- NA
@@ -257,13 +261,19 @@ fig_nums(
   level = 1, display = FALSE,
   caption = "Vangst per soort en per dag (kg/dag)")
 
-catch %>% 
+# catch %>% 
+e %>% 
+  dplyr::mutate(date = as.Date(datetime)) %>% 
+  dplyr::group_by(year, species, scientific_name, english_name, dutch_name, date) %>% 
+  dplyr::summarize(catch_day = sum(weight, na.rm=TRUE)) %>% 
   filter(species %in% top$species) %>% 
-  
+  View()
+
   ggplot(aes(x=year, y=catch_day)) +
   theme_publication() +
-  geom_line(aes(colour=vessel)) +
-  geom_point(aes(colour=vessel)) +
+  geom_boxplot(aes(group=year)) +
+  # geom_line(aes(colour=vessel)) +
+  # geom_point(aes(colour=vessel)) +
   expand_limits(y=0) +
   facet_wrap(~species, scales="free_y")
 
@@ -574,3 +584,113 @@ p %>%
 ```
 
 _`r fig_nums("catchdeviation")`_
+
+```{r cpuemodel, echo=FALSE, message=FALSE, warning=FALSE, comment=NA, fig.asp=1.0}
+
+fig_nums(
+  name    = "cpuemodel", 
+  level = 1, display = FALSE,
+  caption = "CPUE gemodelleerd")
+
+t <-
+  e %>% 
+  dplyr::mutate(date = as.Date(datetime)) %>% 
+  dplyr::mutate(month = lubridate::month(date)) %>%
+  dplyr::mutate(week = lubridate::week(date)) %>%
+  dplyr::rename(division=faozone) %>% 
+  dplyr::mutate(year  = factor(year, levels=sort(unique(e$year)))) %>%
+  dplyr::group_by(year, species, scientific_name, english_name, 
+                  dutch_name, date, month, week, division, rect) %>% 
+  dplyr::summarize(
+    catch_week = sum(weight, na.rm=TRUE),
+    ndays      = n_distinct(date)) %>% 
+  filter(species %in% top$species) 
+
+# model formulation
+model <- formula(paste("catch ~ year + month + division + rect + vessel + offset(log(ndays))"))
+
+# years
+years <-
+  byweek %>%
+  filter(!is.na(stock)) %>% 
+  filter(stock != "her-ash") %>% 
+  distinct(stock, year) %>% 
+  arrange(stock, year)
+
+# Get the unique variables for predictions
+temp <-
+  t %>%
+  na.omit() %>% 
+  tidyr::unite("newvar", c("month", "division","rect"), sep="/") %>%
+  group_by(stock, efficiency, newvar) %>%
+  summarise(
+    n = n(), 
+    catch = sum(catch, na.rm=TRUE))  %>% 
+  group_by(stock, efficiency) %>%
+  arrange(-catch) %>% 
+  group_by(stock, efficiency) %>%
+  filter(row_number() == 1) %>% 
+  ungroup() %>% 
+  dplyr::select(-n, -catch) %>%
+  mutate(ndays  = 7) %>% 
+  tidyr::separate(newvar, into=c("month","division","depth_cat","gt_cat"), sep="/") 
+
+# get the predictor dataset
+newdat <-
+  left_join(years, temp, by=c("stock")) %>% 
+  group_by(stock, efficiency) %>% 
+  summarise(data = list(tibble(month, division, depth_cat, ndays, gt_cat, year)))
+
+
+# fit model
+x <-
+  byweek %>% 
+  na.omit() %>% 
+  filter(!is.na(stock)) %>% 
+  filter(stock != "her-ash") %>% 
+  group_by(stock, efficiency) %>% 
+  nest() %>% 
+  summarise(
+    fit       = purrr::map(data, ~glm.nb(model, data = .x)),
+    tidied    = purrr::map(fit, tidy),
+    augmented = purrr::map(fit, augment)) %>% 
+  group_by(stock, efficiency) %>% 
+  
+  # add the prediction data
+  left_join(newdat, by=c("stock","efficiency")) %>% 
+  
+  # do the prediction
+  rowwise() %>% 
+  mutate(pred =  list(
+                    data.frame(
+                      fit = predict(fit, unnest(data),se.fit=T,type="link")[c(1)],
+                      se  = predict(fit, unnest(data),se.fit=T,type="link")[c(2)]) %>% 
+                      setNames(c("pred","se")) %>% 
+                      as.tibble())) %>% 
+  ungroup()
+
+p <-
+  x %>% 
+  dplyr::select(-fit, -augmented, -tidied) %>% 
+  unnest(c(pred, data))  %>% 
+  mutate(
+    est  = exp(pred),
+    upr  = exp(pred + (1.96 * se)),
+    lwr  = exp(pred - (1.96 * se))
+  )
+
+p %>% 
+  # filter(efficiency==0.025) %>% 
+  mutate(year = as.integer(as.character(year))) %>% 
+  ggplot(aes(x=year, y=est, group=efficiency)) +
+  theme_publication() +
+  geom_line(aes(colour=as.factor(efficiency))) +
+  geom_ribbon(aes(ymin=lwr, ymax=upr, fill=as.factor(efficiency)), alpha=0.2) +
+  expand_limits(y=0) +
+  scale_x_continuous(breaks=seq(min(as.integer(years$year)), max(as.integer(years$year)),2)) +
+  facet_wrap(~stock, scales="free_y")
+
+
+
+
+```
