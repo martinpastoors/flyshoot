@@ -1,0 +1,189 @@
+---
+output:
+  word_document:
+    reference_docx: ../report_template.dotx
+---
+
+
+```{r setup, include=FALSE}
+
+# ==========================================================================================================
+# FLYSHOOT SURVEY and CPUE
+# 
+# 11/01/2023 first coding
+# 16/03/2023 full GLM modelling of top 15 species in the catch
+# 17/03/2023 combining survey and cpue indices
+# ==========================================================================================================
+
+knitr::opts_chunk$set(echo = FALSE,	message = FALSE,	warning = FALSE,	comment = "",	crop = TRUE )
+knitr::opts_chunk$set(fig.width=10) 
+
+options(dplyr.summarise.inform = FALSE)
+
+# Reset lists
+rm(list=ls())
+
+recalculatemaps <- TRUE              # recalculate catch maps (takes relatively long)
+
+# Libraries
+library(rmarkdown)                   # note: requires knitr 1.21
+
+require(tidyverse, quietly=TRUE)     # combined package of dplyr, tidyr, ggplot, readr, purrr and tibble
+require(lubridate, quietly=TRUE)     # data handling
+require(reshape2, quietly=TRUE)      # reshaping data; e.g. cast
+require(RColorBrewer)                # colour schemes
+library(viridis)
+library(pander)
+
+library(captioner)                   # for captions
+tab_nums <- captioner::captioner(prefix = "Table " , levels=1, type=c("n"), infix=".")
+fig_nums <- captioner::captioner(prefix = "Figure ", levels=1, type=c("n"), infix=".")
+
+# Source all the utils
+source("../../prf/R/my utils.r")
+
+get_onedrive <- function (team="Martin Pastoors", site="FLYSHOOT - General") {
+  
+  if (Sys.info()['sysname'] == 'Windows') {
+    
+    # set onedrive directory
+    if(dir.exists(file.path(Sys.getenv('USERPROFILE'), team, site))) {
+      onedrive <- file.path(Sys.getenv('USERPROFILE'), team, site)   
+    } else if(dir.exists(file.path('C:/DATA/PFA', team, site))) {
+      onedrive <- file.path('C:/DATA/PFA', team, site)
+    } else if(dir.exists(file.path('D:/DATA/PFA', team, site))) {
+      onedrive <- file.path('D:/DATA/PFA', team, site)
+    } else {
+      stop("Onedrive directory not found")
+    }
+  }
+  
+  return(onedrive)
+}
+
+# set onedrive directory
+onedrive <- get_onedrive(team="Martin Pastoors", site="FLYSHOOT - General")
+cpue <- readr::read_rds(file=file.path(onedrive,"rdata",paste0("CPUE_","27.7.d-27.7.e",".rds"))) %>% 
+  filter(efficiency==0) %>% 
+  dplyr::select(-anova, -coeff, -aic, -vessel, -quarter, -lon, -effort, -efficiency, -pred, -se) %>% 
+  
+  # tidyr::pivot_longer(names_to = "var", values_to = "data", est:lwr) %>% 
+  filter(est > 0) %>% 
+  group_by(species) %>% 
+  mutate(mean = mean(est))  %>% 
+  mutate(score = est/mean)  %>% 
+  mutate(score_lwr = score - (est-lwr)/mean)  %>% 
+  mutate(score_upr = score + (upr-est)/mean)  %>% 
+
+  dplyr::select(-est, -lwr, -upr, -mean) %>% 
+  rename(est=score, lwr=score_lwr, upr=score_upr) %>% 
+  mutate(source="CPUE") %>% 
+  mutate(year=as.integer(as.character(year)))
+
+bootdir <- "C:/DATA/DATRAS/boot"
+sur  <- readr::read_rds(file=file.path(bootdir, "fr-cgfs_boot.rds")) %>% 
+  filter(var=="B") %>% 
+  filter(year >= 2015) %>% 
+  filter(year != 2020) %>% 
+  filter(species %in% cpue$species) %>% 
+  rename(est=mean, upr=upper.ci, lwr=lower.ci) %>% 
+  
+  dplyr::select(-var, -variable, -family, -order) %>% 
+  filter(est > 0) %>% 
+  group_by(species) %>% 
+  mutate(mean = mean(est))  %>% 
+  mutate(score = est/mean)  %>% 
+  mutate(score_lwr = score - (est-lwr)/mean)  %>% 
+  mutate(score_upr = score + (upr-est)/mean)  %>% 
+
+  dplyr::select(-est, -lwr, -upr, -mean) %>% 
+  rename(est=score, lwr=score_lwr, upr=score_upr) %>% 
+  mutate(source="FR-CGFS") %>% 
+  mutate(year=as.integer(as.character(year)))
+
+
+# sur %>% dplyr::select(year, est, lwr, upr, species) %>% pivot_longer(names_to = "var", values_to = "data", c(est, lwr, upr)) %>% 
+#   ggplot(aes(x=year, y=data, colour=var)) + geom_line() + facet_wrap(~species, scales="free_y")
+
+# sur %>% dplyr::select(year, est=score, lwr=score_lwr, upr=score_upr, species) %>% pivot_longer(names_to = "var", values_to = "data", c(est, lwr, upr)) %>% 
+#   ggplot(aes(x=year, y=data, colour=var)) + geom_line() + facet_wrap(~species, scales="free_y")
+
+
+```
+
+
+# FLYSHOOT SURVEY and CPUE analysis 
+
+M.A. Pastoors
+
+Report generated: `r format(Sys.time(), '%d/%m/%Y')`
+
+&nbsp;
+
+&nbsp;
+
+&nbsp;
+
+&nbsp;
+
+&nbsp;
+
+&nbsp;
+
+&nbsp;
+
+&nbsp;
+
+&nbsp;
+
+&nbsp;
+
+&nbsp;
+
+```{r, echo=FALSE, out.width = "200px", fig.align="left", message=FALSE, warning=FALSE, cache=FALSE}
+
+  knitr::include_graphics("../MPFF logo with text.png")
+
+```
+
+\newpage
+
+**Executive summary**
+
+[ summary here ]
+
+# Introduction
+
+
+# Material and methods
+
+
+# Results
+
+
+
+```{r timetrends, echo=FALSE, fig.asp=1.2, message=FALSE, warning=FALSE, comment=NA}
+
+fig_nums(name    = "timetrends", level = 1, display = FALSE, caption = "GLM, time trends")
+
+# catch by week
+
+bind_rows(sur, cpue) %>% 
+  mutate(year = as.integer(as.character(year))) %>% 
+  ggplot(aes(x=year, y=est)) +
+  theme_publication() +
+  
+  # geom_line(aes(colour=source)) +
+  # geom_point(aes(colour=source)) +
+  ggplot2::geom_pointrange(ggplot2::aes(year, est, ymin = lwr, ymax = upr, colour=source)) +
+  ggplot2::geom_line(ggplot2::aes(year, est, colour=source)) +
+  geom_ribbon(aes(ymin=lwr, ymax=upr, fill=source), alpha=0.2) +
+  # expand_limits(y=0) +
+  # scale_x_continuous(breaks=seq(min(as.integer(ac(years$year))), max(as.integer(ac(years$year))),2)) +
+  facet_wrap(~species, scales="free_y")
+
+
+```
+
+_`r fig_nums("timetrends")`_
+

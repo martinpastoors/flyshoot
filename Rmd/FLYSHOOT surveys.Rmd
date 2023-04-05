@@ -1,0 +1,295 @@
+---
+output:
+  word_document:
+    reference_docx: ../report_template.dotx
+---
+
+
+```{r setup, include=FALSE}
+
+# =======================================================================================================
+# FLYSHOOT surveys
+# 
+# 11/01/2023 first coding
+# 16/03/2023 full GLM modelling of top 15 species in the catch
+# 17/03/2023 combining survey and cpue indices
+# 30/03/2023 only survey info for top species
+# =======================================================================================================
+
+knitr::opts_chunk$set(echo = FALSE,	message = FALSE,	warning = FALSE,	comment = "",	crop = TRUE )
+knitr::opts_chunk$set(fig.width=10) 
+
+options(dplyr.summarise.inform = FALSE)
+
+# Reset lists
+rm(list=ls())
+
+recalculatemaps <- TRUE              # recalculate catch maps (takes relatively long)
+
+# Libraries
+library(rmarkdown)                   # note: requires knitr 1.21
+
+require(tidyverse, quietly=TRUE)     # combined package of dplyr, tidyr, ggplot, readr, purrr and tibble
+require(lubridate, quietly=TRUE)     # data handling
+require(reshape2, quietly=TRUE)      # reshaping data; e.g. cast
+require(RColorBrewer)                # colour schemes
+library(viridis)
+library(pander)
+
+library(captioner)                   # for captions
+tab_nums <- captioner::captioner(prefix = "Table " , levels=1, type=c("n"), infix=".")
+fig_nums <- captioner::captioner(prefix = "Figure ", levels=1, type=c("n"), infix=".")
+
+# Source all the utils
+source("../../prf/R/my utils.r")
+
+get_onedrive <- function (team="Martin Pastoors", site="FLYSHOOT - General") {
+  
+  if (Sys.info()['sysname'] == 'Windows') {
+    
+    # set onedrive directory
+    if(dir.exists(file.path(Sys.getenv('USERPROFILE'), team, site))) {
+      onedrive <- file.path(Sys.getenv('USERPROFILE'), team, site)   
+    } else if(dir.exists(file.path('C:/DATA/PFA', team, site))) {
+      onedrive <- file.path('C:/DATA/PFA', team, site)
+    } else if(dir.exists(file.path('D:/DATA/PFA', team, site))) {
+      onedrive <- file.path('D:/DATA/PFA', team, site)
+    } else {
+      stop("Onedrive directory not found")
+    }
+  }
+  
+  return(onedrive)
+}
+
+# set onedrive directory
+onedrive <- get_onedrive(team="Martin Pastoors", site="FLYSHOOT - General")
+datrasdir  <- "../../tidydatras/vignettes/articles"
+
+top      <- readr::read_rds(file=file.path(onedrive,"rdata", "top.rds")) 
+
+# CGFS
+cgfs  <- 
+  readr::read_rds(file=file.path(datrasdir, "cgfs index.rds")) %>% 
+  rename(year=x) 
+
+cgfs_temp <-
+  cgfs %>% 
+  filter(year %in% 2015:2022) %>% 
+  group_by(english_species) %>% 
+  summarise(
+    z = mean(y, na.rm=TRUE),
+    zmin = mean(ymin, na.rm=TRUE),
+    zmax = mean(ymax, na.rm=TRUE)
+  )
+
+cgfs <-
+  cgfs %>% 
+  left_join(cgfs_temp, by="english_species") %>% 
+  mutate(
+    est = y/z-1,
+    upr = ymax/zmax-1,
+    lwr = ymin/zmin-1
+  ) 
+
+# IBTS Q1
+ibtsq1  <- 
+  readr::read_rds(file=file.path(datrasdir, "ibtsq1 index.rds")) %>% 
+  rename(year=x) 
+
+ibtsq1_temp <-
+  ibtsq1 %>% 
+  filter(year %in% 2015:2022) %>% 
+  group_by(english_species) %>% 
+  summarise(
+    z = mean(y, na.rm=TRUE),
+    zmin = mean(ymin, na.rm=TRUE),
+    zmax = mean(ymax, na.rm=TRUE)
+  )
+
+ibtsq1 <-
+  ibtsq1 %>% 
+  left_join(ibtsq1_temp, by="english_species") %>% 
+  mutate(
+    est = y/z-1,
+    upr = ymax/zmax-1,
+    lwr = ymin/zmin-1
+  ) 
+
+# IBTS Q3
+ibtsq3  <- 
+  readr::read_rds(file=file.path(datrasdir, "ibtsq3 index.rds")) %>% 
+  rename(year=x) 
+
+ibtsq3_temp <-
+  ibtsq3 %>% 
+  filter(year %in% 2015:2022) %>% 
+  group_by(english_species) %>% 
+  summarise(
+    z = mean(y, na.rm=TRUE),
+    zmin = mean(ymin, na.rm=TRUE),
+    zmax = mean(ymax, na.rm=TRUE)
+  )
+
+ibtsq3 <-
+  ibtsq3 %>% 
+  left_join(ibtsq3_temp, by="english_species") %>% 
+  mutate(
+    est = y/z-1,
+    upr = ymax/zmax-1,
+    lwr = ymin/zmin-1
+  ) 
+
+# Channel CPUE
+cpue_channel  <- 
+  readr::read_rds(file=file.path(onedrive,"rdata","CPUE_27.7.d-27.7.e.rds")) 
+
+cpue_channel_temp <-
+  cpue_channel %>% 
+  filter(year %in% 2015:2022) %>% 
+  group_by(english_species) %>% 
+  summarise(
+    z = mean(est, na.rm=TRUE),
+    zmin = mean(lwr, na.rm=TRUE),
+    zmax = mean(upr, na.rm=TRUE)
+  )
+
+cpue_channel <-
+  cpue_channel %>% 
+  left_join(cpue_channel_temp, by="english_species") %>% 
+  mutate(
+    est = est/z-1,
+    upr = upr/zmax-1,
+    lwr = lwr/zmin-1
+  ) %>% 
+  mutate(year = as.numeric(as.character(year))) %>% 
+  dplyr::select(one_of(names(cgfs)))
+
+comb <-
+  cgfs             %>% mutate(source="CGFS") %>% 
+  bind_rows(ibtsq1 %>% mutate(source="IBTSQ1")) %>% 
+  bind_rows(ibtsq3 %>% mutate(source="IBTSQ3")) %>% 
+  bind_rows(cpue_channel %>% mutate(source="CPUE channel")) %>% 
+  mutate(english_species = factor(english_species, levels=top$english_species))
+
+```
+
+
+# FLYSHOOT SURVEY analysis 
+
+M.A. Pastoors
+
+Report generated: `r format(Sys.time(), '%d/%m/%Y')`
+
+&nbsp;
+
+&nbsp;
+
+&nbsp;
+
+&nbsp;
+
+&nbsp;
+
+&nbsp;
+
+&nbsp;
+
+&nbsp;
+
+&nbsp;
+
+&nbsp;
+
+&nbsp;
+
+```{r, echo=FALSE, out.width = "200px", fig.align="left", message=FALSE, warning=FALSE, cache=FALSE}
+
+  knitr::include_graphics("../MPFF logo with text.png")
+
+```
+
+\newpage
+
+**Executive summary**
+
+[ summary here ]
+
+# Introduction
+
+
+# Material and methods
+
+
+# Results
+
+
+
+```{r timetrends2, echo=FALSE, fig.asp=1.2, message=FALSE, warning=FALSE, comment=NA}
+
+fig_nums(name    = "timetrends", level = 1, display = FALSE, caption = "GLM, time trends")
+
+# catch by week
+
+t <-
+  comb %>% 
+  # filter(!(grepl("Black seabream", english_species) & source=="IBTSQ1")) %>% 
+  filter(species %in% slice_head(top, n=8)$species) %>% 
+  filter(!(source == "CGFS" & year < 2015)) %>% 
+  filter(!(source == "CPUE channel"))
+
+t %>% 
+  ggplot(aes(x=year, y=est)) +
+  theme_publication() +
+  
+  # geom_line(aes(colour=source)) +
+  # geom_point(aes(colour=source)) +
+  # ggplot2::geom_pointrange(ggplot2::aes(year, est, ymin = lwr, ymax = upr, colour=source)) +
+  
+  geom_segment(aes(x=2015, xend=2022, y=0, yend=0), linewidth=1) +
+  
+  ggplot2::geom_line(ggplot2::aes(year, est, colour=source)) +
+  geom_ribbon(aes(ymin=lwr, ymax=upr, fill=source), alpha=0.2) +
+  
+  ylim(-(max(abs(t$est))), (max(abs(t$est)))) + 
+  facet_wrap(~english_species, ncol=4)
+
+
+```
+
+_`r fig_nums("timetrends")`_
+
+
+```{r timetrends, echo=FALSE, fig.asp=1.2, message=FALSE, warning=FALSE, comment=NA}
+
+fig_nums(name    = "timetrends2", level = 1, display = FALSE, caption = "GLM, time trends")
+
+# catch by week
+
+t <-
+  comb %>% 
+  # filter(!(grepl("Black seabream", english_species) & source=="IBTSQ1")) %>% 
+  filter(species %in% slice_head(top, n=8)$species) %>% 
+  filter(source %in% c("CPUE channel", "CGFS")) %>% 
+  filter(!(source == "CGFS" & year < 2015)) 
+
+t %>% 
+  ggplot(aes(x=year, y=est)) +
+  theme_publication() +
+  
+  # geom_line(aes(colour=source)) +
+  # geom_point(aes(colour=source)) +
+  # ggplot2::geom_pointrange(ggplot2::aes(year, est, ymin = lwr, ymax = upr, colour=source)) +
+  
+  geom_segment(aes(x=2015, xend=2022, y=0, yend=0), linewidth=1) +
+  
+  ggplot2::geom_line(ggplot2::aes(year, est, colour=source)) +
+  geom_ribbon(aes(ymin=lwr, ymax=upr, fill=source), alpha=0.2) +
+  
+  ylim(-(max(abs(t$est))), (max(abs(t$est)))) + 
+  facet_wrap(~english_species, ncol=4)
+
+
+```
+
+_`r fig_nums("timetrends2")`_

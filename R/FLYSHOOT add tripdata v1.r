@@ -97,7 +97,7 @@ filelist <- list.files(
   pattern="treklijst",
   full.names = TRUE)
 
-# i <- 1
+# i <- 4
 if(!is_empty(filelist)){
   
   for (i in 1:length(filelist)) {
@@ -169,9 +169,9 @@ if(!is_empty(filelist)){
         mutate(shootew = ifelse(is.na(shootlong), NA, shootew)) %>% 
         
         # fill up empty cells
-        mutate(across (c("date","shootlat","shootns", "shootlong", "shootew",
-                         "winddirection","windforce"),
-                       ~zoo::na.locf(.))) %>% 
+        mutate(across (c("date","shootlat","shootns", "shootlong", "shootew"),    ~zoo::na.locf(.))) %>% 
+        {if(!all(is.na(.$winddirection))) { mutate(., across (c("winddirection"), ~zoo::na.locf(.)))} else {.}} %>%
+        {if(!all(is.na(.$windforce)))     { mutate(., across (c("windforce"),     ~zoo::na.locf(.)))} else {.}} %>%
         
         mutate(across (c("vessel", "shootew", "shootns"), 
                        toupper)) %>% 
@@ -633,7 +633,7 @@ if(!is_empty(filelist)){
       mutate(date   = as.Date(catchdate, origin="1899-12-30" , tz="Europe/Amsterdam")) %>% 
       dplyr::select(-catchdate) %>% 
       
-      mutate(landingdate = as.character(landingdate)) %>% 
+      # mutate(landingdate = as.character(landingdate)) %>% 
       
       mutate(
         year       = lubridate::year(date),

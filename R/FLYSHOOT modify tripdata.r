@@ -89,9 +89,21 @@ load(file.path(onedrive, "trip.RData"))
 # removing erroneous trips
 # --------------------------------------------------------------------------------
 
-# haul %>% filter(vessel=="SCH135") %>% group_by(vessel, trip) %>% summarise(n=n())
-haul <- haul %>% mutate(trip = ifelse(vessel=="SCH135"& trip=="2023008", "2023325",trip)) 
-save(haul,  file = file.path(onedrive, "haul.RData"))
+# trip %>% filter(vessel=="SCH153") %>% group_by(vessel, trip) %>% summarise(n=n())
+# trip <- trip %>% filter(vessel!="SCH153") 
+# save(trip,  file = file.path(onedrive,  "trip.RData"))
+
+haul %>% filter(vessel=="Z99") %>% group_by(vessel, trip) %>% summarise(n=n())
+
+haul <- haul %>% mutate(trip = ifelse(vessel=="SL9"& trip=="2023418", "2023417",trip))
+trip <- trip %>% mutate(trip = ifelse(vessel=="SL9"& trip=="2023418", "2023417",trip))
+kisten <- kisten %>% mutate(trip = ifelse(vessel=="SL9"& trip=="2023418", "2023417",trip))
+elog <- elog %>% mutate(trip = ifelse(vessel=="SL9"& trip=="2023418", "2023417",trip)) 
+
+save(haul,   file = file.path(onedrive, "haul.RData"))
+save(trip,   file = file.path(onedrive, "trip.RData"))
+save(kisten, file = file.path(onedrive, "kisten.RData"))
+save(elog,   file = file.path(onedrive, "elog.RData"))
 
 # elog %>% filter(grepl("325", trip) & vessel=="") %>% View()
 # elog <- elog %>% filter(!(vessel =="" & trip=="2023325"))

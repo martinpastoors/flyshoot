@@ -22,10 +22,10 @@ rm(list=ls())
 # Select vessel and trip
 # ------------------------------------------------------------
 
-setvessel<-"SCH135"   ;settrip<-"2023327" ;
-# setvessel<-"SCH65"   ;settrip<-"2023243" ;
-# setvessel<-"SL9"   ;settrip<-c("2023415","2023416") ;
-# setvessel<-"Z99"   ;settrip<-"2023070" ;
+# setvessel<-"SCH135"   ;settrip<-"2023329" ;
+# setvessel<-"SCH65"   ;settrip<-"2023246" ;
+# setvessel<-"SL9"   ;settrip<-c("2023418") ;
+setvessel<-"Z99"   ;settrip<-"2023072" ;
 
 # ------------------------------------------------------------
 
@@ -407,65 +407,66 @@ _`r tab_nums("vangstpersoortendag")`_
 \newpage
 
 <!-- ########################################################################################## -->
-<!-- Figure: Total Catch per Haul (map)                                                         -->
+<!-- Figure: Total Landings per Haul (map)                                                         -->
 <!-- ########################################################################################## -->
 
 ```{r catchperhaul, echo=FALSE, fig.asp=1.0, fig.align="center", message=FALSE, warning=FALSE}
 
 fig_nums(
   name    = "catchperhaul", level   = 1, display = FALSE,
-  caption = "Vangst per trek (kg)")
+  caption = "Vangst (aanvoer) per trek (kg)")
 
 xlim <- c(xmin,xmax); ylim <- c(ymin,ymax)
 
-if (sum(!is.na(h$totalcatch)) >0 ) {
+# if (sum(!is.na(h$totalcatch)) >0 ) {
+# 
+# 
+#   tt %>%
+#     arrange(haul) %>%
+# 
+#     # ggplot(aes(x=shootlon, y=shootlat)) +
+#     ggplot() +
+# 
+#     theme_publication() +
+#     theme(
+#       # panel.grid.major = element_blank(),
+#       panel.grid.minor = element_blank(),
+#       text             = element_text(size=12),
+#       plot.margin      = unit(c(0,0,0,0), "cm"),
+#       panel.background = element_rect(fill = "lightskyblue1")
+#     ) +
+# 
+# 
+#     coord_quickmap(xlim=xlim , ylim=ylim) +
+# 
+#     geom_text(data=rect_df, aes(x=lon, y=lat, label=rect),
+#               hjust=0, vjust=0, nudge_x=0.05, nudge_y=0.025, colour="white") +
+# 
+#     geom_polygon(data=world_mr_df, aes(x=long, y=lat, group=group), fill = "grey75") +
+# 
+#     geom_path (aes(x=lon, y=lat, colour=trip)) +
+#     geom_point(aes(x=lon, y=lat, size = totalcatch, colour=trip), 
+#                 alpha = 0.5) +
+#     geom_point(data=filter(tt, 
+#                            action=="embarked"), 
+#                aes(x=lon, y=lat), colour="green", size=5, alpha=0.5) +
+#     geom_point(data=filter(tt, 
+#                            action=="disembarked"), 
+#                aes(x=lon, y=lat), colour="red", size=5, alpha=0.5) +
+#     
+#     # geom_text(aes(x=lon, y=lat, label=haul), 
+#     #             hjust=0, vjust=0.5) +
+#   
+#     scale_size(range = c(1,10)) +
+# 
+#     scale_x_continuous(breaks = seq(floor(xmin), ceiling(xmax), 1)) +
+#     scale_y_continuous(breaks = seq(floor(2*ymin)/2, ceiling(2*ymax)/2, 0.5)) +
+#     labs(x = NULL, y = NULL, size = "totale vangst/trek", colour="") +
+#     guides(size = guide_legend(nrow = 1))
+#     # + facet_wrap(~source)
+# } 
 
-
-  tt %>%
-    arrange(haul) %>%
-
-    # ggplot(aes(x=shootlon, y=shootlat)) +
-    ggplot() +
-
-    theme_publication() +
-    theme(
-      # panel.grid.major = element_blank(),
-      panel.grid.minor = element_blank(),
-      text             = element_text(size=12),
-      plot.margin      = unit(c(0,0,0,0), "cm"),
-      panel.background = element_rect(fill = "lightskyblue1")
-    ) +
-
-
-    coord_quickmap(xlim=xlim , ylim=ylim) +
-
-    geom_text(data=rect_df, aes(x=lon, y=lat, label=rect),
-              hjust=0, vjust=0, nudge_x=0.05, nudge_y=0.025, colour="white") +
-
-    geom_polygon(data=world_mr_df, aes(x=long, y=lat, group=group), fill = "grey75") +
-
-    geom_path (aes(x=lon, y=lat, colour=trip)) +
-    geom_point(aes(x=lon, y=lat, size = totalcatch, colour=trip), 
-                alpha = 0.5) +
-    geom_point(data=filter(tt, 
-                           action=="embarked"), 
-               aes(x=lon, y=lat), colour="green", size=5, alpha=0.5) +
-    geom_point(data=filter(tt, 
-                           action=="disembarked"), 
-               aes(x=lon, y=lat), colour="red", size=5, alpha=0.5) +
-    
-    # geom_text(aes(x=lon, y=lat, label=haul), 
-    #             hjust=0, vjust=0.5) +
-  
-    scale_size(range = c(1,10)) +
-
-    scale_x_continuous(breaks = seq(floor(xmin), ceiling(xmax), 1)) +
-    scale_y_continuous(breaks = seq(floor(2*ymin)/2, ceiling(2*ymax)/2, 0.5)) +
-    labs(x = NULL, y = NULL, size = "totale vangst/trek", colour="") +
-    guides(size = guide_legend(nrow = 1))
-    # + facet_wrap(~source)
-
-} else if (sum(!is.na(m$gewicht)) >0 ) {
+if (sum(!is.na(m$gewicht)) >0 ) {
 
   fig_nums(
     name    = "totalcatchperhaul", level   = 1, display = FALSE,
@@ -505,7 +506,7 @@ if (sum(!is.na(h$totalcatch)) >0 ) {
               colour="red", size=5) +
 
     geom_jitter(aes(x=lon, y=lat, size = gewicht, colour = as.character(date)),
-                alpha = 0.5, width=0.025, height=0.05) +
+                alpha = 0.5, width=0.015, height=0.03) +
     scale_size(range = c(1,10)) +
 
     scale_x_continuous(breaks = seq(floor(xmin), ceiling(xmax), 1)) +
@@ -568,6 +569,7 @@ t1 %>%
   # + facet_wrap(~source)
 
 ```
+
 _`r fig_nums("catchperhaul")`_
 
 
@@ -629,7 +631,7 @@ _`r fig_nums("totalcatchperclass")`_
 <!-- Figure: aanvoer en discards                                                                -->
 <!-- ########################################################################################## -->
 
-```{r aanvoerendiscards, echo=FALSE, fig.align="center", fig.asp=1.2, message=FALSE, warning=FALSE}
+```{r aanvoerendiscards, eval=FALSE, fig.align="center", fig.asp=1.2, message=FALSE, warning=FALSE, include=FALSE}
 
 # print_option <- FALSE
 # 
