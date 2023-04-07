@@ -22,10 +22,10 @@ rm(list=ls())
 # Select vessel and trip
 # ------------------------------------------------------------
 
-# setvessel<-"SCH135"   ;settrip<-"2023329" ;
-# setvessel<-"SCH65"   ;settrip<-"2023246" ;
+setvessel<-"SCH135"   ;settrip<-"2023330" ;
+# setvessel<-"SCH65"   ;settrip<-"2023247" ;
 # setvessel<-"SL9"   ;settrip<-c("2023418") ;
-setvessel<-"Z99"   ;settrip<-"2023072" ;
+# setvessel<-"Z99"   ;settrip<-"2023073" ;
 
 # ------------------------------------------------------------
 
@@ -92,7 +92,10 @@ rect_df <-
   filter(row_number() ==1) %>% 
   dplyr::select(rect, lon=long, lat)
 
-load(file.path(spatialdir, "afsis.RData"))
+asfis <-
+  loadRData(file.path(spatialdir, "asfis.RData")) %>% 
+  lowcase()
+
 
 # ===============================================================================
 #  Load and filter the trip data
@@ -729,6 +732,67 @@ if (nrow(m) > 0 & sum(!is.na(h$totalcatch))>0) {
 }
 
 my_caption   <- ifelse(print_option, paste0("_", fig_nums("aanvoerentotalevangst"),"_"), "")
+
+
+```
+
+
+<!-- ########################################################################################## -->
+<!-- Figure: aanvoer per week                                                                   -->
+<!-- ########################################################################################## -->
+
+```{r aanvoerperweek, echo=FALSE, fig.align="center", fig.asp=0.8, message=FALSE, warning=FALSE}
+
+
+# create list of catch by species by week
+if (nrow(m) > 0) {
+  
+  s <-
+    elog %>% 
+    filter(vessel == setvessel, year == 2023) %>% 
+    
+    group_by(species) %>% 
+    summarise(weight = sum(weight, na.rm=TRUE)) %>% 
+    
+    arrange (desc(weight)) %>% 
+    group_by() %>% 
+    slice_head(n=10) %>% 
+    left_join(dplyr::select(asfis,
+                            species, englishname), 
+              by=c("species")) %>% 
+    mutate(english_species = paste(englishname, species))
+  
+
+  t <-
+    elog %>% 
+    filter(vessel == setvessel, year == 2023) %>% 
+    
+    mutate(species = ifelse(species %in% s$species, species, "ZZZ")) %>%
+
+    group_by(week, species) %>% 
+    summarise(weight = sum(weight, na.rm=TRUE)) %>% 
+    
+    left_join(dplyr::select(asfis,
+                            species, dutchname, englishname, scientificname), 
+              by=c("species")) %>% 
+    mutate(
+      dutchname   = ifelse(species == "ZZZ", "Overig", dutchname),
+      englishname = ifelse(species == "ZZZ", "Other", englishname),
+      scientificname = ifelse(species == "ZZZ", "", dutchname),
+      english_species = paste(englishname, species)
+    ) %>% 
+    mutate(english_species = factor(english_species, levels=c(s$english_species, "Other ZZZ")))
+  
+  t %>% 
+    ggplot(aes(x=week, y=weight)) +
+    theme_publication() +
+    theme(legend.position = "right", legend.direction = "vertical") +
+    geom_bar(aes(fill=english_species), 
+             stat="identity", position = position_stack(reverse = TRUE), colour="lightgray", linewidth=0.3) +
+    labs(y="aanvoer (kg)", title=paste(setvessel, "aanvoer per soort en week"), fill="") +
+    scale_fill_brewer(palette="Paired")
+  
+}
 
 
 ```

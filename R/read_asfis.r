@@ -26,35 +26,36 @@ ers       <-
   summarise(dutch_name2 = paste(dutch_name2, collapse = " / "))
 
 # old asfis
+
 asfis_old <- 
-  loadRData("C:/Users/MartinPastoors/Martin Pastoors/FLYSHOOT - General/rdata/afsis.RData") %>% 
-  mutate(
-    species = toupper(species)
-  ) %>% 
+  readxl::read_excel("C:/DATA/FAO ASFIS 6 languages_2014 plus dutch and english.xlsx", col_types = "text") %>% 
+  rename(species = "3A_CODE") %>% 
+  lowcase() %>% 
   ungroup() %>% 
-  drop_na(dutch_name) %>% 
-  dplyr::select(species, dutch_name, german_name, pfa)
+  drop_na(dutchname) %>% 
+  dplyr::select(species, dutchname, germanname, pfa)
 
 
 asfis <- 
   readxl::read_excel("C:/DATA/FAO ASFIS_sp_2022_REV1.xlsx") %>% 
   rename(species = "3A_CODE") %>% 
+  lowcase() %>% 
   left_join(asfis_old) %>% 
   left_join(ers) %>% 
-  mutate(dutch_name = ifelse(is.na(dutch_name), dutch_name2, dutch_name)) %>% 
-  mutate(dutch_name = case_when(
-    dutch_name == "Auxis rochei" ~ "Kogeltonijn",
-    dutch_name == "Brama australis" ~ "Zeebraam",
-    dutch_name == "Caranx rhonchus" ~ "Gele horsmakreel",
-    dutch_name == "Harder(diklip)" ~ "Diklipharder",
-    dutch_name == "Inktvis (kraak)" ~ "Octopus",
-    dutch_name == "Pieterman (grote)" ~ "Grote pieterman",
-    dutch_name == "Centropristis striata" ~ "Zwarte zeebaars",
-    TRUE                         ~ dutch_name
+  mutate(dutchname = ifelse(is.na(dutchname), dutch_name2, dutchname)) %>% 
+  mutate(dutchname = case_when(
+    dutchname == "Auxis rochei" ~ "Kogeltonijn",
+    dutchname == "Brama australis" ~ "Zeebraam",
+    dutchname == "Caranx rhonchus" ~ "Gele horsmakreel",
+    dutchname == "Harder(diklip)" ~ "Diklipharder",
+    dutchname == "Inktvis (kraak)" ~ "Octopus",
+    dutchname == "Pieterman (grote)" ~ "Grote pieterman",
+    dutchname == "Centropristis striata" ~ "Zwarte zeebaars",
+    TRUE                         ~ dutchname
   )) %>% 
-  dplyr::select(-dutch_name2)
+  dplyr::select(-dutch_name2) 
   
 
-save(asfis, file="C:/DATA/RDATA/afsis.RData") 
+save(asfis, file="C:/DATA/RDATA/asfis.RData") 
 
   

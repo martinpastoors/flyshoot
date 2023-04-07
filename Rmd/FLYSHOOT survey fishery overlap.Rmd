@@ -1,0 +1,161 @@
+---
+output:
+  word_document:
+    reference_docx: ../report_template.dotx
+---
+
+
+```{r setup, include=FALSE}
+
+# =======================================================================================================
+# FLYSHOOT surveys
+# 
+# 11/01/2023 first coding
+# 16/03/2023 full GLM modelling of top 15 species in the catch
+# 17/03/2023 combining survey and cpue indices
+# 30/03/2023 only survey info for top species
+# =======================================================================================================
+
+knitr::opts_chunk$set(echo = FALSE,	message = FALSE,	warning = FALSE,	comment = "",	crop = TRUE )
+knitr::opts_chunk$set(fig.width=10) 
+
+options(dplyr.summarise.inform = FALSE)
+
+# Reset lists
+rm(list=ls())
+
+recalculatemaps <- TRUE              # recalculate catch maps (takes relatively long)
+
+# Libraries
+library(rmarkdown)                   # note: requires knitr 1.21
+
+require(tidyverse, quietly=TRUE)     # combined package of dplyr, tidyr, ggplot, readr, purrr and tibble
+require(lubridate, quietly=TRUE)     # data handling
+require(reshape2, quietly=TRUE)      # reshaping data; e.g. cast
+require(RColorBrewer)                # colour schemes
+library(viridis)
+library(pander)
+
+library(captioner)                   # for captions
+tab_nums <- captioner::captioner(prefix = "Table " , levels=1, type=c("n"), infix=".")
+fig_nums <- captioner::captioner(prefix = "Figure ", levels=1, type=c("n"), infix=".")
+
+# Source all the utils
+source("../../prf/R/my utils.r")
+
+get_onedrive <- function (team="Martin Pastoors", site="FLYSHOOT - General") {
+  
+  if (Sys.info()['sysname'] == 'Windows') {
+    
+    # set onedrive directory
+    if(dir.exists(file.path(Sys.getenv('USERPROFILE'), team, site))) {
+      onedrive <- file.path(Sys.getenv('USERPROFILE'), team, site)   
+    } else if(dir.exists(file.path('C:/DATA/PFA', team, site))) {
+      onedrive <- file.path('C:/DATA/PFA', team, site)
+    } else if(dir.exists(file.path('D:/DATA/PFA', team, site))) {
+      onedrive <- file.path('D:/DATA/PFA', team, site)
+    } else {
+      stop("Onedrive directory not found")
+    }
+  }
+  
+  return(onedrive)
+}
+
+spatialdir <- "C:/DATA/RDATA"
+icesrect <-
+  loadRData(file.path(spatialdir, "rect_lr_sf.RData")) %>% 
+  sf::st_drop_geometry() %>% 
+  rename(rect=ICESNAME) %>% 
+  mutate(lat = (SOUTH + NORTH)/2) %>% 
+  mutate(lon = (EAST + WEST)/2) %>% 
+  dplyr::select(rect, lat, lon)
+
+# set onedrive directory
+onedrive <- get_onedrive(team="Martin Pastoors", site="FLYSHOOT - General")
+datrasdir  <- "C:/DATA/DATRAS/tidy"
+
+# CGFS
+cgfs  <- 
+  readr::read_rds(file=file.path(datrasdir, "fr-cgfs_hh.rds")) %>% 
+  mutate(source="cgfs", year=as.integer(year)) %>% 
+  rename(lat=shootlat, lon=shootlong) %>% 
+  dplyr::select(source, year, quarter, lat, lon)
+
+ibts  <- 
+  readr::read_rds(file=file.path(datrasdir, "ns-ibts_hh.rds")) %>% 
+  mutate(source="ibts", year=as.integer(year)) %>% 
+  rename(lat=shootlat, lon=shootlong) %>% 
+  dplyr::select(source, year, quarter, lat, lon)
+
+fish  <- 
+  loadRData(file=file.path(onedrive,"rdata","elog.RData")) %>% 
+  mutate(quarter=quarter(date), source="fish") %>%
+  left_join(icesrect, by="rect") %>%
+  mutate(
+    lat = ifelse(is.na(lat.x), lat.y, lat.x),
+    lon = ifelse(is.na(lon.x), lon.y, lon.x)
+  ) %>% 
+  dplyr::select(source, year, quarter, lat, lon)
+
+comb <- bind_rows(cgfs, ibts, fish)
+
+```
+
+
+# FLYSHOOT FISHERY and SURVEY overlap 
+
+M.A. Pastoors
+
+Report generated: `r format(Sys.time(), '%d/%m/%Y')`
+
+&nbsp;
+
+&nbsp;
+
+&nbsp;
+
+&nbsp;
+
+&nbsp;
+
+&nbsp;
+
+&nbsp;
+
+&nbsp;
+
+&nbsp;
+
+&nbsp;
+
+&nbsp;
+
+```{r, echo=FALSE, out.width = "200px", fig.align="left", message=FALSE, warning=FALSE, cache=FALSE}
+
+  knitr::include_graphics("../MPFF logo with text.png")
+
+```
+
+\newpage
+
+
+```{r echo=FALSE, fig.asp=1.2, message=FALSE, warning=FALSE, comment=NA}
+
+# catch by week
+comb %>% 
+  filter(year >= 2020, quarter %in% c(1,4)) %>% 
+  ggplot(aes(x=lon, y=lat)) +
+  theme_publication() +
+  geom_point(aes(colour=source), size=0.2) +
+  facet_wrap(~year)
+
+comb %>% 
+  filter(year %in% c(2021, 2022, 2023), quarter %in% c(1,4)) %>% 
+  ggplot(aes(x=lon, y=lat)) +
+  theme_publication() +
+  geom_point(aes(colour=source), size=0.5) +
+  facet_wrap(~year)
+
+```
+

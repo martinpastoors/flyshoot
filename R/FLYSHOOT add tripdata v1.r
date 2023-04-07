@@ -58,7 +58,7 @@ rect_df <-
 
 # load fish biology datasets -------------------------
 
-afsis <- loadRData(file.path(spatialdir, "afsis.RData"))
+asfis <- loadRData(file.path(spatialdir, "asfis.RData"))
 
 # load fishery datasets -------------------------
 
