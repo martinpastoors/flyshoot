@@ -66,7 +66,7 @@ load(file.path(spatialdir, "rect_lr_sf.RData"))
 
 load(file.path(spatialdir, "world_lr_df.RData"))
 
-load(file.path(spatialdir, "afsis.RData"))
+load(file.path(spatialdir, "asfis.RData"))
 
 # ===============================================================================
 #  Load and filter the trip data
@@ -118,7 +118,7 @@ e <-
   ungroup() %>% 
   mutate(species = tolower(species)) %>% 
   mutate(species = ifelse(species == "SQR", "SQC", species)) %>% 
-  left_join(dplyr::select(afsis,
+  left_join(dplyr::select(asfis,
                           species, scientific_name, english_name, dutch_name),
             by = "species") %>% 
   mutate(species = toupper(species))  

@@ -65,18 +65,18 @@ get_onedrive <- function (team="Martin Pastoors", site="FLYSHOOT - General") {
 onedrive <- get_onedrive(team="Martin Pastoors", site="FLYSHOOT - General")
 cpue <- readr::read_rds(file=file.path(onedrive,"rdata",paste0("CPUE_","27.7.d-27.7.e",".rds"))) %>% 
   filter(efficiency==0) %>% 
-  dplyr::select(-anova, -coeff, -aic, -vessel, -quarter, -lon, -effort, -efficiency, -pred, -se) %>% 
+  # dplyr::select(-anova, -coeff, -aic, -vessel, -quarter, -lon, -effort, -efficiency, -pred, -se) %>% 
   
   # tidyr::pivot_longer(names_to = "var", values_to = "data", est:lwr) %>% 
   filter(est > 0) %>% 
   group_by(species) %>% 
   mutate(mean = mean(est))  %>% 
-  mutate(score = est/mean)  %>% 
-  mutate(score_lwr = score - (est-lwr)/mean)  %>% 
-  mutate(score_upr = score + (upr-est)/mean)  %>% 
+  mutate(std_est = est/mean)  %>% 
+  mutate(std_lwr = std_est - (est-lwr)/mean)  %>% 
+  mutate(std_upr = std_est + (upr-est)/mean)  %>% 
 
-  dplyr::select(-est, -lwr, -upr, -mean) %>% 
-  rename(est=score, lwr=score_lwr, upr=score_upr) %>% 
+  # dplyr::select(-est, -lwr, -upr, -mean) %>% 
+  # rename(est=score, lwr=score_lwr, upr=score_upr) %>% 
   mutate(source="CPUE") %>% 
   mutate(year=as.integer(as.character(year)))
 

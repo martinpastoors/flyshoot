@@ -57,7 +57,7 @@ my_spatial_drive = "C:/DATA/RDATA"
   
   # load fish biology datasets -------------------------
   
-  afsis <- loadRData(file.path(my_spatial_drive, "afsis.RData"))
+  asfis <- loadRData(file.path(my_spatial_drive, "asfis.RData"))
 
   # load fishery datasets -------------------------
   

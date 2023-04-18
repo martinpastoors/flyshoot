@@ -62,7 +62,7 @@ rect_df <-
   filter(row_number() ==1) %>% 
   dplyr::select(rect, lon=long, lat)
 
-load(file.path(spatialdir, "afsis.RData"))
+load(file.path(spatialdir, "asfis.RData"))
 
 # ===============================================================================
 #  Load and filter the trip data

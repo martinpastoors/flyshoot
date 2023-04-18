@@ -61,7 +61,7 @@ rect_df <-
   filter(row_number() ==1) %>% 
   dplyr::select(rect, lon=long, lat)
 
-load(file.path(spatialdir, "afsis.RData"))
+load(file.path(spatialdir, "asfis.RData"))
 
 # set onedrive directory
 onedrive <- get_onedrive(team="Martin Pastoors", site="FLYSHOOT - General/rdata")

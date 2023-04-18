@@ -97,7 +97,7 @@ filelist <- list.files(
   pattern="treklijst",
   full.names = TRUE)
 
-# i <- 4
+# i <- 1
 if(!is_empty(filelist)){
   
   for (i in 1:length(filelist)) {

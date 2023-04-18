@@ -51,7 +51,7 @@ onedrive <- "C:/Users/MartinPastoors/Martin Pastoors/FLYSHOOT - General/data"
 # load(file.path(onedrive, "rdata/icesrectangles.RData"))
 
 # load fish biology datasets -------------------------
-# afsis                   <- loadRData(file.path(onedrive, "rdata/afsis.RData"))
+# asfis                   <- loadRData(file.path(onedrive, "rdata/asfis.RData"))
 
 # ================================================================================
 #  1. Reading data and converting to initial dataframes

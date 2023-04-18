@@ -66,79 +66,80 @@ get_onedrive <- function (team="Martin Pastoors", site="FLYSHOOT - General") {
 onedrive <- get_onedrive(team="Martin Pastoors", site="FLYSHOOT - General")
 datrasdir  <- "../../tidydatras/vignettes/articles"
 
-top      <- readr::read_rds(file=file.path(onedrive,"rdata", "top.rds")) 
+top_channel      <- readr::read_rds(file=file.path(onedrive,"rdata", "top_27.7.d-27.7.e.rds")) 
+top_northsea     <- readr::read_rds(file=file.path(onedrive,"rdata", "top_27.4.b-27.4.c.rds")) 
 
 # CGFS
 cgfs  <- 
   readr::read_rds(file=file.path(datrasdir, "cgfs index.rds")) %>% 
-  rename(year=x) 
+  rename(year=x, est=y, lwr=ymin, upr=ymax) 
 
 cgfs_temp <-
   cgfs %>% 
   filter(year %in% 2015:2022) %>% 
   group_by(english_species) %>% 
   summarise(
-    z = mean(y, na.rm=TRUE),
-    zmin = mean(ymin, na.rm=TRUE),
-    zmax = mean(ymax, na.rm=TRUE)
+    z    = mean(est, na.rm=TRUE),
+    zmin = mean(lwr, na.rm=TRUE),
+    zmax = mean(upr, na.rm=TRUE)
   )
 
 cgfs <-
   cgfs %>% 
   left_join(cgfs_temp, by="english_species") %>% 
   mutate(
-    est = y/z-1,
-    upr = ymax/zmax-1,
-    lwr = ymin/zmin-1
+    std_est = est/z-1,
+    std_upr = upr/z-1,
+    std_lwr = lwr/z-1
   ) 
 
 # IBTS Q1
 ibtsq1  <- 
   readr::read_rds(file=file.path(datrasdir, "ibtsq1 index.rds")) %>% 
-  rename(year=x) 
+  rename(year=x, est=y, lwr=ymin, upr=ymax) 
 
 ibtsq1_temp <-
   ibtsq1 %>% 
   filter(year %in% 2015:2022) %>% 
   group_by(english_species) %>% 
   summarise(
-    z = mean(y, na.rm=TRUE),
-    zmin = mean(ymin, na.rm=TRUE),
-    zmax = mean(ymax, na.rm=TRUE)
+    z    = mean(est, na.rm=TRUE),
+    zmin = mean(lwr, na.rm=TRUE),
+    zmax = mean(upr, na.rm=TRUE)
   )
 
 ibtsq1 <-
   ibtsq1 %>% 
   left_join(ibtsq1_temp, by="english_species") %>% 
   mutate(
-    est = y/z-1,
-    upr = ymax/zmax-1,
-    lwr = ymin/zmin-1
+    std_est = est/z-1,
+    std_upr = upr/z-1,
+    std_lwr = lwr/z-1
   ) 
 
 # IBTS Q3
-ibtsq3  <- 
-  readr::read_rds(file=file.path(datrasdir, "ibtsq3 index.rds")) %>% 
-  rename(year=x) 
+ibtsq3  <-
+  readr::read_rds(file=file.path(datrasdir, "ibtsq3 index.rds")) %>%
+  rename(year=x, est=y, lwr=ymin, upr=ymax)
 
 ibtsq3_temp <-
-  ibtsq3 %>% 
-  filter(year %in% 2015:2022) %>% 
-  group_by(english_species) %>% 
+  ibtsq3 %>%
+  filter(year %in% 2015:2022) %>%
+  group_by(english_species) %>%
   summarise(
-    z = mean(y, na.rm=TRUE),
-    zmin = mean(ymin, na.rm=TRUE),
-    zmax = mean(ymax, na.rm=TRUE)
+    z    = mean(est, na.rm=TRUE),
+    zmin = mean(lwr, na.rm=TRUE),
+    zmax = mean(upr, na.rm=TRUE)
   )
 
 ibtsq3 <-
-  ibtsq3 %>% 
-  left_join(ibtsq3_temp, by="english_species") %>% 
+  ibtsq3 %>%
+  left_join(ibtsq3_temp, by="english_species") %>%
   mutate(
-    est = y/z-1,
-    upr = ymax/zmax-1,
-    lwr = ymin/zmin-1
-  ) 
+    std_est = est/z-1,
+    std_upr = upr/z-1,
+    std_lwr = lwr/z-1
+  )
 
 # Channel CPUE
 cpue_channel  <- 
@@ -158,19 +159,47 @@ cpue_channel <-
   cpue_channel %>% 
   left_join(cpue_channel_temp, by="english_species") %>% 
   mutate(
-    est = est/z-1,
-    upr = upr/zmax-1,
-    lwr = lwr/zmin-1
+    std_est = est/z-1,
+    std_upr = upr/z-1,
+    std_lwr = lwr/z-1
+  ) %>% 
+  mutate(year = as.numeric(as.character(year))) %>% 
+  dplyr::select(one_of(names(cgfs)))
+
+# CPUE North Sea
+cpue_northsea  <- 
+  readr::read_rds(file=file.path(onedrive,"rdata","CPUE_27.4.b-27.4.c.rds")) 
+
+cpue_northsea_temp <-
+  cpue_northsea %>% 
+  filter(year %in% 2015:2022) %>% 
+  group_by(english_species) %>% 
+  summarise(
+    z = mean(est, na.rm=TRUE),
+    zmin = mean(lwr, na.rm=TRUE),
+    zmax = mean(upr, na.rm=TRUE)
+  )
+
+cpue_northsea <-
+  cpue_northsea %>% 
+  left_join(cpue_northsea_temp, by="english_species") %>% 
+  mutate(
+    std_est = est/z-1,
+    std_upr = upr/z-1,
+    std_lwr = lwr/z-1
   ) %>% 
   mutate(year = as.numeric(as.character(year))) %>% 
   dplyr::select(one_of(names(cgfs)))
 
 comb <-
-  cgfs             %>% mutate(source="CGFS") %>% 
-  bind_rows(ibtsq1 %>% mutate(source="IBTSQ1")) %>% 
-  bind_rows(ibtsq3 %>% mutate(source="IBTSQ3")) %>% 
-  bind_rows(cpue_channel %>% mutate(source="CPUE channel")) %>% 
-  mutate(english_species = factor(english_species, levels=top$english_species))
+  cgfs             %>% mutate(source="CGFS", area="channel") %>% 
+  bind_rows(ibtsq1 %>% mutate(source="IBTSQ1", area="northsea")) %>% 
+  bind_rows(ibtsq3 %>% mutate(source="IBTSQ3", area="northsea")) %>% 
+  bind_rows(cpue_channel %>% mutate(source="CPUE", area="channel")) %>% 
+  bind_rows(cpue_northsea %>% mutate(source="CPUE", area="northsea")) 
+
+# writexl::write_xlsx(comb, path=file.path(onedrive, "comb.xlsx"))
+
 
 ```
 
@@ -234,25 +263,68 @@ fig_nums(name    = "timetrends", level = 1, display = FALSE, caption = "GLM, tim
 t <-
   comb %>% 
   # filter(!(grepl("Black seabream", english_species) & source=="IBTSQ1")) %>% 
-  filter(species %in% slice_head(top, n=8)$species) %>% 
-  filter(!(source == "CGFS" & year < 2015)) %>% 
-  filter(!(source == "CPUE channel"))
+  filter(species %in% slice_head(top_channel, n=8)$species) %>% 
+  mutate(source=case_when(
+    source == "CGFS" & year <  2015 ~ "CGFS old",
+    source == "CGFS" & year >= 2015 ~ "CGFS new",
+    TRUE                            ~ source
+  ))   
+  # filter(!(source == "CPUE channel"))
+
 
 t %>% 
-  ggplot(aes(x=year, y=est)) +
+  filter(!grepl("CPUE", source), english_species=="Surmullet MUR") %>% 
+  ggplot(aes(x=year, group=source)) +
+  theme_publication() +
+  
+  geom_line(aes(y=est), colour="red") +
+  geom_line(aes(y=lwr), colour="blue") +
+  geom_line(aes(y=upr), colour="green") +
+  
+  geom_line(aes(y=z), colour="red") +
+  geom_line(aes(y=zmin), colour="blue") +
+  geom_line(aes(y=zmax), colour="green") +
+  
+  facet_grid(english_species~area)
+
+t %>% 
+  filter(!grepl("CPUE", source), english_species=="Surmullet MUR") %>% 
+  ggplot(aes(x=year, group=source)) +
+  theme_publication() +
+  
+  geom_line(aes(y=std_est), colour="red") +
+  geom_line(aes(y=std_lwr), colour="blue") +
+  geom_line(aes(y=std_upr), colour="green") +
+  
+  facet_grid(english_species~area)
+
+t %>% 
+  filter(!grepl("CPUE", source), english_species=="Surmullet MUR") %>% 
+  ggplot(aes(x=year, y=std_est)) +
+  theme_publication() +
+  ggplot2::geom_line(ggplot2::aes(year, std_est, colour=source)) +
+  geom_ribbon(aes(ymin=std_lwr, ymax=std_upr, fill=source), alpha=0.2) +
+  facet_grid(english_species~area)
+
+  # facet_grid(english_species~area)
+
+t %>% 
+  ggplot(aes(x=year, y=std_est)) +
   theme_publication() +
   
   # geom_line(aes(colour=source)) +
   # geom_point(aes(colour=source)) +
   # ggplot2::geom_pointrange(ggplot2::aes(year, est, ymin = lwr, ymax = upr, colour=source)) +
   
-  geom_segment(aes(x=2015, xend=2022, y=0, yend=0), linewidth=1) +
+  geom_segment(aes(x=2015, xend=2022, y=0, yend=0), linewidth=0.5) +
   
-  ggplot2::geom_line(ggplot2::aes(year, est, colour=source)) +
-  geom_ribbon(aes(ymin=lwr, ymax=upr, fill=source), alpha=0.2) +
+  ggplot2::geom_line(ggplot2::aes(year, std_est, colour=source)) +
+  geom_ribbon(aes(ymin=std_lwr, ymax=std_upr, fill=source), alpha=0.2) +
   
-  ylim(-(max(abs(t$est))), (max(abs(t$est)))) + 
-  facet_wrap(~english_species, ncol=4)
+  ylim(-(max(abs(t$std_est))), (max(abs(t$std_est)))) +
+  # facet_grid(english_species~source)
+
+  facet_grid(english_species~area)
 
 
 ```

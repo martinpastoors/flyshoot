@@ -74,7 +74,7 @@ rect_df <-
   filter(row_number() ==1) %>% 
   dplyr::select(rect, lon=long, lat)
 
-load(file.path(spatialdir, "afsis.RData"))
+load(file.path(spatialdir, "asfis.RData"))
 
 # set onedrive directory
 onedrive <- get_onedrive(team="Martin Pastoors", site="FLYSHOOT - General/rdata")
@@ -100,6 +100,13 @@ trip <- trip %>% mutate(trip = ifelse(vessel=="SL9"& trip=="2023418", "2023417",
 kisten <- kisten %>% mutate(trip = ifelse(vessel=="SL9"& trip=="2023418", "2023417",trip))
 elog <- elog %>% mutate(trip = ifelse(vessel=="SL9"& trip=="2023418", "2023417",trip)) 
 
+elog <-
+  elog %>% 
+  filter(!(vessel=="SL9" & year == 2018 &  week == 52 & source=="m-catch")) %>% 
+  filter(!(vessel=="SCH135" & year == 2019 &  week == 1 & source=="m-catch")) %>% 
+  filter(!(vessel=="SL65" & year == 2018 &  week == 5 & source=="m-catch")) 
+  
+
 save(haul,   file = file.path(onedrive, "haul.RData"))
 save(trip,   file = file.path(onedrive, "trip.RData"))
 save(kisten, file = file.path(onedrive, "kisten.RData"))
@@ -109,6 +116,18 @@ save(elog,   file = file.path(onedrive, "elog.RData"))
 # elog <- elog %>% filter(!(vessel =="" & trip=="2023325"))
 # elog <- elog %>% distinct()
 # save(elog,  file = file.path(onedrive,  "elog.RData"))
+
+# elog %>% 
+#   ungroup() %>% 
+#   filter(year %in% 2016:2019) %>% 
+#   distinct(vessel, year, week, yday, source) %>%  
+#   ggplot(aes(x=yday, y=vessel, colour=source)) +
+#   theme_publication() +
+#   geom_point() +
+#   facet_wrap(~year, ncol=1)
+
+
+
 
 # --------------------------------------------------------------------------------
 # fixing kisten problem
@@ -190,6 +209,35 @@ kisten <-
 save(kisten,  file = file.path(onedrive, "kisten.RData"))  
 
 
+# --------------------------------------------------------------------------------
+# Check the number of fishing days per week
+# --------------------------------------------------------------------------------
+
+elog_weeks <-
+  elog %>% 
+  group_by(vessel, year, source) %>% 
+  distinct(week) %>% 
+  group_by(vessel, year, source) %>% 
+  summarise(minweek = min(week), maxweek=max(week))
+
+elog %>% 
+  group_by(vessel, year, source, week) %>% 
+  summarise(ndays = n_distinct(date)) %>% 
+  group_by(vessel, year, source) %>% 
+  tidyr::pivot_wider(names_from = week, values_from = ndays, values_fill = 0) %>% 
+  tidyr::pivot_longer(names_to = "week", values_to = "ndays", 4:56) %>% 
+  mutate(week= as.numeric(week)) %>% 
+  
+  # check if in applicable week
+  left_join(elog_weeks, by=c("vessel","year","source")) %>% 
+  filter(week >= minweek, week <= maxweek) %>% 
+  
+  ggplot(aes(x=week, y=ndays)) +
+  theme_publication() +
+  geom_point(aes(colour=source), size=0.75, shape=1) +
+  expand_limits(y=0) +
+  labs(x="weeknummer", y="visdagen per week", title="Aantal visdagen per week") +
+  facet_grid(vessel~year)
 
 
 

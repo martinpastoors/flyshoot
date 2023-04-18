@@ -36,6 +36,7 @@ require(RColorBrewer)                # colour schemes
 library(viridis)
 library(pander)
 library(patchwork)
+library(gridExtra)
 
 library(captioner)                   # for captions
 tab_nums <- captioner::captioner(prefix = "Table " , levels=1, type=c("n"), infix=".")
@@ -61,6 +62,21 @@ get_onedrive <- function (team="Martin Pastoors", site="FLYSHOOT - General") {
   }
   
   return(onedrive)
+}
+
+calc_boxplot_stat <- function(x) {
+  coef <- 1.5
+  n <- sum(!is.na(x))
+  # calculate quantiles
+  stats <- quantile(x, probs = c(0.0, 0.25, 0.5, 0.75, 1.0))
+  names(stats) <- c("ymin", "lower", "middle", "upper", "ymax")
+  iqr <- diff(stats[c(2, 4)])
+  # set whiskers
+  outliers <- x < (stats[2] - coef * iqr) | x > (stats[4] + coef * iqr)
+  if (any(outliers)) {
+    stats[c(1, 5)] <- range(c(stats[2:4], x[!outliers]), na.rm = TRUE)
+  }
+  return(stats)
 }
 
 spatialdir <- "C:/DATA/RDATA"
@@ -108,7 +124,7 @@ elog   <-
   
   mutate(species = tolower(species)) %>% 
   left_join(dplyr::select(asfis,
-                          species, scientific_name, english_name, dutch_name),
+                          species, scientificname, englishname, dutchname),
             by = "species") %>% 
   mutate(species = toupper(species))  %>% 
   
@@ -186,6 +202,18 @@ e <-
   ungroup()
 
 # e %>% distinct(species, regulated) %>% filter(is.na(regulated)) %>% View()
+# e %>% 
+#   filter(vessel=="SCH135", week==1:3, year==2019) %>%  
+#   group_by(vessel, year, week, source) %>% 
+#   summarise(n=n_distinct(source)) %>% 
+#   filter(n > 1) %>%
+#   View()
+#   # left_join(e, by=c("vessel","year","week")) %>% 
+#   group_by(vessel, year, week, source) %>% 
+#   summarise(weight = sum(weight, na.rm=TRUE)) %>% 
+#   pivot_wider(names_from = source, values_from = weight) %>% 
+#   View()
+
 
 # calculate the scaling of plots
 
@@ -198,14 +226,20 @@ n <- 15
 
 effort <-
   e %>% 
+  dplyr::group_by(vessel, year, week, source) %>% 
+  dplyr::summarize(ndays = n_distinct(date)) %>% 
+  
+  # temp fix!!
+  mutate(ndays = ifelse(source=="m-catch" & year < 2023, 4, ndays)) %>% 
   dplyr::group_by(vessel, year) %>% 
-  dplyr::summarize(ndays = n_distinct(paste(vessel, date))) %>% 
+  dplyr::summarize(ndays  = sum(ndays, na.rm=TRUE))  %>% 
+
   ungroup()
 
 catch <-
   e %>% 
   dplyr::group_by(vessel, year, species, 
-                  scientific_name, english_name, dutch_name, regulated) %>% 
+                  scientificname, englishname, dutchname, regulated) %>% 
   dplyr::summarize(weight = sum(weight, na.rm=TRUE)) %>% 
   dplyr::group_by(vessel, year) %>% 
   dplyr::mutate(perc = weight/sum(weight, na.rm=TRUE)) %>% 
@@ -215,10 +249,25 @@ catch <-
 
 effort_byweek <-
   e %>% 
+  dplyr::group_by(vessel, year, quarter, month, week, division, rect, source) %>% 
+  dplyr::summarize(effort  = n_distinct(date))  %>% 
+  
+  # temp fix!!
+  mutate(effort = ifelse(source=="m-catch" & year < 2023, 4, effort)) %>% 
   dplyr::group_by(vessel, year, quarter, month, week, division, rect) %>% 
-  dplyr::summarize(
-    effort  = n_distinct(date)
-  )  %>% 
+  dplyr::summarize(effort  = sum(effort, na.rm=TRUE))  %>% 
+  ungroup()
+
+effort_byweek2 <-
+  e %>% 
+  dplyr::group_by(vessel, year, week, source) %>% 
+  dplyr::summarize(effort  = n_distinct(date))  %>% 
+  
+  # temp fix!!
+  mutate(effort = ifelse(source=="m-catch" & year < 2023, 4, effort)) %>% 
+  dplyr::group_by(vessel, year, week) %>% 
+  dplyr::summarize(effort  = sum(effort, na.rm=TRUE))  %>% 
+
   ungroup()
 
 revenue_byweek <-
@@ -227,7 +276,8 @@ revenue_byweek <-
   mutate(revenue = weight * avgprice) %>% 
   drop_na(revenue) %>% 
   group_by(vessel, year, week, species) %>% 
-  summarise(revenue = sum(revenue, na.rm=TRUE))
+  summarise(revenue = sum(revenue, na.rm=TRUE)) %>% 
+  ungroup()
     
 target_byweek <-
   revenue_byweek %>% 
@@ -240,7 +290,7 @@ target_byweek <-
 catch_byweek <-
   e %>% 
   dplyr::group_by(vessel, year, quarter, month, week, division, rect,  
-                  species, scientific_name, english_name, dutch_name, regulated) %>% 
+                  species, scientificname, englishname, dutchname, regulated) %>% 
   dplyr::summarize(
     catch = sum(weight, na.rm=TRUE),
     # effort  = n_distinct(date)
@@ -265,21 +315,54 @@ top_rectangles <-
 
 top <-
   catch %>% 
-  dplyr::group_by(species, scientific_name, english_name, dutch_name) %>% 
+  dplyr::group_by(species, scientificname, englishname, dutchname) %>% 
   dplyr::summarize(weight = sum(weight, na.rm=TRUE)) %>% 
   dplyr::ungroup() %>% 
-  dplyr::mutate(english_species = paste(english_name, species)) %>% 
+  dplyr::mutate(english_species = paste(englishname, species)) %>% 
   arrange(desc(weight)) %>% 
   slice_head(n=n)
 
 rest <-
   catch %>% 
-  dplyr::group_by(species, scientific_name, english_name, dutch_name) %>% 
+  dplyr::group_by(species, scientificname, englishname, dutchname) %>% 
   dplyr::summarize(weight     = sum(weight, na.rm=TRUE)) %>% 
   dplyr::ungroup() %>% 
-  dplyr::mutate(english_species = paste(english_name, species)) %>% 
+  dplyr::mutate(english_species = paste(englishname, species)) %>% 
   arrange(desc(weight)) %>% 
   filter(species %notin% top$species)
+
+all <- 
+  bind_rows(top, rest, data.frame(english_species="Other")) %>% 
+  mutate(english_species = factor(english_species, levels=.$english_species))
+
+# top colours
+colourCount             <- nrow(top)+1
+getPalette              <- colorRampPalette(brewer.pal(12, "Paired"))
+myTopColors             <- getPalette(colourCount)
+names(myTopColors)      <- c(top$english_species, "Other")
+
+# scales::show_col(myTopColors)
+
+# target colours
+t1 <- 
+  target_byweek %>% 
+  ungroup() %>% 
+  distinct(target) %>% 
+  left_join(bind_rows(top, rest), by=c("target"="species")) %>% 
+  arrange(desc(weight)) %>% 
+  left_join(as.data.frame(myTopColors) %>% rownames_to_column(var="english_species"), 
+            by="english_species")
+
+t2a <- t1 %>% filter(!is.na(myTopColors))
+t2b <- t1 %>% filter(is.na(myTopColors))
+
+colourCount             <- nrow(t2b)
+getPalette              <- colorRampPalette(myTopColors[c(length(myTopColors)-1,length(myTopColors))])
+myAddedColors           <- getPalette(colourCount)
+names(myAddedColors)    <- c(t2b$english_species)
+
+myTargetColors          <- c(myTopColors, myAddedColors)
+# scales::show_col(myTargetColors)
 
 readr::write_rds(top, file=file.path(onedrive,
                                      "rdata",
@@ -347,110 +430,159 @@ It is well known that modelling fisheries catch rates could provide biased estim
 
 # Material and methods
 
-Electronic logbook data was available for the vessels `r paste(unique(e$vessel), collapse=", ")` and year  `r paste(c(min(yrs), max(yrs)), collapse="-")`. From the electronic logbook data, fishing effort can be derived (number of fishing days per vessel) and the landings by species and vessel. It should be noted that there is no data available on the total catches, because the logbooks only contain the landed catch. 
+Electronic logbook data was available for the vessels `r paste(unique(e$vessel), collapse=", ")` and years  `r paste(c(min(yrs), max(yrs)), collapse="-")`. From the electronic logbook data, fishing effort can be derived (number of fishing days per vessel) and the landings by species and vessel. It should be noted that there is no data available on the total catches, because the logbooks only contain the landed catch. 
 
-**Fishing effort by vessel (fishing days by year)**
+**Fishing effort by vessel**
 
-```{r effort1, echo=FALSE, message=FALSE, warning=FALSE, comment=NA, fig.asp=0.6}
+Number of fishing days per week (from available source) by vessel and year. 
+
+```{r effort0, echo=FALSE, message=FALSE, warning=FALSE, comment=NA, fig.asp=0.8}
+
+fig_nums(
+  name    = "effort0", 
+  level = 1, display = FALSE,
+  caption = "Average number of fishing days per week (from available source) by vessel and year.")
+
+e_weeks <-
+  e %>% 
+  group_by(vessel, year, source) %>% 
+  distinct(week) %>% 
+  group_by(vessel, year, source) %>% 
+  summarise(minweek = min(week), maxweek=max(week))
+
+# by year
+e %>% 
+  dplyr::group_by(vessel, year, week, source) %>% 
+  dplyr::summarize(ndays = n_distinct(date)) %>% 
+  # temp fix!!
+  # mutate(ndays = ifelse(source=="m-catch" & year < 2023, 4, ndays)) %>% 
+  
+  tidyr::pivot_wider(names_from = week, values_from = ndays, values_fill = 0) %>% 
+  tidyr::pivot_longer(names_to = "week", values_to = "ndays", 4:ncol(.)) %>% 
+  
+  left_join(e_weeks, by=c("vessel","year","source")) %>% 
+  filter(week >= minweek, week <= maxweek) %>% 
+
+  # dplyr::group_by(vessel, year, source) %>% 
+  # summarise(ndays = mean(ndays, na.rm=TRUE)) %>% 
+  
+  ggplot(aes(x=as.character(year), y=ndays)) +
+  theme_publication() +
+  theme(plot.margin = margin(2,2,2,5, "mm")) +
+  # theme(legend.position = "none") +
+  
+  # geom_bar(aes(fill=source), stat="identity", position=position_dodge2(preserve="single", width=0.9)) + 
+  geom_boxplot(aes(colour=source), position=position_dodge2(preserve="single", width=0.9)) +
+  geom_point(aes(colour=source), size=1.5, position=position_jitterdodge(), shape=3) +
+  scale_fill_brewer(palette = "Paired") +
+  expand_limits(y=0) +
+  labs(y="fishing days per week", x="", title="Number of fishing days per week", colour="source") +
+  # scale_x_continuous(breaks=yrs) +
+  facet_grid(vessel~.)
+
+
+```
+
+_`r fig_nums("effort0")`_
+
+
+**Fishing effort by vessel**
+
+Number of fishing days (from available data) by vessel and year, and by vessel, year and quarter. 
+
+```{r effort1, echo=FALSE, message=FALSE, warning=FALSE, comment=NA, fig.asp=1.0}
 
 fig_nums(
   name    = "effort1", 
   level = 1, display = FALSE,
-  caption = "Totaal number of fishing days per year")
+  caption = "Total number of fishing days per vessel and year (top) and by vessel, year and quarter (bottom)")
 
 
-effort %>% 
-
+# by year
+p1 <-
+  effort %>% 
   ggplot(aes(x=year, y=ndays)) +
   theme_publication() +
+  theme(plot.margin = margin(2,2,2,5, "mm")) +
+  theme(legend.position = "none") +
   geom_bar(aes(fill=vessel), stat="identity") + 
+  scale_fill_brewer(palette = "Paired") +
+  ylab(NULL) +
   scale_x_continuous(breaks=seq(min(effort$year), max(effort$year),1))
 
+# by quarter
+p2 <-
+  e %>% 
+  group_by(vessel, year, quarter) %>% 
+  summarize(ndays = n_distinct(paste(vessel, date))) %>% 
+
+  ggplot(aes(x=quarter, y=ndays)) +
+  theme_publication() +
+  theme(plot.margin = margin(2,2,2,5, "mm")) +
+  geom_bar(aes(fill=vessel), stat="identity") + 
+  scale_fill_brewer(palette = "Paired") +
+  scale_x_continuous(breaks=seq(1,12,1)) +
+  ylab(NULL) +
+  facet_grid(vessel~year)
+
+# Combine the plots
+gridExtra::grid.arrange(p1, p2, left = "Effort (days)", ncol=1, heights=c(10,20)) 
 
 ```
 
 _`r fig_nums("effort1")`_
 
-**Fishing effort (fishing days by vessel, year and quarter)**  
-
-```{r effort2, echo=FALSE, message=FALSE, warning=FALSE, comment=NA, fig.asp=0.6}
-
-fig_nums(
-  name    = "effort2", 
-  level = 1, display = FALSE,
-  caption = "Totaal number of fishing days per vessel, year and quarter")
-
-
-catch_byweek %>% 
-  group_by(vessel, year, quarter) %>% 
-  summarise(ndays = sum(effort, na.rm=TRUE)) %>% 
-
-  ggplot(aes(x=quarter, y=ndays)) +
-  theme_publication() +
-  # theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
-  geom_bar(aes(fill=vessel), stat="identity") + 
-  scale_x_continuous(breaks=seq(1,12,1)) +
-  facet_grid(vessel~year)
-
-
-```
-
-_`r fig_nums("effort2")`_
-
 \newpage
 
 **Total landings by vessel and year**
 
-```{r catch1, echo=FALSE, message=FALSE, warning=FALSE, comment=NA, fig.asp=0.6}
+```{r catch1, echo=FALSE, message=FALSE, warning=FALSE, comment=NA, fig.asp=1.2}
 
 fig_nums(
   name    = "catch1", 
   level = 1, display = FALSE,
-  caption = "Total landings by year")
+  caption = "Total landings (tonnes) per vessel and year (top) and by vessel, year and quarter (bottom)")
 
-catch_byweek %>% 
+my_colors <- RColorBrewer::brewer.pal(12, "Paired")[5:8]
+
+# by year
+p1 <-
+  catch_byweek %>% 
   group_by(vessel, year) %>% 
   summarise(catch = sum(catch, na.rm=TRUE)) %>% 
   mutate(catch = catch/1000) %>% 
-
+  
   ggplot(aes(x=year, y=catch)) +
   theme_publication() +
-  # theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
-  geom_bar(aes(fill=vessel), stat="identity") +
-  expand_limits(y=0) +
-  labs(y="landings (tonnes)") +
-  scale_x_continuous(breaks=seq(min(catch$year), max(catch$year),1)) 
+  theme(legend.position = "none") +
+  theme(plot.margin = margin(2,2,2,5, "mm")) +
+  geom_bar(aes(fill=vessel), stat="identity") + 
+  scale_fill_manual(values = my_colors) +
+  ylab(NULL) +
+  scale_x_continuous(breaks=seq(min(effort$year), max(effort$year),1))
 
+# by quarter
+p2 <-
+  catch_byweek %>% 
+  group_by(vessel, year, quarter) %>% 
+  summarise(catch = sum(catch, na.rm=TRUE)) %>% 
+  mutate(catch = catch/1000) %>% 
+
+  ggplot(aes(x=quarter, y=catch)) +
+  theme_publication() +
+  theme(plot.margin = margin(2,2,2,5, "mm")) +
+  # theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  geom_bar(aes(fill=vessel), stat="identity") + 
+  scale_fill_manual(values = my_colors) +
+  scale_x_continuous(breaks=seq(1,4,1)) +
+  ylab(NULL) +
+  facet_grid(vessel~year)
+
+gridExtra::grid.arrange(p1, p2, left = "Landings (tonnes)", ncol=1, heights=c(10,20)) 
 
 ```
 
 _`r fig_nums("catch1")`_
-
-**Total landings by vessel, year and quarter**
-
-```{r catch2, echo=FALSE, message=FALSE, warning=FALSE, comment=NA, fig.asp=1.0}
-
-fig_nums(
-  name    = "catch2", 
-  level = 1, display = FALSE,
-  caption = "Total landings per vessel, year and quarter")
-
-catch_byweek %>% 
-  group_by(vessel, year, quarter) %>% 
-  summarise(catch = sum(catch, na.rm=TRUE)) %>% 
-  mutate(catch = catch/1000) %>% 
-  
-  ggplot(aes(x=quarter, y=catch)) +
-  theme_publication() +
-  # theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
-  geom_bar(aes(fill=vessel), stat="identity") + 
-  scale_x_continuous(breaks=seq(1, 12,1)) +
-  labs(y="landings (tonnes)") +
-  facet_grid(vessel~year)
-
-```
-
-_`r fig_nums("catch2")`_
 
 \newpage
 
@@ -467,7 +599,7 @@ fig_nums(
 
 t <-
   catch_byweek %>% 
-  mutate(english_species = paste(english_name, species)) %>% 
+  mutate(english_species = paste(englishname, species)) %>% 
   mutate(english_species = ifelse(species %notin% top$species, "Other", english_species)) %>% 
   mutate(english_species = factor(english_species, 
                                   levels=c("Other", rev(top$english_species)))) %>% 
@@ -476,7 +608,7 @@ t <-
   mutate(catch = catch/1000) 
   
 colourCount = n+1
-getPalette = colorRampPalette(rev(brewer.pal(9, "Set1")))
+getPalette = colorRampPalette(rev(brewer.pal(12, "Paired")))
 
 p1 <-
   t %>% 
@@ -489,7 +621,8 @@ p1 <-
   theme(plot.title = element_text(hjust = 0.0)) +
   geom_bar(aes(fill=english_species), stat="identity") + 
   
-  scale_fill_manual(values = getPalette(colourCount)) +
+  scale_fill_manual(values = myTopColors) +
+  # scale_fill_manual(values = getPalette(colourCount)) +
   guides(fill = guide_legend(order = 2)) +
   scale_x_continuous(breaks=seq(min(catch_byweek$year), max(catch_byweek$year),1)) +
   labs(y="Landings (tonnes)", title="Landings by species", x="",fill="") 
@@ -506,18 +639,65 @@ p2 <-
   # geom_bar(aes(fill=english_species), stat="identity") + 
   geom_bar(aes(fill=english_species), stat="identity", position=position_fill()) + 
   
-  scale_fill_manual(values = getPalette(colourCount)) +
+  scale_fill_manual(values = myTopColors) +
+  # scale_fill_manual(values = getPalette(colourCount)) +
   guides(fill = guide_legend(order = 2)) +
-  # scale_fill_brewer(16, palette = "RdYlBu") +
   scale_x_continuous(breaks=seq(min(catch_byweek$year), max(catch_byweek$year),1)) +
   scale_y_continuous(labels=scales::percent) +
   labs(y="", title="Proportions of landings by species", x="",fill="") 
 
-print( p1 +  p2   + plot_layout(widths = c(10, 11) ))
+print( p1 +  p2   + plot_layout(widths = c(11, 11) ))
 
 ```
 
 _`r fig_nums("catch3a")`_
+
+\newpage
+
+**Proportion of the landings per month (top 15 species)**
+
+```{r catch4, echo=FALSE, message=FALSE, warning=FALSE, comment=NA, fig.asp=0.6}
+
+fig_nums(
+  name    = "catch4", 
+  level = 1, display = FALSE,
+  caption = "Proportion of the catch per quarter and year (top 15 species)")
+
+# colourCount = n+1
+# getPalette = colorRampPalette(rev(brewer.pal(12, "Paired")))
+
+t <-
+  catch_byweek %>% 
+  mutate(english_species = paste(englishname, species)) %>% 
+  mutate(english_species = ifelse(species %notin% top$species, "Other", english_species)) %>% 
+  mutate(english_species = factor(english_species, 
+                                  levels=c("Other", rev(top$english_species)))) %>% 
+  mutate(english_species = factor(english_species, 
+                                  levels=c("Other", rev(top$english_species)))) %>% 
+  group_by(english_species, year, quarter) %>% 
+  summarise(catch = sum(catch, na.rm=TRUE)) %>% 
+  mutate(catch = catch/1000) %>% 
+  group_by(year, quarter) %>% 
+  mutate(prop = catch/sum(catch)) %>% 
+  ungroup()
+
+t %>% 
+  ggplot(aes(x=quarter, y=prop)) +
+  theme_publication() +
+  theme(plot.margin = margin(1,1,1,1, "mm")) +
+  theme(legend.position = "right", legend.direction="vertical") +
+  geom_bar(aes(fill=english_species), stat="identity") + 
+  scale_fill_manual(values = myTopColors) +
+  # scale_fill_manual(values = getPalette(colourCount)) +
+  guides(fill = guide_legend(order = 2)) +
+  scale_x_continuous(breaks=seq(1,4,1)) +
+  ylab(NULL) +
+  facet_wrap(~year, nrow=1)
+
+
+```
+
+_`r fig_nums("catch4")`_
 
 \newpage
 
@@ -534,7 +714,7 @@ fig_nums(
 
 t <-
   catch_byweek %>% 
-  mutate(english_species = paste(english_name, species)) %>% 
+  mutate(english_species = paste(englishname, species)) %>% 
   mutate(english_species = ifelse(species %notin% top$species, "Other", english_species)) %>% 
   mutate(english_species = factor(english_species, 
                                   levels=c("Other", rev(top$english_species)))) %>% 
@@ -543,8 +723,8 @@ t <-
   summarise(revenue = sum(revenue, na.rm=TRUE)) %>% 
   mutate(revenue = revenue/1000) 
   
-colourCount = n+1
-getPalette = colorRampPalette(rev(brewer.pal(9, "Set1")))
+# colourCount = n+1
+# getPalette = colorRampPalette(rev(brewer.pal(12, "Paired")))
 
 p1 <-
   t %>% 
@@ -557,7 +737,8 @@ p1 <-
   theme(plot.title = element_text(hjust = 0.0)) +
   geom_bar(aes(fill=english_species), stat="identity") + 
   
-  scale_fill_manual(values = getPalette(colourCount)) +
+  scale_fill_manual(values = myTopColors) +
+  # scale_fill_manual(values = getPalette(colourCount)) +
   guides(fill = guide_legend(order = 2)) +
   scale_x_continuous(breaks=seq(min(catch_byweek$year), max(catch_byweek$year),1)) +
   labs(y="Revenue (kEuro)", title="Revenue by species", x="",fill="") 
@@ -574,9 +755,9 @@ p2 <-
   # geom_bar(aes(fill=english_species), stat="identity") + 
   geom_bar(aes(fill=english_species), stat="identity", position=position_fill()) + 
   
-  scale_fill_manual(values = getPalette(colourCount)) +
+  scale_fill_manual(values = myTopColors) +
+  # scale_fill_manual(values = getPalette(colourCount)) +
   guides(fill = guide_legend(order = 2)) +
-  # scale_fill_brewer(16, palette = "RdYlBu") +
   scale_x_continuous(breaks=seq(min(catch_byweek$year), max(catch_byweek$year),1)) +
   scale_y_continuous(labels=scales::percent) +
   labs(y="", title="Proportions of revenue by species", x="",fill="") 
@@ -589,97 +770,20 @@ _`r fig_nums("catch3b")`_
 
 \newpage
 
-**Total landings by species and year**
 
- Top 15 species in the landings.
- 
-```{r catch3, echo=FALSE, message=FALSE, warning=FALSE, comment=NA, fig.asp=1.0}
-
-fig_nums(
-  name    = "catch3", 
-  level = 1, display = FALSE,
-  caption = "Total landings per species and year (top 15 species)")
-
-t <-
-  catch_byweek %>% 
-  filter(species %in% top$species) %>% 
-  left_join(top, by="species") %>% 
-  mutate(english_species = factor(english_species, levels=top$english_species)) %>% 
-  group_by(regulated, english_species, year) %>% 
-  summarise(catch = sum(catch, na.rm=TRUE)) %>% 
-  mutate(catch = catch/1000) 
-  
-# p1 <-
-  t %>% 
-  # filter(regulated == "NR") %>% 
-  ggplot(aes(x=year, y=catch)) +
-  theme_publication() +
-  theme(legend.position = "none") +
-  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
-  theme(plot.margin = margin(1,1,1,1, "mm")) +
-  theme(plot.title = element_text(hjust = 0.0)) +
-  # geom_bar(aes(fill=english_species), stat="identity") + 
-  geom_bar(stat="identity") + 
-  scale_x_continuous(breaks=seq(min(catch_byweek$year), max(catch_byweek$year),1)) +
-  labs(y="Landings (tonnes)", title="Landings", x="") +
-  facet_wrap(~english_species, ncol=4)
-
-```
-
-_`r fig_nums("catch3")`_
-
-\newpage
-
-**Proportion of the landings per month (top 15 species)**
-
-```{r catch4, echo=FALSE, message=FALSE, warning=FALSE, comment=NA, fig.asp=1.0}
-
-fig_nums(
-  name    = "catch4", 
-  level = 1, display = FALSE,
-  caption = "Proportion of the catch per month (top 15 species)")
-
-t <-
-  catch_byweek %>% 
-  filter(species %in% top$species) %>% 
-  left_join(top, by="species") %>% 
-  mutate(english_species = factor(english_species, levels=top$english_species)) %>% 
-  group_by(regulated, english_species, month) %>% 
-  summarise(catch = sum(catch, na.rm=TRUE)) %>% 
-  mutate(catch = catch/1000) %>% 
-  group_by(regulated, english_species) %>% 
-  mutate(prop = catch/sum(catch)) 
-
-# p1 <-
-  t %>% 
-  # filter(regulated == "NR") %>% 
-  ggplot(aes(x=month, y=prop)) +
-  theme_publication() +
-  theme(legend.position = "none") +
-  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
-  theme(plot.margin = margin(1,1,1,1, "mm")) +
-  theme(plot.title = element_text(hjust = 0.0)) +
-  # geom_bar(aes(fill=english_species), stat="identity") + 
-  geom_bar(stat="identity") + 
-  scale_x_continuous(breaks=seq(1,12,1)) +
-  scale_y_continuous(labels=scales::percent) +
-  labs(y="prop of landings by species and month", title="Proportions by month", x="") +
-  facet_wrap(~english_species, ncol=4)
-
-```
-
-_`r fig_nums("catch4")`_
-
-\newpage
 
 **Percentage of weeks targeting certain species**
 
-```{r catch5, echo=FALSE, message=FALSE, warning=FALSE, comment=NA, fig.asp=1.0}
+For each year, the proportion of weeks targeting a certain species. The target species of a vessel-year-week combination was derived by determining the species with the highest revenue for each combination. Then the number of vessel-year-week-target combinations were counted and expresses as percentages per year and species. Surmullet (MUR) and European Squid (SQR) have been the main target species during the period considered. Since 2018 the contribution of targeted trips on Common Cuttlefish (CTC) has strongly increased. 
+
+
+```{r catch5, echo=FALSE, message=FALSE, warning=FALSE, comment=NA, fig.asp=0.6}
 
 fig_nums(
   name    = "catch5", 
   level = 1, display = FALSE,
   caption = "Number of weeks targeting certain species (highest value in the catch)")
+
 
 t <-
   catch_byweek %>% 
@@ -689,22 +793,26 @@ t <-
   summarise(n=n()) %>% 
   group_by(year) %>%
   mutate(prop = n/sum(n, na.rm=TRUE)) %>% 
-  left_join(top, by=c("target"= "species")) %>% 
+  left_join(bind_rows(top, rest), by=c("target"= "species")) %>% 
   drop_na(english_species) %>% 
-  mutate(english_species = factor(english_species, levels=top$english_species))
+  # mutate(english_species = factor(english_species, levels=levels(all$english_species)))
+  mutate(english_species = factor(english_species, 
+                                  levels=rev(all$english_species))) 
+
+# colourCount = levels(t$english_species)
+# getPalette = colorRampPalette(rev(brewer.pal(12, "Paired")))
 
 t %>% 
   ggplot(aes(x=year, y=prop)) +
   theme_publication() +
-  theme(legend.position = "none") +
-  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
-  theme(plot.margin = margin(1,1,1,1, "mm")) +
-  theme(plot.title = element_text(hjust = 0.0)) +
-  geom_bar(stat="identity") + 
-  scale_x_continuous(breaks=seq(min(catch_byweek$year), max(catch_byweek$year),1)) +
+  theme(plot.margin = margin(2,2,2,5, "mm")) +
+  theme(legend.position = "right", legend.direction="vertical") +
+  geom_bar(aes(fill=english_species), stat="identity") + 
+  scale_fill_manual(values = myTargetColors) +
+  guides(fill = guide_legend(order = 2)) +
+  scale_x_continuous(breaks=seq(min(t$year),max(t$year),1)) +
   scale_y_continuous(labels=scales::percent) +
-  labs(y="", title="Percentage of targeted weeks", x="") +
-  facet_wrap(~english_species, ncol=4)
+  labs(y="proportion of targeted weeks", x="", fill="Target species") 
 
 ```
 
@@ -726,7 +834,7 @@ t <-
   filter(species %in% top$species) %>%
   left_join(top, by="species") %>% 
   left_join(regulated, by="species") %>% 
-  mutate(english_species = factor(paste(english_name, species), levels=top$english_species)) %>% 
+  mutate(english_species = factor(paste(englishname, species), levels=top$english_species)) %>% 
   group_by(regulated, english_species, year) %>% 
   summarise(
     price = mean(avgprice, na.rm=TRUE)) %>% 
@@ -738,13 +846,16 @@ t <-
   
   ggplot() +
   theme_publication() +
-  theme(plot.margin = margin(1,1,1,1, "mm")) +
+  theme(plot.margin = margin(2,2,2,5, "mm")) +
   theme(plot.title = element_text(hjust = 0.0)) +
   theme(legend.position = "none") +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
 
-  geom_point(aes(x=year, y=price)) +  
-  geom_line(aes(x=year, y=price)) +  
+  geom_point(aes(x=year, y=price, colour=english_species)) +  
+  geom_line(aes(x=year, y=price, colour=english_species)) +  
+  scale_colour_manual(values = myTopColors) +
+  # scale_fill_manual(values = getPalette(colourCount)) +
+  guides(fill = guide_legend(order = 2)) +
   guides(fill=guide_legend(nrow = 1)) + 
   scale_x_continuous(breaks=seq(min(e$year), max(e$year),1)) +
   labs(x="",y="", title="Average price") +
@@ -768,7 +879,7 @@ fig_nums(
 
 catch_byweek %>% 
   filter(species %in% top$species) %>%   
-  mutate(english_species = paste(english_name, species)) %>% 
+  mutate(english_species = paste(englishname, species)) %>% 
   mutate(english_species = factor(english_species, levels=top$english_species)) %>% 
   group_by(english_species, species, year) %>% 
   summarise(catch = sum(catch,na.rm=TRUE)/1000) %>% 
@@ -777,8 +888,11 @@ catch_byweek %>%
   
   ggplot(aes(x=catch, y=avgprice)) +
   theme_publication() +
-  geom_point() +
-  geom_smooth(se=FALSE, method="lm", colour="black", linewidth=0.5) +
+  theme(legend.position = "none") +
+  theme(plot.margin = margin(2,2,2,5, "mm")) +
+  geom_point(aes(colour=english_species)) +
+  geom_smooth(aes(colour=english_species), se=FALSE, method="lm", linewidth=0.5) +
+  scale_colour_manual(values = myTopColors) +
   expand_limits(x=0, y=0) +
   labs(x="catch (tonnes)") +
   facet_wrap(~english_species, scales="free", ncol=4)
@@ -802,7 +916,7 @@ fig_nums(
 t <-
   catch_byweek %>% 
   filter(species %in% top$species) %>%
-  mutate(english_species = factor(paste(english_name, species), levels=top$english_species)) %>% 
+  mutate(english_species = factor(paste(englishname, species), levels=top$english_species)) %>% 
   drop_na(catch, lat, lon) %>% 
   group_by(regulated, english_species, rect, lat, lon, year) %>% 
   summarise(
@@ -873,26 +987,11 @@ fig_nums(
 
 winsorize      <- c(0.05, 0.95)
 
-calc_boxplot_stat <- function(x) {
-  coef <- 1.5
-  n <- sum(!is.na(x))
-  # calculate quantiles
-  stats <- quantile(x, probs = c(0.0, 0.25, 0.5, 0.75, 1.0))
-  names(stats) <- c("ymin", "lower", "middle", "upper", "ymax")
-  iqr <- diff(stats[c(2, 4)])
-  # set whiskers
-  outliers <- x < (stats[2] - coef * iqr) | x > (stats[4] + coef * iqr)
-  if (any(outliers)) {
-    stats[c(1, 5)] <- range(c(stats[2:4], x[!outliers]), na.rm = TRUE)
-  }
-  return(stats)
-}
-
 # catch %>% 
 t <-
   e %>% 
   filter(species %in% top$species) %>%
-  mutate(english_species = paste(english_name, species)) %>% 
+  mutate(english_species = paste(englishname, species)) %>% 
   mutate(english_species = factor(english_species, levels=top$english_species)) %>% 
   drop_na(weight) %>% 
   group_by(regulated, vessel, english_species, year, date) %>% 
@@ -953,6 +1052,63 @@ s <-
 ```
 
 _`r fig_nums("cpuepersoort")`_
+
+**Observed revenue rate (revenue / week)**
+
+```{r obsrevenue, echo=FALSE, message=FALSE, warning=FALSE, comment=NA, fig.asp=1.0}
+
+fig_nums(
+  name    = "obsrevenue", 
+  level = 1, display = FALSE,
+  caption = "Observed revenue by week. Red dot indicates medians. Blue line is the linear slope through the medians. The slope refers to the slope of the regression line. ")
+
+  
+# revenue %>% 
+t <-
+  catch_byweek %>% 
+  mutate(revenue = catch * avgprice) %>% 
+  group_by(vessel, year, quarter, week) %>% 
+  summarise(revenue = sum(revenue, na.rm=TRUE)) %>% 
+  left_join(effort_byweek2, by=c("vessel", "year","week")) %>% 
+  mutate(revenue_day = revenue / effort) %>% 
+  ungroup() 
+
+# t %>% distinct(english_species, regulated) %>% View()
+# e %>% filter(vessel == "SCH135", year==2017, week==38) %>% mutate(date2=format(date, format="%a %m/%d/%Y")) %>% View()
+
+# median
+m <-
+  t %>% 
+  group_by(vessel, year, quarter) %>% 
+  summarise(median = median(revenue_day, na.rm=TRUE))
+
+
+# p1 <-
+t %>%   
+  # filter(regulated =="NR") %>% 
+  
+  ggplot(aes(x=year, y=revenue_day, group=year)) +
+  theme_publication() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  theme(plot.margin = margin(1,1,1,1, "mm")) +
+  theme(plot.title = element_text(hjust = 0.0)) +
+  
+  stat_summary(fun.data = calc_boxplot_stat, geom="boxplot") +  
+  geom_point(data=m, 
+             aes(x=year, y=median), 
+             colour="red", inherit.aes = FALSE) +
+  expand_limits(y=0) +
+  scale_x_continuous(breaks=seq(min(e$year), max(e$year),1)) +
+  # scale_y_log10() +
+  labs(x="", y="revenue/day (euro)", title="Observed revenue per week") +
+  facet_grid(vessel~quarter)
+  
+
+
+```
+
+_`r fig_nums("obsrevenue")`_
+
 
 \newpage
 
@@ -1719,6 +1875,15 @@ The following species have the following third linear factor:
 
 ```{r cpuemodel, echo=FALSE, fig.asp=1.0, message=FALSE, warning=FALSE, comment=NA}
 
+# Function to calculate deviance table
+GetDevianceTable=function(glm){
+  tmp <- anova(glm,test="Chisq")
+  tmp <- as.data.frame(tmp)
+  tmp$PercDevExp <- 100*(tmp$Deviance/(max(tmp[,4])-min(tmp[,4])))
+  row.names(tmp)[tmp$PercDevExp >= 5.0]
+  DevTableProPos <- tmp
+  DevTableProPos   
+}
 
 # fit final model
 x <-
@@ -1735,7 +1900,10 @@ x <-
     fit       = purrr::map(data, ~MASS::glm.nb(model, data = .x)),
     tidied    = purrr::map(fit, broom::tidy),
     augmented = purrr::map(fit, broom::augment),
-    anova     = purrr::map(fit, stats::anova),
+    anova     = purrr::map(fit, stats::anova, test="Chisq"),
+    anovaf    = purrr::map(fit, stats::anova, test="F"),
+    summary   = purrr::map(fit, summary),
+    devtable  = purrr::map(fit, GetDevianceTable),
     coeff     = purrr::map(fit, stats::coefficients),
     # resid     = purrr::map(fit, stats::residuals),
     aic       = purrr::map(fit, stats::AIC)
@@ -1749,6 +1917,7 @@ x <-
   rowwise() %>% 
   mutate(n        = length(anova[["Resid. Dev"]])) %>% 
   mutate(expl_dev = (anova[["Resid. Dev"]][1]-anova[["Resid. Dev"]][n])/anova[["Resid. Dev"]][1]) %>% 
+  mutate(pchisq   = pchisq(fit$null.deviance-fit$deviance, fit$df.null-fit$df.residual, lower.tail=FALSE)) %>%  
   mutate(pred =  list(
                     data.frame(
                       fit = predict(fit, unnest(data),se.fit=T,type="link")[c(1)],
@@ -1854,6 +2023,22 @@ for (i in 1:nrow(x)) {
         group_by(species, efficiency) %>%
         mutate(expl_dev = (first(resid_dev) - resid_dev)/dplyr::first(resid_dev) )
 
+    )
+}
+
+anovaf <- data.frame(stringsAsFactors = FALSE)
+for (i in 1:nrow(x)) {
+  anovaf <-
+    bind_rows(
+      anovaf,
+      data.frame(species    = as.character(paste(x[i, "species"][["species"]]))) %>% 
+        mutate(efficiency = scales::percent(x[i, "efficiency"][["efficiency"]], accuracy=0.1)) %>% 
+        bind_cols(as.data.frame(x[i, "anovaf"][["anovaf"]][[1]]) %>% 
+                    rownames_to_column() %>% 
+                    setNames(c("var","df","deviance", "resid_df", "resid_dev","F", "pr(>F)"))) %>% 
+        left_join(top, by="species") %>% 
+        group_by(species, efficiency) %>%
+        mutate(expl_dev = (first(resid_dev) - resid_dev)/dplyr::first(resid_dev) )
     )
 }
 
@@ -2096,7 +2281,7 @@ if(recalculatemaps == TRUE) {
     # cpue map
     tmap <-
       catch_byweek %>% 
-      mutate(english_species = paste(english_name, species)) %>% 
+      mutate(english_species = paste(englishname, species)) %>% 
       filter(english_species == sp) %>%
       group_by(regulated, english_species, rect, lat, lon, year) %>% 
       summarise(
