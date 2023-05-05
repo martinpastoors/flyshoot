@@ -8,7 +8,7 @@ output:
 ```{r setup, include=FALSE}
 
 # =====================================================================================================
-# FLYSHOOT CPUE analysis
+# FLYSHOOT CPUE analysis annex by species
 # 
 # 11/01/2023 first coding
 # 16/03/2023 full GLM modelling of top 15 species in the catch
@@ -62,15 +62,21 @@ divisions <- c("27.7.d", "27.7.e") # fix error in division 4.a
 
 # Folder for storing figures  
 if(!any(is.na(divisions))) {
-  folder <- paste(divisions, collapse="-") } else {
-  folder <- "all"}
+  folder <- paste("CPUE", paste(divisions, collapse="-")) 
+} else {
+  folder <- "CPUE northsea-channel"
+}
 
-figuresdir <- file.path(onedrive, "reports","figures",folder)
-tablesdir  <- file.path(onedrive, "reports","tables",folder)
+dir.create   (file.path(onedrive, "report",folder, "figures"), showWarnings = FALSE)
+figuresdir <- file.path(onedrive, "report",folder, "figures")
 
-top <- readr::read_rds(file=file.path(onedrive,
-                                      "rdata",
-                                      paste0("top_",folder,".rds")))
+dir.create  (file.path(onedrive, "report",folder, "tables"), showWarnings = FALSE)
+tablesdir <- file.path(onedrive, "report",folder, "tables")
+
+dir.create   (file.path(onedrive, "report",folder, "data"), showWarnings = FALSE)
+datadir    <- file.path(onedrive, "report",folder, "data")
+
+top <- readr::read_rds(file=file.path(datadir, paste0("top_",folder,".rds")))
 
 # writexl::write_xlsx(catch_byweek, path=file.path(onedrive, paste0("export",folder,".xlsx")))
 

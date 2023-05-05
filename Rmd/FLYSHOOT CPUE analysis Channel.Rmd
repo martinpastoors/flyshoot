@@ -12,7 +12,7 @@ output:
 # 
 # 11/01/2023 first coding
 # 16/03/2023 full GLM modelling of top 15 species in the catch
-#
+# 21/04/2023 TO DO: convert totals to total per vessel
 # =====================================================================================================
 
 knitr::opts_chunk$set(echo = FALSE,	message = FALSE,	warning = FALSE,	comment = "",	crop = TRUE )
@@ -173,14 +173,19 @@ divisions <- c("27.7.d", "27.7.e") # fix error in division 4.a
 
 # Folder for storing figures  
 if(!any(is.na(divisions))) {
-  folder <- paste(divisions, collapse="-") } else {
-  folder <- "all"}
+  folder <- paste("CPUE", paste(divisions, collapse="-")) 
+} else {
+  folder <- "CPUE northsea-channel"
+}
 
-dir.create(file.path(onedrive, "reports","figures",folder), showWarnings = FALSE)
-figuresdir <- file.path(onedrive, "reports","figures",folder)
+dir.create   (file.path(onedrive, "report",folder, "figures"), showWarnings = FALSE)
+figuresdir <- file.path(onedrive, "report",folder, "figures")
 
-dir.create(file.path(onedrive, "reports","tables",folder), showWarnings = FALSE)
-tablesdir <- file.path(onedrive, "reports","tables",folder)
+dir.create  (file.path(onedrive, "report",folder, "tables"), showWarnings = FALSE)
+tablesdir <- file.path(onedrive, "report",folder, "tables")
+
+dir.create   (file.path(onedrive, "report",folder, "data"), showWarnings = FALSE)
+datadir    <- file.path(onedrive, "report",folder, "data")
 
 # making the data selections
 e <- 
@@ -191,6 +196,9 @@ e <-
   {if(!is.na(all(yrs)))     filter(., year %in% yrs) else . } %>% 
   {if(!is.na(all(mnths)))   filter(., month %in% mnths) else .} %>% 
   {if(!any(is.na(divisions))) filter(., division %in% divisions) else .} %>% 
+  
+  # temp fix!!
+  filter(!(source=="m-catch" & year < 2023)) %>% 
   
   left_join(regulated, by="species") %>% 
   mutate(regulated = case_when(
@@ -230,7 +238,7 @@ effort <-
   dplyr::summarize(ndays = n_distinct(date)) %>% 
   
   # temp fix!!
-  mutate(ndays = ifelse(source=="m-catch" & year < 2023, 4, ndays)) %>% 
+  mutate(ndays = ifelse(source=="m-catch" & year < 2023, NA, ndays)) %>% 
   dplyr::group_by(vessel, year) %>% 
   dplyr::summarize(ndays  = sum(ndays, na.rm=TRUE))  %>% 
 
@@ -264,7 +272,7 @@ effort_byweek2 <-
   dplyr::summarize(effort  = n_distinct(date))  %>% 
   
   # temp fix!!
-  mutate(effort = ifelse(source=="m-catch" & year < 2023, 4, effort)) %>% 
+  mutate(effort = ifelse(source=="m-catch" & year < 2023, NA, effort)) %>% 
   dplyr::group_by(vessel, year, week) %>% 
   dplyr::summarize(effort  = sum(effort, na.rm=TRUE))  %>% 
 
@@ -364,15 +372,15 @@ names(myAddedColors)    <- c(t2b$english_species)
 myTargetColors          <- c(myTopColors, myAddedColors)
 # scales::show_col(myTargetColors)
 
-readr::write_rds(top, file=file.path(onedrive,
-                                     "rdata",
-                                     paste0("top_",folder,".rds")))
+readr::write_rds(top, file=file.path(datadir, paste0("top_",folder,".rds")))
 # writexl::write_xlsx(catch_byweek, path=file.path(onedrive, paste0("export",folder,".xlsx")))
 
 ```
 
 
 # FLYSHOOT fishery CPUE analysis in `r paste(sort(unique(catch_byweek$division)), collapse=(", "))`
+
+**Version where M-Catch export have been temporarily removed because of error in number of fishing days**
 
 M.A. Pastoors
 
@@ -391,8 +399,6 @@ Eric van Linden en Anton Dekker
 Vissershavenweg 35
 
 2583 DK  Den Haag
-
-&nbsp;
 
 &nbsp;
 
@@ -648,6 +654,14 @@ p2 <-
 
 print( p1 +  p2   + plot_layout(widths = c(11, 11) ))
 
+png(filename=file.path(figuresdir, "landings by species.png"),
+     width=12.5, height=5.5, units="in", res=300, bg="transparent")
+print( p1 +  p2   + 
+         plot_layout(widths = c(11, 11) ) + 
+         theme(plot.background = element_blank()) +
+         theme(panel.background = element_blank())) 
+invisible(dev.off())
+
 ```
 
 _`r fig_nums("catch3a")`_
@@ -764,6 +778,14 @@ p2 <-
 
 print( p1 +  p2   + plot_layout(widths = c(10, 11) ))
 
+png(filename=file.path(figuresdir, "revenue by species.png"),
+     width=12.5, height=5.5, units="in", res=300, bg="transparent")
+print( p1 +  p2   + 
+         plot_layout(widths = c(11, 11) ) + 
+         theme(plot.background = element_blank()) +
+         theme(panel.background = element_blank())) 
+invisible(dev.off())
+
 ```
 
 _`r fig_nums("catch3b")`_
@@ -802,7 +824,8 @@ t <-
 # colourCount = levels(t$english_species)
 # getPalette = colorRampPalette(rev(brewer.pal(12, "Paired")))
 
-t %>% 
+pp <-
+  t %>% 
   ggplot(aes(x=year, y=prop)) +
   theme_publication() +
   theme(plot.margin = margin(2,2,2,5, "mm")) +
@@ -813,6 +836,15 @@ t %>%
   scale_x_continuous(breaks=seq(min(t$year),max(t$year),1)) +
   scale_y_continuous(labels=scales::percent) +
   labs(y="proportion of targeted weeks", x="", fill="Target species") 
+
+print(pp)
+
+png(filename=file.path(figuresdir, "proportion of targeted weeks.png"),
+     width=12.5, height=5.5, units="in", res=300, bg="transparent")
+print( pp   + 
+         theme(plot.background = element_blank()) +
+         theme(panel.background = element_blank())) 
+invisible(dev.off())
 
 ```
 
@@ -840,7 +872,7 @@ t <-
     price = mean(avgprice, na.rm=TRUE)) %>% 
   ungroup() 
 
-# p1 <-
+pp <-
   t %>% 
   # filter(regulated == "NR") %>% 
   
@@ -861,6 +893,14 @@ t <-
   labs(x="",y="", title="Average price") +
   facet_wrap(~english_species, ncol=4)
   
+print(pp)
+
+png(filename=file.path(figuresdir, "prices by species.png"),
+     width=12.5, height=5.5, units="in", res=300, bg="transparent")
+print( pp   + 
+         theme(plot.background = element_blank()) +
+         theme(panel.background = element_blank())) 
+invisible(dev.off())
 
 ```
 
@@ -1021,7 +1061,7 @@ s <-
   group_by(regulated, english_species) %>%
   summarise(slope = scales::percent(lm(year ~ median)$coefficients[2], accuracy=1)) 
 
-# p1 <-
+pp <-
   t2 %>%   
   # filter(regulated =="NR") %>% 
   
@@ -1045,22 +1085,32 @@ s <-
   expand_limits(y=0) +
   scale_x_continuous(breaks=seq(min(e$year), max(e$year),1)) +
   scale_y_log10() +
-  labs(x="", y="landings/day (kg)", title="Observed landings per week") +
+  labs(x="", y="landings/day (kg)", title="Average landings per day") +
   facet_wrap(~english_species, ncol=4)
+
+print(pp)
+
+png(filename=file.path(figuresdir, "average landings per day.png"),
+     width=12.5, height=5.5, units="in", res=300, bg="transparent")
+print( pp   + 
+         facet_wrap(~english_species, ncol=5) +
+         theme(plot.background = element_blank()) +
+         theme(panel.background = element_blank())) 
+invisible(dev.off())
 
 
 ```
 
 _`r fig_nums("cpuepersoort")`_
 
-**Observed revenue rate (revenue / week)**
+**Average revenue rate (revenue / day)**
 
 ```{r obsrevenue, echo=FALSE, message=FALSE, warning=FALSE, comment=NA, fig.asp=1.0}
 
 fig_nums(
   name    = "obsrevenue", 
   level = 1, display = FALSE,
-  caption = "Observed revenue by week. Red dot indicates medians. Blue line is the linear slope through the medians. The slope refers to the slope of the regression line. ")
+  caption = "Average revenue by week. Red dot indicates medians. Blue line is the linear slope through the medians. The slope refers to the slope of the regression line. ")
 
   
 # revenue %>% 
@@ -1083,10 +1133,9 @@ m <-
   summarise(median = median(revenue_day, na.rm=TRUE))
 
 
-# p1 <-
-t %>%   
-  # filter(regulated =="NR") %>% 
-  
+pp <-
+  t %>%   
+
   ggplot(aes(x=year, y=revenue_day, group=year)) +
   theme_publication() +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
@@ -1100,9 +1149,18 @@ t %>%
   expand_limits(y=0) +
   scale_x_continuous(breaks=seq(min(e$year), max(e$year),1)) +
   # scale_y_log10() +
-  labs(x="", y="revenue/day (euro)", title="Observed revenue per week") +
+  labs(x="", y="revenue/day (euro)", title="Average revenue per day") +
   facet_grid(vessel~quarter)
   
+print(pp)
+
+png(filename=file.path(figuresdir, "average revenue per day.png"),
+     width=12.5, height=5.5, units="in", res=300, bg="transparent")
+print( pp   + 
+         plot_layout(widths = c(11, 11) ) + 
+         theme(plot.background = element_blank()) +
+         theme(panel.background = element_blank())) 
+invisible(dev.off())
 
 
 ```
@@ -1940,9 +1998,7 @@ predfinal <-
   mutate(english_species = factor(english_species, levels=top$english_species)) %>% 
   left_join(regulated)
 
-readr::write_rds(predfinal, file=file.path(onedrive,
-                                   "rdata",
-                                   paste0("CPUE_",folder,".rds")))
+readr::write_rds(predfinal, file=file.path(datadir, paste0(folder,".rds")))
 
 # generate obs and predicted dataset
 obspred <-
@@ -2140,6 +2196,13 @@ pp <-
   labs(x="", y="landings/day (kg)", title="CPUE", fill="model") +
   facet_wrap(~english_species, scales="free_y", ncol=5)
 
+png(filename=file.path(figuresdir, "CPUE timetrends stepwise.png"),
+     width=12.5, height=5.5, units="in", res=300, bg="transparent")
+print( pp + 
+         theme(plot.background = element_blank()) +
+         theme(panel.background = element_blank())) 
+invisible(dev.off())
+
 jpeg(filename=file.path(figuresdir, "CPUE timetrends stepwise.jpg"),
      width=10, height=8, units="in", res=300)
 print( pp) 
@@ -2165,6 +2228,12 @@ pp <-
   labs(x="", y="landings/day (kg)", title="Standardized CPUE") +
   facet_wrap(~english_species, scales="free_y", ncol=5)
 
+png(filename=file.path(figuresdir, "CPUE timetrends.png"),
+     width=12.5, height=5.5, units="in", res=300, bg="transparent")
+print( pp + 
+         theme(plot.background = element_blank()) +
+         theme(panel.background = element_blank())) 
+invisible(dev.off())
 
 jpeg(filename=file.path(figuresdir, "CPUE timetrends.jpg"),
      width=10, height=8, units="in", res=300)
@@ -2196,6 +2265,13 @@ pp <-
   
   scale_x_continuous(breaks=seq(min(as.integer(ac(years$year))), max(as.integer(ac(years$year))),1)) +
   labs(x="", y="", title="relative CPUE by species") 
+
+png(filename=file.path(figuresdir, "CPUE timetrends ggridges.png"),
+     width=12.5, height=5.5, units="in", res=300, bg="transparent")
+print( pp + 
+         theme(plot.background = element_blank()) +
+         theme(panel.background = element_blank())) 
+invisible(dev.off())
 
 jpeg(filename=file.path(figuresdir, "CPUE timetrends ggridges.jpg"),
      width=8, height=8, units="in", res=300)
@@ -2248,6 +2324,13 @@ pp <-
   scale_y_continuous(limits=c(10,10000), trans='log10') +
   labs(x="", y="Predicted landings/day (kg)", title="Observed vs. Predicted CPUE") +
   facet_wrap(~english_species, ncol=5)
+
+png(filename=file.path(figuresdir, "CPUE obspred.png"),
+     width=12.5, height=5.5, units="in", res=300, bg="transparent")
+print( pp + 
+         theme(plot.background = element_blank()) +
+         theme(panel.background = element_blank())) 
+invisible(dev.off())
 
 jpeg(filename=file.path(figuresdir, "CPUE obspred.jpg"),
      width=10, height=8, units="in", res=300)
