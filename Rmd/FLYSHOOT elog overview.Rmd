@@ -84,7 +84,7 @@ load(file.path(onedrive, "rdata/haul.RData"))
 load(file.path(onedrive, "rdata/kisten.RData"))
 load(file.path(onedrive, "rdata/elog.RData"))
 
-yrs     <- 2000:2023
+yrs     <- 2012:2023
 mnths   <- 1:12
 vessels <- NA
 
@@ -106,7 +106,7 @@ e <-
   ungroup() %>% 
   mutate(species = tolower(species)) %>% 
   left_join(dplyr::select(asfis,
-                          species, scientific_name, english_name, dutch_name),
+                          species, scientificname, englishname, dutchname),
             by = "species")
 
 # calculate the scaling of plots
@@ -116,33 +116,6 @@ xmax <- ceiling(2 * (max(e$lon, na.rm=TRUE)+0.5))/2;
 ymin <- floor(2 * (min(e$lat, na.rm=TRUE)-0.5))/2;
 ymax <- ceiling(2* (max(e$lat, na.rm=TRUE)+0.5))/2
 
-# xdistance <- geosphere::distGeo(matrix(c(xmin, ymin), ncol=2, byrow=FALSE),
-#                                 matrix(c(xmax, ymin) , ncol=2, byrow=FALSE) )/1000
-# ydistance <- geosphere::distGeo(matrix(c(xmin, ymin), ncol=2, byrow=FALSE),
-#                                 matrix(c(xmin, ymax) , ncol=2, byrow=FALSE) )/1000
- 
- 
- 
-# xdistance <- geo::arcdist(lat=ymin, lon=xmin, lat1 = ymin, lon1 = xmax, scale = "km")
-# ydistance <- geo::arcdist(lat=ymin, lon=xmin, lat1 = ymax, lon1 = xmin, scale = "km") 
-# aspect    <- ydistance/xdistance
-
-# if (aspect < 1.4) {
-#   
-#   projecty  <- ((1.4/aspect * ydistance) - ydistance)/2
-#   ymax      <- as.numeric(geosphere::destPoint(p=c(xmin, ymax), b=0, d=projecty*1000)[,2])
-#   ymin      <- as.numeric(geosphere::destPoint(p=c(xmin, ymin), b=180, d=projecty*1000)[,2])
-#   # ymin      <- floor  (2 * (ymin-0.5))/2 
-#   # ymax      <- ceiling(2* (ymax+0.5))/2
-# 
-# } else {
-# 
-#   projectx  <- ((aspect/1.4 * xdistance) - xdistance)/2
-#   xmin      <- as.numeric(geosphere::destPoint(p=c(xmin, ymin), b=270, d=projectx*1000)[,1])
-#   xmax      <- as.numeric(geosphere::destPoint(p=c(xmax, ymin), b=90,  d=projectx*1000)[,1])
-#   # xmin      <- floor(2 * (xmin-0.5))/2;   
-#   # xmax      <- ceiling(2 * (xmax+0.5))/2;
-# }
 n <- 15
 
 effort <-
@@ -153,7 +126,7 @@ effort <-
 catch <-
   e %>% 
   dplyr::group_by(source, vessel, year, month, species, 
-                  scientific_name, english_name, dutch_name) %>% 
+                  scientificname, englishname, dutchname) %>% 
   dplyr::summarize(weight = sum(weight, na.rm=TRUE)) %>% 
   dplyr::group_by(source, vessel, year, month) %>% 
   dplyr::mutate(perc = weight/sum(weight, na.rm=TRUE)) %>% 
@@ -171,27 +144,49 @@ top <-
 ```
 
 
-# Elog overview
-
-### Vessels `r paste(unique(e$vessel), collapse=", ")`
-
-### Years `r paste(yrs, collapse=", ")`, months: `r paste(mnths, collapse=", ")`
+# Een overzicht van de beschikbare elog data. 
 
 Report generated: `r format(Sys.time(), '%d/%m/%Y')`
 
 &nbsp;
 
-Een overzicht van de beschikbare elog data. 
+Vessels `r paste(unique(e$vessel), collapse=", ")`
 
-<!-- ########################################################################################## -->
-<!-- Table: vangst --------------------------- -->
-<!-- ########################################################################################## -->
+Years `r paste(min(yrs), max(yrs), sep="-")`
 
-Aantal visdagen per schip, maand en jaar (kleur geeft aan of het Ecatch of PEFA is)
+Totale vangst per schip, maand en jaar (kleur geeft aan of het Ecatch of PEFA is)
+
+```{r vangst, echo=FALSE, message=FALSE, warning=FALSE, comment=NA, fig.asp=1.0}
+
+fig_nums(
+  name    = "totalevangst", 
+  level = 1, display = FALSE,
+  caption = "Totale vangst (=aanvoer)")
+
+
+catch %>% 
+  group_by(source, vessel, year, month) %>% 
+  summarise(weight = sum(weight, na.rm=TRUE)) %>% 
+  
+  ggplot(aes(x=year, y=month)) +
+  theme_publication() +
+  geom_point(aes(colour=source, size=weight)) +
+  scale_y_continuous(breaks=seq(1,12,1)) +
+  labs(size="catch") + 
+  facet_wrap(~vessel)
+
+
+```
+
+_`r fig_nums("totalevangst")`_
+
+\newpage
+
+Aantal visdagen per schip, maand en jaar (kleur geeft aan uit welke bron de data afkomstig zijn)
 
 ```{r visdagen, echo=FALSE, message=FALSE, warning=FALSE, comment=NA, fig.asp=1.0}
 
-tab_nums(
+fig_nums(
   name    = "visdagen", 
   level = 1, display = FALSE,
   caption = "Totaal aantal visdagen")
@@ -208,33 +203,49 @@ effort %>%
 
 ```
 
-_`r tab_nums("visdagen")`_
+_`r fig_nums("visdagen")`_
 
 \newpage
 
-Totale vangst per schip, maand en jaar (kleur geeft aan of het Ecatch of PEFA is)
+Gemiddeld aantal visdagen per week, per schip en jaar (kleur geeft aan uit welke bron de data afkomstig zijn). 
 
-```{r vangst, echo=FALSE, message=FALSE, warning=FALSE, comment=NA, fig.asp=1.0}
+Dit laat duidelijk zien dat de m-catch exports onjuiste informatie geven over het aantal visdagen. In de huidige m-catch export wordt niet de datum van de vangst vermeld, maar de datum van de aanlanding. Daardoor wordt het aantal visdagen onderschat. 
 
-tab_nums(
-  name    = "totale vangst", 
+
+```{r visdagen2, echo=FALSE, message=FALSE, warning=FALSE, comment=NA, fig.asp=0.6}
+
+fig_nums(
+  name    = "visdagen2", 
   level = 1, display = FALSE,
-  caption = "Totale vangst (=aanvoer)")
+  caption = "Gemiddeld aantal visdagen per week")
 
 
-catch %>% 
-  group_by(source, vessel, year, month) %>% 
-  summarise(weight = sum(weight, na.rm=TRUE)) %>% 
-  
-  ggplot(aes(x=year, y=month)) +
+pp<-
+  e %>% 
+  group_by(vessel, year, source, week) %>% 
+  summarise(ndays = n_distinct(date)) %>% 
+  group_by(vessel, year, source) %>% 
+  summarise(ndays = mean(ndays, na.rm=TRUE)) %>% 
+
+  ggplot(aes(x=year, y=ndays, group=source)) +
   theme_publication() +
-  geom_point(aes(colour=source, size=weight)) +
-  scale_y_continuous(breaks=seq(1,12,1)) +
+  geom_point(aes(colour=source)) +
+  geom_line(aes(colour=source)) +
+  scale_y_continuous(breaks=seq(0,7,1)) +
+  scale_x_continuous(breaks=yrs) +
   facet_wrap(~vessel)
+
+print(pp)
+
+png(filename=file.path(onedrive,"report","CPUE 27.7.d-27.7.e","figures","average days at sea by week.png"),
+     width=12.5, height=5.5, units="in", res=300, bg="transparent")
+print( pp   + 
+         theme(plot.background = element_blank()) +
+         theme(panel.background = element_blank())) 
+invisible(dev.off())
 
 
 ```
 
-_`r tab_nums("visdagen")`_
-
+_`r fig_nums("visdagen2")`_
 
