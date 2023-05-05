@@ -24,25 +24,8 @@ library(pander)
 
 # Source all the utils
 source("../prf/R/my utils.r")
+source("../mptools/R/get_onedrive.r")
 
-get_onedrive <- function (team="Martin Pastoors", site="FLYSHOOT - General/rdata") {
-  
-  if (Sys.info()['sysname'] == 'Windows') {
-    
-    # set onedrive directory
-    if(dir.exists(file.path(Sys.getenv('USERPROFILE'), team, site))) {
-      onedrive <- file.path(Sys.getenv('USERPROFILE'), team, site)   
-    } else if(dir.exists(file.path('C:/DATA/PFA', team, site))) {
-      onedrive <- file.path('C:/DATA/PFA', team, site)
-    } else if(dir.exists(file.path('D:/DATA/PFA', team, site))) {
-      onedrive <- file.path('D:/DATA/PFA', team, site)
-    } else {
-      stop("Onedrive directory not found")
-    }
-  }
-  
-  return(onedrive)
-}
 
 spatialdir <- "C:/DATA/RDATA"
 
@@ -74,7 +57,12 @@ load(file.path(onedrive, "trip.RData"))
 
 e <-
   elog %>% 
-  filter(!is.na(catchdate) & !is.na(lon) & !is.na(lat) & year==2023)
+  filter(!is.na(date) & !is.na(lon) & !is.na(lat) & year==2023)
+
+inspectdf::inspect_num(e) %>% inspectdf::show_plot()
+inspectdf::inspect_imb(e) %>% inspectdf::show_plot()
+inspectdf::inspect_cat(e) %>% inspectdf::show_plot()
+distinct(e, vessel)
 
 comb <-
   e %>% 
