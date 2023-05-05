@@ -126,13 +126,18 @@ excel_timezone_to_utc <- function(t,timezone) {
 # calculate_time: Convert Excel time to R time object (ignores timezone)
 
 calculate_time <- function(t) {
-  t = t - floor(t) # remove date if needed
-  t = t*24
-  h = floor(t)
-  m = floor(60*((t)-h))
-  s = floor(60*((t*60-h*60-m)))
-  tst = lubridate::hms(paste(h, m, s, sep="/"))
-  return(tst)
+  
+  if(all(is.na(t))) {
+    return(t) 
+  } else {
+    t = t - floor(t) # remove date if needed
+    t = t*24
+    h = floor(t)
+    m = floor(60*((t)-h))
+    s = floor(60*((t*60-h*60-m)))
+    tst = lubridate::hms(paste(h, m, s, sep="/"))
+    return(tst)
+  }
 }
 
 # calculate_time(42653.99)
