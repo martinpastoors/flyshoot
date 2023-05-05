@@ -22,10 +22,10 @@ rm(list=ls())
 # Select vessel and trip
 # ------------------------------------------------------------
 
-# setvessel<-"SCH135"   ;settrip<-"2023330" ;
-# setvessel<-"SCH65"   ;settrip<-"2023247" ;
-# setvessel<-"SL9"   ;settrip<-c("2023418") ;
-setvessel<-"Z99"   ;settrip<-"2023074" ;
+setvessel<-"SCH135"   ;settrip<-"2023332" ;
+# setvessel<-"SCH65"   ;settrip<-"2023250" ;
+# setvessel<-"SL9"   ;settrip<-c("2023421") ;
+# setvessel<-"Z99"   ;settrip<-"2023074" ;
 
 # ------------------------------------------------------------
 
@@ -142,7 +142,9 @@ tt <-
   left_join(dplyr::select(h,
                           vessel, trip, haul, totalcatch),
             by=c("vessel","trip","haul"))
-  
+
+if(nrow(tt) == 0) stop("error in trip data")
+
 trip2 <-
   bind_rows(
     distinct(h, 
@@ -251,7 +253,7 @@ c1 <-
     nhauls            = n(),
     startdate         = min(date, na.rm=TRUE),
     enddate           = max(date, na.rm=TRUE),
-    weeks             = paste(unique(week), collapse=", "),
+    weeks             = paste(unique(lubridate::week(h$date)), collapse=", "),
     months            = paste(unique(month), collapse=", "),
     divisions         = paste(unique(division), collapse="; "),
     rects             = paste(unique(rect), collapse="; "),

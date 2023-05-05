@@ -136,6 +136,10 @@ if(!is_empty(filelist)){
     
     if(r > 0) {
       
+      # check in trip number
+      if (ac(readxl::read_excel(filelist[i], sheet = "Haul",  col_names=FALSE, range="B2")) != mytrip) 
+        stop(paste(basename(filelist[i]), ": tripnumber problem"))
+      
       h  <-
         readxl::read_excel(filelist[i],
                            sheet = "Haul",  col_names=TRUE, col_types="text",
@@ -173,6 +177,13 @@ if(!is_empty(filelist)){
         {if(!all(is.na(.$winddirection))) { mutate(., across (c("winddirection"), ~zoo::na.locf(.)))} else {.}} %>%
         {if(!all(is.na(.$windforce)))     { mutate(., across (c("windforce"),     ~zoo::na.locf(.)))} else {.}} %>%
         
+        mutate(timezone = case_when(
+          timezone == "CET"   ~ "Europe/Amsterdam", 
+          timezone == "UTC+1" ~ "Europe/Amsterdam", 
+          timezone == "UTC-5" ~ "America/Santiago",
+          is.na(timezone)     ~ "UTC",    
+          TRUE                ~ timezone) ) %>% 
+        
         mutate(across (c("vessel", "shootew", "shootns"), 
                        toupper)) %>% 
         mutate(across (c("haul", "meshsize","date", "windforce", "waterdepth",
@@ -181,27 +192,25 @@ if(!is_empty(filelist)){
         mutate(across (c("waterdepth","vertopening", "landingweight", "totalcatch",
                          "shoottime", "shoottime2", "haultime"), 
                        as.numeric)) %>%
-        # mutate(across (c("shoottime","haultime"), 
-        #                ~calculate_time_from_string(.))) %>% 
-        mutate(across (c("shoottime","shoottime2", "haultime"), 
-                       ~calculate_time(.))) %>% 
-        
-        mutate(timezone = case_when(
-          timezone == "CET"   ~ "Europe/Amsterdam", 
-          timezone == "UTC+1" ~ "Europe/Amsterdam", 
-          timezone == "UTC-5" ~ "America/Santiago",
-          is.na(timezone)     ~ "UTC",    
-          TRUE                ~ timezone) ) %>% 
         
         mutate(date   = as.Date(date, origin="1899-12-30" , tz=unique(timezone))) %>% 
-        
         mutate(dateembarked   = as.Date(dateembarked, origin="1899-12-30" , tz=unique(timezone))) %>% 
         mutate(datedisembarked   = as.Date(datedisembarked, origin="1899-12-30" , tz=unique(timezone))) %>% 
         
+        # mutate(across (c("shoottime","haultime"), 
+        #                ~calculate_time_from_string(.))) %>% 
+        # mutate(across (c("haultime", "shoottime2"), 
+        #                ~calculate_time(.))) %>% 
+        mutate(across (c("shoottime","shoottime2", "haultime"),
+                       ~calculate_time(.))) %>%
+        
         mutate( 
-          shoottime = date + shoottime,
-          shoottime2 = date + shoottime2,
-          haultime  = date + haultime
+          shoottime  = ifelse(!is.na(shoottime), date + shoottime, NA),
+          shoottime  = as_datetime(shoottime),
+          shoottime2 = ifelse(!is.na(shoottime2), date + shoottime2, NA),
+          shoottime2 = as_datetime(shoottime2),
+          haultime   = ifelse(!is.na(haultime), date + haultime, NA),
+          haultime   = as_datetime(haultime)
         ) %>%
         
         # add haultime if missing
@@ -521,7 +530,7 @@ if(!is_empty(filelist)){
 
       {if(any(grepl("haulid",names(.)))) {rename(., haul = haulid)} else{.}} %>% 
       
-      mutate(across (one_of("boxes", "meshsize", "haul"),
+      mutate(across (any_of(c("boxes", "meshsize", "haul")),
                      as.integer)) %>%
       mutate(across (c("catchdate", "departuredate","arrivaldate", "auctiondate", "catchdate", "weight", "lat", "lon", "conversionfactor"),
                      as.numeric)) %>%
