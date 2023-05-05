@@ -42,25 +42,7 @@ fig_nums <- captioner::captioner(prefix = "Figure ", levels=1, type=c("n"), infi
 
 # Source all the utils
 source("../../prf/R/my utils.r")
-
-get_onedrive <- function (team="Martin Pastoors", site="FLYSHOOT - General") {
-  
-  if (Sys.info()['sysname'] == 'Windows') {
-    
-    # set onedrive directory
-    if(dir.exists(file.path(Sys.getenv('USERPROFILE'), team, site))) {
-      onedrive <- file.path(Sys.getenv('USERPROFILE'), team, site)   
-    } else if(dir.exists(file.path('C:/DATA/PFA', team, site))) {
-      onedrive <- file.path('C:/DATA/PFA', team, site)
-    } else if(dir.exists(file.path('D:/DATA/PFA', team, site))) {
-      onedrive <- file.path('D:/DATA/PFA', team, site)
-    } else {
-      stop("Onedrive directory not found")
-    }
-  }
-  
-  return(onedrive)
-}
+source("../../mptools/R/get_onedrive.r")
 
 # set onedrive directory
 onedrive <- get_onedrive(team="Martin Pastoors", site="FLYSHOOT - General")
@@ -194,9 +176,7 @@ cpue_northsea <-
 comb <-
   cgfs             %>% mutate(source="CGFS", area="channel") %>% 
   bind_rows(ibtsq1 %>% mutate(source="IBTSQ1", area="northsea")) %>% 
-  bind_rows(ibtsq3 %>% mutate(source="IBTSQ3", area="northsea")) %>% 
-  bind_rows(cpue_channel %>% mutate(source="CPUE", area="channel")) %>% 
-  bind_rows(cpue_northsea %>% mutate(source="CPUE", area="northsea")) 
+  bind_rows(ibtsq3 %>% mutate(source="IBTSQ3", area="northsea")) 
 
 # writexl::write_xlsx(comb, path=file.path(onedrive, "comb.xlsx"))
 
@@ -263,7 +243,7 @@ fig_nums(name    = "timetrends", level = 1, display = FALSE, caption = "GLM, tim
 t <-
   comb %>% 
   # filter(!(grepl("Black seabream", english_species) & source=="IBTSQ1")) %>% 
-  filter(species %in% slice_head(top_channel, n=8)$species) %>% 
+  filter(species %in% slice_head(top_channel, n=4)$species) %>% 
   mutate(source=case_when(
     source == "CGFS" & year <  2015 ~ "CGFS old",
     source == "CGFS" & year >= 2015 ~ "CGFS new",
@@ -272,39 +252,39 @@ t <-
   # filter(!(source == "CPUE channel"))
 
 
-t %>% 
-  filter(!grepl("CPUE", source), english_species=="Surmullet MUR") %>% 
-  ggplot(aes(x=year, group=source)) +
-  theme_publication() +
-  
-  geom_line(aes(y=est), colour="red") +
-  geom_line(aes(y=lwr), colour="blue") +
-  geom_line(aes(y=upr), colour="green") +
-  
-  geom_line(aes(y=z), colour="red") +
-  geom_line(aes(y=zmin), colour="blue") +
-  geom_line(aes(y=zmax), colour="green") +
-  
-  facet_grid(english_species~area)
+# t %>% 
+#   filter(!grepl("CPUE", source), english_species=="Surmullet MUR") %>% 
+#   ggplot(aes(x=year, group=source)) +
+#   theme_publication() +
+#   
+#   geom_line(aes(y=est), colour="red") +
+#   geom_line(aes(y=lwr), colour="blue") +
+#   geom_line(aes(y=upr), colour="green") +
+#   
+#   geom_line(aes(y=z), colour="red") +
+#   geom_line(aes(y=zmin), colour="blue") +
+#   geom_line(aes(y=zmax), colour="green") +
+#   
+#   facet_grid(english_species~area)
 
-t %>% 
-  filter(!grepl("CPUE", source), english_species=="Surmullet MUR") %>% 
-  ggplot(aes(x=year, group=source)) +
-  theme_publication() +
-  
-  geom_line(aes(y=std_est), colour="red") +
-  geom_line(aes(y=std_lwr), colour="blue") +
-  geom_line(aes(y=std_upr), colour="green") +
-  
-  facet_grid(english_species~area)
-
-t %>% 
-  filter(!grepl("CPUE", source), english_species=="Surmullet MUR") %>% 
-  ggplot(aes(x=year, y=std_est)) +
-  theme_publication() +
-  ggplot2::geom_line(ggplot2::aes(year, std_est, colour=source)) +
-  geom_ribbon(aes(ymin=std_lwr, ymax=std_upr, fill=source), alpha=0.2) +
-  facet_grid(english_species~area)
+# t %>% 
+#   filter(!grepl("CPUE", source), english_species=="Surmullet MUR") %>% 
+#   ggplot(aes(x=year, group=source)) +
+#   theme_publication() +
+#   
+#   geom_line(aes(y=std_est), colour="red") +
+#   geom_line(aes(y=std_lwr), colour="blue") +
+#   geom_line(aes(y=std_upr), colour="green") +
+#   
+#   facet_grid(english_species~area)
+# 
+# t %>% 
+#   filter(!grepl("CPUE", source), english_species=="Surmullet MUR") %>% 
+#   ggplot(aes(x=year, y=std_est)) +
+#   theme_publication() +
+#   ggplot2::geom_line(ggplot2::aes(year, std_est, colour=source)) +
+#   geom_ribbon(aes(ymin=std_lwr, ymax=std_upr, fill=source), alpha=0.2) +
+#   facet_grid(english_species~area)
 
   # facet_grid(english_species~area)
 
