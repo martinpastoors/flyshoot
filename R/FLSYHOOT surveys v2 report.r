@@ -51,13 +51,21 @@ my_docx <-
   body_add_par("Analysis of survey data relevant to the key target species of the flyshoot fishery", style = "Title") %>% 
   body_add_par("Martin Pastoors", style = "Normal") %>% 
   
-  body_add_par(" ", style = "Normal") %>% 
+  body_add_img(src = file.path(figuresdir, "IMG_20230102_092247.jpg"), 
+             height = 3/4*6, width = 6) %>% 
   
   body_add_par(" ", style = "Normal") %>% 
   
-  body_add_img(src = file.path(figuresdir, "MPFF logo with text.png"), 
-               height = 399/332*1, width = 1) %>% 
+  body_add_par(" ", style = "Normal") %>% 
   
+  # body_add_img(src = file.path(figuresdir, "MPFF logo with text.png"), 
+  #              height = 399/332*1, width = 1) %>% 
+  body_add_fpar(fpar(
+    external_img(src = file.path(figuresdir, "MPFF logo with text.png"), 
+                 height = 399/332*1, width = 1),
+    fp_p = fp_par(text.align = "right")    
+  )) %>% 
+
   # ------------------------------------------------------------------------------
   # Exec summary 
   # ------------------------------------------------------------------------------
@@ -65,8 +73,6 @@ my_docx <-
   body_add_par("Executive summary", style = "heading 1") %>% 
   
   body_add_par("The flyshoot fishery is operating largely within the Channel and southern North Sea. Main target species are European squid, Red mullet, Common cuttlefish, mackerel and gurnards. For most of the target species there are no regular assessments and they are not regulated via quota. Therefore, it is important to assess the development of those species/stocks via other means than regular assessments. Here, we used available survey information in the Channel and southern North Sea to develop a reliable information base to underpin assessments of the status of those species", style = "Normal") %>% 
-  
-  body_add_par("Bottom trawl survey data directly downloaded from Datras database using the icesDatras and tidyDatras packages. The following surveys were included: FR-CGFS (Q4, Channel), NS-IBTS Q1 (North Sea), NS-IBTS Q3 (North Sea).", style = "Normal") %>% 
   
   body_add_par("TidyDatras was used to standardize all observations by length to numbers per hour. Outliers were excluded via the Winsorize function whereby all observations larger than the 98 percentile per species were set to the value at 98 percentile. Zero hauls were added for each species and survey.", style = "Normal") %>% 
   
@@ -95,8 +101,11 @@ my_docx <-
   body_add_par("Introduction", style = "heading 1") %>% 
   
   body_add_par("The flyshoot fishery is operating largely within the Channel and southern North Sea. Main target species are European squid, Red mullet, Common cuttlefish, mackerel and gurnards. For most of the target species there are no regular assessments and they are not regulated via quota. Therefore, it is important to assess the development of those species/stocks via other means than regular assessments. Here, we used available survey information in the Channel and southern North Sea to develop a reliable information base to underpin assessments of the status of those species", style = "Normal") %>% 
+
+  body_add_par("The work presented in this document and the visualization of results has greatly benefitted from the development of the icesDatras package at ICES and the tidyDatras and shinyDatras packages by Einar Hjorleifsson (Iceland). The opening up of ICES survey data for scientific analysis has allowed the development of indices of abundance for species that have previously not been evaluated within ICES.", style = "Normal") %>% 
   
-  # ------------------------------------------------------------------------------
+
+# ------------------------------------------------------------------------------
   # Material and methods 
   # ------------------------------------------------------------------------------
 
@@ -105,7 +114,7 @@ my_docx <-
   body_add_par("Top species in value and weight from Jaczon Flyshoot vessels 2018-2022", style = "Normal") %>% 
   
   body_add_img(src = file.path(figuresdir, "top.png"), 
-               height = 1500/2100*6, width = 6) %>% 
+               height = 1200/2100*6, width = 6) %>% 
   
   body_add_par("We included the top 8 species in value from the graph above", style = "Normal") %>% 
 
@@ -131,6 +140,12 @@ my_docx <-
   body_add_par("A standardized abundance index was also calculated to make the units comparable across species and areas. Standardization was carried out by dividing the index by the mean over the years 2015-2022 (the years when the Thalassa vessel has been used for the CGFS survey) and subtracting 1. This means that the average of the standardized abundance indices over the standardization years would be zero. The standardization was also applied to the bootstrapped values. ", style = "Normal") %>% 
 
   body_add_par("We calculated the slope of the index of abundance by species and survey to derive the general tendency for the species. We only used data from the years 2015-2022, to exclude the survey vessel effect in the CGFS survey. The slopes were categorized as strongly increasing (>0.15; green), moderately increasing (0.05 > x <= 0.15; light green), flat (-0.05 > x <= 0.05; light gray), moderately decreasing (-0.15 >= x < -0.05;pink) and strongly decreasing (x < -0.15; red).", style = "Normal") %>% 
+
+  body_add_par("All the code underpinning this report can be found on the following locations", style = "Normal") %>%   
+  
+  body_add_par("https://github.com/martinpastoors/flyshoot/blob/main/R/FLYSHOOT%20surveys%20v2.r", style = "Normal") %>% 
+  
+  body_add_par("https://github.com/martinpastoors/flyshoot/blob/main/R/FLSYHOOT%20surveys%20v2%20report.r", style = "Normal") %>%   
   
 # ------------------------------------------------------------------------------
 # Results 
@@ -627,9 +642,9 @@ my_docx <-
 my_docx <-
   my_docx %>% 
   body_add_break() %>% 
-  body_add_par("Discussion and overview", style = "heading 2") %>%
+  body_add_par("Discussion and overview", style = "heading 1") %>%
   
-  body_add_par("Number of zero hauls", style = "heading 3") %>% 
+  body_add_par("Number of zero hauls", style = "heading 2") %>% 
   body_add_par("The number of zero hauls per species and survey shows very different patterns.", style = "Normal") %>% 
   body_add_par("The average number of zero hauls over the years 2015-2022 was calculated by species and survey. For some species and surveys, the number of zero hauls clearly prevented the calculation of a useable index of abundance due to the high number of zero hauls (e.g. European squid in IBTS Q3, Common cuttlefish and Seabass in IBTS Q1 and IBTS Q3 and Tub gurnard in IBTS Q1)", style = "Normal") %>% 
   
@@ -642,7 +657,7 @@ my_docx <-
   
   body_add_break() %>% 
   
-  body_add_par("Relative index of abundance", style = "heading 3") %>% 
+  body_add_par("Relative index of abundance", style = "heading 2") %>% 
   
   body_add_par("A relative abundance index was calculated to make the units comparable across species and areas. Standardization was carried out by dividing the index by the mean over the years 2015-2022 (the years when the Thalassa vessel has been used for the CGFS survey) and subtracting 1. This means that the average of the standardized abundance indices over the standardization years would be zero. The standardization was also applied to the bootstrapped values. ", style = "Normal") %>% 
   
@@ -657,6 +672,21 @@ my_docx <-
   
   body_add_img(src = file.path(figuresdir, "standardized cpue 5-8.png"), height = 2940/2100*6, width = 6)  
 
+
+my_docx <-
+  my_docx %>% 
+  body_add_break() %>% 
+  body_add_par("Acknowledgements", style = "heading 1") %>%
+
+  body_add_par("This work has been funded by Jaczon BV, part of Vrolijk BV, and was carried out by Martin Pastoors (MPFF) as part of overall project aimed at improving the knowledge-base for the flyshoot fishery.", style = "Normal") %>% 
+  
+  body_add_par("The work presented in this document and the visualization of results has greatly benefitted from the development of the icesDatras package at ICES and the tidyDatras and shinyDatras packages by Einar Hjorleifsson (Iceland). The opening up of ICES survey data for scientific analysis has allowed the development of indices of abundance for species that have previously not been evaluated within ICES.", style = "Normal") %>% 
+  
+  body_add_par("All the code underpinning this report can be found on the following locations", style = "Normal") %>%   
+  
+  body_add_par("https://github.com/martinpastoors/flyshoot/blob/main/R/FLYSHOOT%20surveys%20v2.r", style = "Normal") %>% 
+  
+  body_add_par("https://github.com/martinpastoors/flyshoot/blob/main/R/FLSYHOOT%20surveys%20v2%20report.r", style = "Normal") 
 
 fileout <- myfile
 print(my_docx, target = fileout)

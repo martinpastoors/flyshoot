@@ -104,7 +104,7 @@ my_lab    <- "N/hour"
 # ======================================================================================
 
 png(filename=file.path(figuresdir, paste0("top.png")),
-    width=7, height=5, units="in", res=300)
+    width=7, height=4, units="in", res=300)
 
 top %>% 
   mutate(species = factor(species, levels=top$species)) %>% 
