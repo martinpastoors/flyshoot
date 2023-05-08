@@ -44,40 +44,9 @@ fig_nums <- captioner::captioner(prefix = "Figure ", levels=1, type=c("n"), infi
 
 # Source all the utils
 source("../../prf/R/my utils.r")
+source("../../mptools/R/get_onedrive.r")
+source("../R/FLYSHOOT utils.r")
 
-get_onedrive <- function (team="Martin Pastoors", site="FLYSHOOT - General") {
-  
-  if (Sys.info()['sysname'] == 'Windows') {
-    
-    # set onedrive directory
-    if(dir.exists(file.path(Sys.getenv('USERPROFILE'), team, site))) {
-      onedrive <- file.path(Sys.getenv('USERPROFILE'), team, site)   
-    } else if(dir.exists(file.path('C:/DATA/PFA', team, site))) {
-      onedrive <- file.path('C:/DATA/PFA', team, site)
-    } else if(dir.exists(file.path('D:/DATA/PFA', team, site))) {
-      onedrive <- file.path('D:/DATA/PFA', team, site)
-    } else {
-      stop("Onedrive directory not found")
-    }
-  }
-  
-  return(onedrive)
-}
-
-calc_boxplot_stat <- function(x) {
-  coef <- 1.5
-  n <- sum(!is.na(x))
-  # calculate quantiles
-  stats <- quantile(x, probs = c(0.0, 0.25, 0.5, 0.75, 1.0))
-  names(stats) <- c("ymin", "lower", "middle", "upper", "ymax")
-  iqr <- diff(stats[c(2, 4)])
-  # set whiskers
-  outliers <- x < (stats[2] - coef * iqr) | x > (stats[4] + coef * iqr)
-  if (any(outliers)) {
-    stats[c(1, 5)] <- range(c(stats[2:4], x[!outliers]), na.rm = TRUE)
-  }
-  return(stats)
-}
 
 spatialdir <- "C:/DATA/RDATA"
 
@@ -86,9 +55,9 @@ spatialdir <- "C:/DATA/RDATA"
 load(file.path(spatialdir, "world_lr_sf.RData"))
 load(file.path(spatialdir, "world_mr_sf.RData"))
 load(file.path(spatialdir, "world_hr_sf.RData"))
-# load(file.path(onedrive, "rdata/eez.df.RData"))
-# load(file.path(onedrive, "rdata/fao.df.RData"))
-# load(file.path(onedrive, "rdata/depth200.df.RData"))
+
+load(file.path(spatialdir, "world_mr_df.RData"))
+load(file.path(spatialdir, "fao_sf.RData"))
 load(file.path(spatialdir, "rect_lr_sf.RData"))
 icesrect <-
   rect_lr_sf %>% 
@@ -98,8 +67,6 @@ icesrect <-
   mutate(lon = (EAST + WEST)/2) %>% 
   dplyr::select(rect, lat, lon)
 
-load(file.path(spatialdir, "world_lr_df.RData"))
-load(file.path(spatialdir, "fao_sf.RData"))
 
 asfis <- 
   loadRData(file.path(spatialdir, "asfis.RData")) %>% 
@@ -121,7 +88,7 @@ elog   <-
   mutate(species = toupper(species)) %>% 
   mutate(species = ifelse(species == "JAX","HOM",species)) %>% 
   mutate(species = ifelse(species == "SQU", "SQR", species)) %>% 
-  
+  filter(geartype %in% c("SSC","SDN")) %>% 
   mutate(species = tolower(species)) %>% 
   left_join(dplyr::select(asfis,
                           species, scientificname, englishname, dutchname),
@@ -131,24 +98,36 @@ elog   <-
   # remove 348 records without rectangle information
   drop_na(rect) %>% 
   
-  left_join(icesrect, by="rect") %>% 
-  mutate(
-    lat = ifelse(is.na(lat.x), lat.y, lat.x),
-    lon = ifelse(is.na(lon.x), lon.y, lon.x)) %>% 
-  dplyr::select(-lat.x, -lat.y, -lon.x, -lon.y) %>% 
-  dplyr::select(-lat2, -lon2) %>% 
-  
   sf::st_as_sf(coords = c("lon", "lat"), crs = 4326, remove = FALSE)  %>%  
   
+  # get division from rectangle / lat-lon if available
   sf::st_join(filter(fao_sf, F_LEVEL=="DIVISION")) %>%
   sf::st_drop_geometry() %>% 
   rename(division = F_CODE) %>% 
   dplyr::select(-F_LEVEL, -FID, -OCEAN, -SUBOCEAN, -F_AREA, -F_SUBAREA, -F_DIVISION,
                 -F_SUBDIVIS, -F_SUBUNIT, -F_STATUS) %>%
-  ungroup()
+  ungroup() %>% 
+  
+  # handle missing divisions (coastline issues)
+  mutate(division = ifelse(is.na(division) & !is.na(faozone), faozone, division))
+
+skimr::skim(elog)
 
 # elog %>% filter(!is.na(lat.x)) %>% View()
+# xlim <- range(elog$lon, na.rm=TRUE)
+# ylim <- range(elog$lat, na.rm=TRUE)  
+# elog %>% 
+#   filter(is.na(division)) %>% 
+#   group_by(vessel, year, source, rect, lat, lon) %>% 
+#   summarise(weight = sum(weight, na.rm=TRUE)) %>% 
+#   ggplot(aes(x=lon, y=lat)) +
+#   theme_publication() +
+#   coord_quickmap(xlim=xlim , ylim=ylim) +
+#   geom_polygon(data=world_mr_df, aes(x=long, y=lat, group=group), fill = "grey75") +
+#   geom_point(aes(colour=vessel, size=weight), alpha=0.5) +
+#   facet_wrap(~year)
 
+  
 price  <- 
   readr::read_rds(file.path(onedrive, "rdata/prices.rds")) %>% 
   dplyr::select(year, species, avgprice) %>% 
@@ -197,9 +176,6 @@ e <-
   {if(!is.na(all(mnths)))   filter(., month %in% mnths) else .} %>% 
   {if(!any(is.na(divisions))) filter(., division %in% divisions) else .} %>% 
   
-  # temp fix!!
-  filter(!(source=="m-catch" & year < 2023)) %>% 
-  
   left_join(regulated, by="species") %>% 
   mutate(regulated = case_when(
     is.na(regulated) & species %in% c("BSE","DGX","ANF","DGH","HER","PLE")             ~ "R",
@@ -237,8 +213,6 @@ effort <-
   dplyr::group_by(vessel, year, week, source) %>% 
   dplyr::summarize(ndays = n_distinct(date)) %>% 
   
-  # temp fix!!
-  mutate(ndays = ifelse(source=="m-catch" & year < 2023, NA, ndays)) %>% 
   dplyr::group_by(vessel, year) %>% 
   dplyr::summarize(ndays  = sum(ndays, na.rm=TRUE))  %>% 
 
@@ -372,15 +346,13 @@ names(myAddedColors)    <- c(t2b$english_species)
 myTargetColors          <- c(myTopColors, myAddedColors)
 # scales::show_col(myTargetColors)
 
-readr::write_rds(top, file=file.path(datadir, paste0("top_",folder,".rds")))
+# readr::write_rds(top, file=file.path(datadir, paste0("top_",folder,".rds")))
 # writexl::write_xlsx(catch_byweek, path=file.path(onedrive, paste0("export",folder,".xlsx")))
 
 ```
 
 
 # FLYSHOOT fishery CPUE analysis in `r paste(sort(unique(catch_byweek$division)), collapse=(", "))`
-
-**Version where M-Catch export have been temporarily removed because of error in number of fishing days**
 
 M.A. Pastoors
 
@@ -440,7 +412,7 @@ Electronic logbook data was available for the vessels `r paste(unique(e$vessel),
 
 **Fishing effort by vessel**
 
-Number of fishing days per week (from available source) by vessel and year. 
+Average number of fishing days per week (from available sources) by vessel and year. 
 
 ```{r effort0, echo=FALSE, message=FALSE, warning=FALSE, comment=NA, fig.asp=0.8}
 
@@ -449,39 +421,27 @@ fig_nums(
   level = 1, display = FALSE,
   caption = "Average number of fishing days per week (from available source) by vessel and year.")
 
-e_weeks <-
-  e %>% 
-  group_by(vessel, year, source) %>% 
-  distinct(week) %>% 
-  group_by(vessel, year, source) %>% 
-  summarise(minweek = min(week), maxweek=max(week))
-
 # by year
 e %>% 
   dplyr::group_by(vessel, year, week, source) %>% 
   dplyr::summarize(ndays = n_distinct(date)) %>% 
-  # temp fix!!
-  # mutate(ndays = ifelse(source=="m-catch" & year < 2023, 4, ndays)) %>% 
-  
-  tidyr::pivot_wider(names_from = week, values_from = ndays, values_fill = 0) %>% 
-  tidyr::pivot_longer(names_to = "week", values_to = "ndays", 4:ncol(.)) %>% 
-  
-  left_join(e_weeks, by=c("vessel","year","source")) %>% 
-  filter(week >= minweek, week <= maxweek) %>% 
 
-  # dplyr::group_by(vessel, year, source) %>% 
-  # summarise(ndays = mean(ndays, na.rm=TRUE)) %>% 
+  dplyr::group_by(vessel, year, source) %>%
+  dplyr::summarise(
+    ndays = mean(ndays, na.rm=TRUE),
+    nweeks = n_distinct(week)
+  ) %>% 
   
-  ggplot(aes(x=as.character(year), y=ndays)) +
+  ggplot(aes(x=as.character(year), y=ndays, group=source)) +
   theme_publication() +
   theme(plot.margin = margin(2,2,2,5, "mm")) +
   # theme(legend.position = "none") +
   
   # geom_bar(aes(fill=source), stat="identity", position=position_dodge2(preserve="single", width=0.9)) + 
-  geom_boxplot(aes(colour=source), position=position_dodge2(preserve="single", width=0.9)) +
-  geom_point(aes(colour=source), size=1.5, position=position_jitterdodge(), shape=3) +
+  geom_point(aes(colour=source, size=nweeks)) +
+  geom_path(aes(colour=source), linewidth=0.5) +
   scale_fill_brewer(palette = "Paired") +
-  expand_limits(y=0) +
+  scale_y_continuous(limits=c(0,7), breaks=seq(0,7,1)) +
   labs(y="fishing days per week", x="", title="Number of fishing days per week", colour="source") +
   # scale_x_continuous(breaks=yrs) +
   facet_grid(vessel~.)
@@ -668,7 +628,7 @@ _`r fig_nums("catch3a")`_
 
 \newpage
 
-**Proportion of the landings per month (top 15 species)**
+**Proportion of the landings per quarter (top 15 species)**
 
 ```{r catch4, echo=FALSE, message=FALSE, warning=FALSE, comment=NA, fig.asp=0.6}
 
@@ -2534,6 +2494,396 @@ Quality of the data
 E.g. the issue with landings as indicator for catch rate
 
 Targetting
+
+
+\newpage
+
+**Annex: Detailed results by species (FLYSHOOT fishery CPUE analysis `r folder`)**
+
+In the following sections, we are presenting detailed results by species. The presentation will consist of a map of catch rates by rectangle and year, the GLM estimated time trend in catch rate, the estimated GLM coefficients, the observed vs. predicted catch rates and the ANOVA Analysis of Deviance table.  
+
+<!-- =============================================================================================== --> 
+
+\newpage
+
+```{r echo=FALSE, fig.asp=1.0, message=FALSE, warning=FALSE, comment=NA}
+i   <- 1
+sp  <- top$english_species[i] 
+sp2 <- filter(top, english_species==sp) %>% dplyr::select(species) %>% as.character()
+
+```
+
+**`r sp`**
+
+Catch rates of red mullet are highest in the eastern Channel area. High catch rates were observed in 2015 and 2020. The trend from the GLM modelled catch rates show a maximum in 2015 and 2016, with lower values thereafter. Catch rates in 2022 are still double the catch rates of 2012. The fit of the GLM model is problematic for the lower catch rates where the model overpredicts the values. It is unknown what is causing this behaviour. 
+
+```{r echo=FALSE, fig.asp=1.0, message=FALSE, warning=FALSE, comment=NA}
+
+fig_nums(
+  name    = paste0(sp, "cpue"), level = 1, display = FALSE,
+  caption = paste(sp, "CPUE by year and rectangle (kg/day) and standardized CPUE trend by year (kg/day)"))
+
+knitr::include_graphics(path=file.path(figuresdir, paste(top$english_species[[i]], "cpuemap.jpg", sep="_")))
+```
+
+```{r echo=FALSE, fig.asp=1.0, message=FALSE, warning=FALSE, comment=NA}
+knitr::include_graphics(path=file.path(figuresdir, paste(top$english_species[[i]], "cpuetrend.jpg", sep="_")))
+```
+
+_`r fig_nums(paste0(sp, "cpue"))`_
+
+\newpage
+
+```{r echo=FALSE, fig.asp=1.0, message=FALSE, warning=FALSE, comment=NA}
+fig_nums(
+  name    = paste0(sp, "comb"), level = 1, display = FALSE,
+  caption = paste(sp, "GLM coefficients for rectangles (left) and observed vs. predicted CPUE values (kg/day)"))
+
+knitr::include_graphics(path=file.path(figuresdir, paste(top$english_species[[i]], "cpuecomb.jpg", sep="_")))
+```
+
+_`r fig_nums(paste0(sp, "comb"))`_
+
+```{r echo=FALSE, fig.asp=1.0, message=FALSE, warning=FALSE, comment=NA}
+tab_nums(
+  name    = paste0(sp, "anova"), level = 1, display = FALSE,
+  caption = paste(sp, "Anova table of CPUE GLM by year and rectangle (kg/day) "))
+    
+  cat(readLines(file.path(tablesdir, paste(sp, "anova.txt", sep="_"))), sep = '\n')
+
+```
+
+_`r tab_nums(paste0(sp, "anova"))`_
+
+<!-- =============================================================================================== --> 
+
+\newpage
+
+```{r echo=FALSE, fig.asp=1.0, message=FALSE, warning=FALSE, comment=NA}
+i   <- 2
+sp  <- top$english_species[i] 
+sp2 <- filter(top, english_species==sp) %>% dplyr::select(species) %>% as.character()
+
+```
+
+**`r sp`**
+
+```{r echo=FALSE, fig.asp=1.0, message=FALSE, warning=FALSE, comment=NA}
+
+fig_nums(
+  name    = paste0(sp, "cpue"), level = 1, display = FALSE,
+  caption = paste(sp, "CPUE by year and rectangle (kg/day) and standardized CPUE trend by year (kg/day)"))
+
+knitr::include_graphics(path=file.path(figuresdir, paste(top$english_species[[i]], "cpuemap.jpg", sep="_")))
+```
+
+```{r echo=FALSE, fig.asp=1.0, message=FALSE, warning=FALSE, comment=NA}
+knitr::include_graphics(path=file.path(figuresdir, paste(top$english_species[[i]], "cpuetrend.jpg", sep="_")))
+```
+
+_`r fig_nums(paste0(sp, "cpue"))`_
+
+\newpage
+
+```{r echo=FALSE, fig.asp=1.0, message=FALSE, warning=FALSE, comment=NA}
+fig_nums(
+  name    = paste0(sp, "comb"), level = 1, display = FALSE,
+  caption = paste(sp, "GLM coefficients for rectangles (left) and observed vs. predicted CPUE values (kg/day)"))
+
+knitr::include_graphics(path=file.path(figuresdir, paste(top$english_species[[i]], "cpuecomb.jpg", sep="_")))
+```
+
+_`r fig_nums(paste0(sp, "comb"))`_
+
+```{r echo=FALSE, fig.asp=1.0, message=FALSE, warning=FALSE, comment=NA}
+tab_nums(
+  name    = paste0(sp, "anova"), level = 1, display = FALSE,
+  caption = paste(sp, "Anova table of CPUE GLM by year and rectangle (kg/day) "))
+
+  cat(readLines(file.path(tablesdir, paste(sp, "anova.txt", sep="_"))), sep = '\n')
+```
+
+_`r tab_nums(paste0(sp, "anova"))`_
+
+<!-- =============================================================================================== --> 
+
+\newpage
+
+```{r echo=FALSE, fig.asp=1.0, message=FALSE, warning=FALSE, comment=NA}
+i   <- 3
+sp  <- top$english_species[i] 
+sp2 <- filter(top, english_species==sp) %>% dplyr::select(species) %>% as.character()
+
+```
+
+**`r sp`**
+
+```{r echo=FALSE, fig.asp=1.0, message=FALSE, warning=FALSE, comment=NA}
+
+fig_nums(
+  name    = paste0(sp, "cpue"), level = 1, display = FALSE,
+  caption = paste(sp, "CPUE by year and rectangle (kg/day) and standardized CPUE trend by year (kg/day)"))
+
+knitr::include_graphics(path=file.path(figuresdir, paste(top$english_species[[i]], "cpuemap.jpg", sep="_")))
+```
+
+```{r echo=FALSE, fig.asp=1.0, message=FALSE, warning=FALSE, comment=NA}
+knitr::include_graphics(path=file.path(figuresdir, paste(top$english_species[[i]], "cpuetrend.jpg", sep="_")))
+```
+
+_`r fig_nums(paste0(sp, "cpue"))`_
+
+\newpage
+
+```{r echo=FALSE, fig.asp=1.0, message=FALSE, warning=FALSE, comment=NA}
+fig_nums(
+  name    = paste0(sp, "comb"), level = 1, display = FALSE,
+  caption = paste(sp, "GLM coefficients for rectangles (left) and observed vs. predicted CPUE values (kg/day)"))
+
+knitr::include_graphics(path=file.path(figuresdir, paste(top$english_species[[i]], "cpuecomb.jpg", sep="_")))
+```
+
+_`r fig_nums(paste0(sp, "comb"))`_
+
+```{r echo=FALSE, fig.asp=1.0, message=FALSE, warning=FALSE, comment=NA}
+tab_nums(
+  name    = paste0(sp, "anova"), level = 1, display = FALSE,
+  caption = paste(sp, "Anova table of CPUE GLM by year and rectangle (kg/day) "))
+
+  cat(readLines(file.path(tablesdir, paste(sp, "anova.txt", sep="_"))), sep = '\n')
+```
+
+_`r tab_nums(paste0(sp, "anova"))`_
+
+<!-- =============================================================================================== --> 
+
+\newpage
+
+```{r echo=FALSE, fig.asp=1.0, message=FALSE, warning=FALSE, comment=NA}
+i   <- 4
+sp  <- top$english_species[i] 
+sp2 <- filter(top, english_species==sp) %>% dplyr::select(species) %>% as.character()
+
+```
+
+**`r sp`**
+
+```{r echo=FALSE, fig.asp=1.0, message=FALSE, warning=FALSE, comment=NA}
+
+fig_nums(
+  name    = paste0(sp, "cpue"), level = 1, display = FALSE,
+  caption = paste(sp, "CPUE by year and rectangle (kg/day) and standardized CPUE trend by year (kg/day)"))
+
+knitr::include_graphics(path=file.path(figuresdir, paste(top$english_species[[i]], "cpuemap.jpg", sep="_")))
+```
+
+```{r echo=FALSE, fig.asp=1.0, message=FALSE, warning=FALSE, comment=NA}
+knitr::include_graphics(path=file.path(figuresdir, paste(top$english_species[[i]], "cpuetrend.jpg", sep="_")))
+```
+
+_`r fig_nums(paste0(sp, "cpue"))`_
+
+\newpage
+
+```{r echo=FALSE, fig.asp=1.0, message=FALSE, warning=FALSE, comment=NA}
+fig_nums(
+  name    = paste0(sp, "comb"), level = 1, display = FALSE,
+  caption = paste(sp, "GLM coefficients for rectangles (left) and observed vs. predicted CPUE values (kg/day)"))
+
+knitr::include_graphics(path=file.path(figuresdir, paste(top$english_species[[i]], "cpuecomb.jpg", sep="_")))
+```
+
+_`r fig_nums(paste0(sp, "comb"))`_
+
+```{r echo=FALSE, fig.asp=1.0, message=FALSE, warning=FALSE, comment=NA}
+tab_nums(
+  name    = paste0(sp, "anova"), level = 1, display = FALSE,
+  caption = paste(sp, "Anova table of CPUE GLM by year and rectangle (kg/day) "))
+
+  cat(readLines(file.path(tablesdir, paste(sp, "anova.txt", sep="_"))), sep = '\n')
+```
+
+_`r tab_nums(paste0(sp, "anova"))`_
+
+<!-- =============================================================================================== --> 
+
+\newpage
+
+```{r echo=FALSE, fig.asp=1.0, message=FALSE, warning=FALSE, comment=NA}
+i   <- 5
+sp  <- top$english_species[i] 
+sp2 <- filter(top, english_species==sp) %>% dplyr::select(species) %>% as.character()
+
+```
+
+**`r sp`**
+
+```{r echo=FALSE, fig.asp=1.0, message=FALSE, warning=FALSE, comment=NA}
+
+fig_nums(
+  name    = paste0(sp, "cpue"), level = 1, display = FALSE,
+  caption = paste(sp, "CPUE by year and rectangle (kg/day) and standardized CPUE trend by year (kg/day)"))
+
+knitr::include_graphics(path=file.path(figuresdir, paste(top$english_species[[i]], "cpuemap.jpg", sep="_")))
+```
+
+```{r echo=FALSE, fig.asp=1.0, message=FALSE, warning=FALSE, comment=NA}
+knitr::include_graphics(path=file.path(figuresdir, paste(top$english_species[[i]], "cpuetrend.jpg", sep="_")))
+```
+
+_`r fig_nums(paste0(sp, "cpue"))`_
+
+\newpage
+
+```{r echo=FALSE, fig.asp=1.0, message=FALSE, warning=FALSE, comment=NA}
+fig_nums(
+  name    = paste0(sp, "comb"), level = 1, display = FALSE,
+  caption = paste(sp, "GLM coefficients for rectangles (left) and observed vs. predicted CPUE values (kg/day)"))
+
+knitr::include_graphics(path=file.path(figuresdir, paste(top$english_species[[i]], "cpuecomb.jpg", sep="_")))
+```
+
+_`r fig_nums(paste0(sp, "comb"))`_
+
+```{r echo=FALSE, fig.asp=1.0, message=FALSE, warning=FALSE, comment=NA}
+tab_nums(
+  name    = paste0(sp, "anova"), level = 1, display = FALSE,
+  caption = paste(sp, "Anova table of CPUE GLM by year and rectangle (kg/day) "))
+
+  cat(readLines(file.path(tablesdir, paste(sp, "anova.txt", sep="_"))), sep = '\n')
+```
+
+_`r tab_nums(paste0(sp, "anova"))`_
+
+<!-- =============================================================================================== --> 
+
+\newpage
+
+```{r echo=FALSE, fig.asp=1.0, message=FALSE, warning=FALSE, comment=NA}
+i   <- 6
+sp  <- top$english_species[i] 
+sp2 <- filter(top, english_species==sp) %>% dplyr::select(species) %>% as.character()
+
+```
+
+**`r sp`**
+
+```{r echo=FALSE, fig.asp=1.0, message=FALSE, warning=FALSE, comment=NA}
+
+fig_nums(
+  name    = paste0(sp, "cpue"), level = 1, display = FALSE,
+  caption = paste(sp, "CPUE by year and rectangle (kg/day) and standardized CPUE trend by year (kg/day)"))
+
+knitr::include_graphics(path=file.path(figuresdir, paste(top$english_species[[i]], "cpuemap.jpg", sep="_")))
+```
+
+```{r echo=FALSE, fig.asp=1.0, message=FALSE, warning=FALSE, comment=NA}
+knitr::include_graphics(path=file.path(figuresdir, paste(top$english_species[[i]], "cpuetrend.jpg", sep="_")))
+```
+
+_`r fig_nums(paste0(sp, "cpue"))`_
+
+\newpage
+
+```{r echo=FALSE, fig.asp=1.0, message=FALSE, warning=FALSE, comment=NA}
+fig_nums(
+  name    = paste0(sp, "comb"), level = 1, display = FALSE,
+  caption = paste(sp, "GLM coefficients for rectangles (left) and observed vs. predicted CPUE values (kg/day)"))
+
+knitr::include_graphics(path=file.path(figuresdir, paste(top$english_species[[i]], "cpuecomb.jpg", sep="_")))
+```
+
+_`r fig_nums(paste0(sp, "comb"))`_
+
+```{r echo=FALSE, fig.asp=1.0, message=FALSE, warning=FALSE, comment=NA}
+tab_nums(
+  name    = paste0(sp, "anova"), level = 1, display = FALSE,
+  caption = paste(sp, "Anova table of CPUE GLM by year and rectangle (kg/day) "))
+
+  cat(readLines(file.path(tablesdir, paste(sp, "anova.txt", sep="_"))), sep = '\n')
+```
+
+_`r tab_nums(paste0(sp, "anova"))`_
+
+\newpage
+
+<!-- Horse mackerel (HOM) --> 
+
+```{r echo=FALSE, fig.asp=1.0, message=FALSE, warning=FALSE, comment=NA}
+i   <- 7
+sp  <- top$english_species[i] 
+sp2 <- filter(top, english_species==sp) %>% dplyr::select(species) %>% as.character()
+
+```
+
+**`r sp`**
+
+```{r echo=FALSE, fig.asp=1.0, message=FALSE, warning=FALSE, comment=NA}
+
+fig_nums(
+  name    = paste0(sp, "cpue"), level = 1, display = FALSE,
+  caption = paste(sp, "CPUE by year and rectangle (kg/day) and standardized CPUE trend by year (kg/day)"))
+
+knitr::include_graphics(path=file.path(figuresdir, paste(top$english_species[[i]], "cpuemap.jpg", sep="_")))
+```
+
+```{r echo=FALSE, fig.asp=1.0, message=FALSE, warning=FALSE, comment=NA}
+knitr::include_graphics(path=file.path(figuresdir, paste(top$english_species[[i]], "cpuetrend.jpg", sep="_")))
+```
+
+_`r fig_nums(paste0(sp, "cpue"))`_
+
+\newpage
+
+```{r echo=FALSE, fig.asp=1.0, message=FALSE, warning=FALSE, comment=NA}
+fig_nums(
+  name    = paste0(sp, "comb"), level = 1, display = FALSE,
+  caption = paste(sp, "GLM coefficients for rectangles (left) and observed vs. predicted CPUE values (kg/day)"))
+
+knitr::include_graphics(path=file.path(figuresdir, paste(top$english_species[[i]], "cpuecomb.jpg", sep="_")))
+```
+
+_`r fig_nums(paste0(sp, "comb"))`_
+
+```{r echo=FALSE, fig.asp=1.0, message=FALSE, warning=FALSE, comment=NA}
+tab_nums(
+  name    = paste0(sp, "anova"), level = 1, display = FALSE,
+  caption = paste(sp, "Anova table of CPUE GLM by year and rectangle (kg/day) "))
+
+  cat(readLines(file.path(tablesdir, paste(sp, "anova.txt", sep="_"))), sep = '\n')
+```
+
+_`r tab_nums(paste0(sp, "anova"))`_
+
+\newpage
+
+# Discussion
+
+[discussion here]
+
+Quality of the data
+
+E.g. the issue with landings as indicator for catch rate
+
+Targetting
+
+```{r eval=FALSE, fig.asp=1.0, message=FALSE, warning=FALSE, comment=NA, include=FALSE}
+
+# NOT SHOWN 
+
+i <- 1
+
+fig_nums(
+  name    = paste0(tolower(top$species[[i]]), "catch"), level = 1, display = FALSE,
+  caption = paste(top$english_species[[i]], "landings per rectangle and year (tonnes)"))
+
+knitr::include_graphics(path=file.path(figuresdir, paste(top$english_species[[i]], "catchbyrect.jpg", sep="_")))
+
+# _`r fig_nums(paste0(tolower(top$species[[i]]), "catch"))`_
+
+```
+
+
 
 
 

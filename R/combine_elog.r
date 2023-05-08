@@ -72,7 +72,7 @@ mcatch <- loadRData(file=file.path(onedrive, "elog mcatch.RData"))
 pefa <- loadRData(file=file.path(onedrive, "elog pefa.RData")) %>% 
   mutate(landingdate = excel_timezone_to_utc(as.numeric(landingdate), timezone="UTC")) 
 
-janitor::compare_df_cols(olrac, ecatch, mcatch, pefa)
+# janitor::compare_df_cols(olrac, ecatch, mcatch, pefa)
 
 # combine from new to old
 elog <-
