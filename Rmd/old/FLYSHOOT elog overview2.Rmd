@@ -107,7 +107,7 @@ e <-
   ungroup() %>% 
   mutate(species = tolower(species)) %>% 
   left_join(dplyr::select(asfis,
-                          species, scientific_name, english_name, dutch_name),
+                          species, scientificname, englishname, dutchname),
             by = "species") %>% 
   mutate(species = toupper(species))  
 
@@ -157,7 +157,7 @@ effort <-
 catch <-
   e %>% 
   dplyr::group_by(vessel, year, month, species, 
-                  scientific_name, english_name, dutch_name) %>% 
+                  scientificname, englishname, dutchname) %>% 
   dplyr::summarize(weight = sum(weight, na.rm=TRUE)) %>% 
   dplyr::group_by(vessel, year, month) %>% 
   dplyr::mutate(perc = weight/sum(weight, na.rm=TRUE)) %>% 
@@ -286,15 +286,15 @@ t <-
   catch %>% 
   filter(species %in% top$species) %>% 
   mutate(
-    dutch_name = ifelse(species %in% c("SQC","SQR"), "pijlinktvis", dutch_name),
+    dutchname = ifelse(species %in% c("SQC","SQR"), "pijlinktvis", dutchname),
     species    = ifelse(species %in% c("SQC","SQR"), "SQR/SQC", species)
   ) %>% 
-  group_by(year, month, species, dutch_name) %>% 
+  group_by(year, month, species, dutchname) %>% 
   summarise(
     catch = sum(weight, na.rm=TRUE),
     n     = n_distinct(vessel)) %>% 
   mutate(catch = catch/n ) %>% 
-  mutate(species = paste(species, dutch_name))
+  mutate(species = paste(species, dutchname))
 
 
 t1 <-
@@ -368,7 +368,7 @@ _`r tab_nums("cpuepersoort2")`_
 
 Vangst afwijking ten opzichte van gemiddelde
 
-```{r cpuepersoort, echo=FALSE, message=FALSE, warning=FALSE, comment=NA, fig.asp=1.0}
+```{r cpuepersoort3, echo=FALSE, message=FALSE, warning=FALSE, comment=NA, fig.asp=1.0}
 
 tab_nums(
   name    = "catchdeviation", 
