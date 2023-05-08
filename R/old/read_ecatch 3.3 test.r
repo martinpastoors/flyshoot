@@ -1,3 +1,9 @@
+# ==============================================================================
+# read_ecatch 3.3
+#
+# 25/04/2023 added NLDEP, NLxxx
+# ==============================================================================
+
 library(xml2)
 library(tidyverse)
 library(lubridate)
@@ -82,7 +88,13 @@ raw <- data.frame(stringsAsFactors = FALSE)
 
 filename = filelist2[9]
 
-for (i in 1:length(filelist2)) {
+# 
+filename = "C:/Users/MartinPastoors/Martin Pastoors/FLYSHOOT - General/data/SCH65/ecatch/20170213001000000647.xml"
+
+# NLFAR
+filename = "C:/Users/MartinPastoors/Martin Pastoors/FLYSHOOT - General/data/SCH65/ecatch/20170529001000000970.xml"
+
+for (i in 291:length(filelist2)) {
 # for (i in 1:25) {
     
   print(i)
@@ -104,8 +116,14 @@ for (i in 1:length(filelist2)) {
     dplyr::select(NLERS_id) %>% 
     as.character()
   
-  if(grepl("2.0", xmlns)) {
+  if(grepl("3.3", xmlns)) {
     
+    # RTP
+    
+    # -------------------------------------------------------------------------  
+    # DEP
+    # -------------------------------------------------------------------------  
+
     # -------------------------------------------------------------------------  
     # FAR
     # -------------------------------------------------------------------------  
@@ -167,12 +185,20 @@ for (i in 1:length(filelist2)) {
           dplyr::select(-GE)
         
         # print("catch")
-        
+
+        gear <-
+          tmp %>% 
+          dplyr::select(contains("NLGE")) %>% 
+          pivot_longer(names(.)) %>% 
+          unnest_wider(value) %>%
+          unnest(cols = names(.))  
+          
         catch <-
           tmp %>% 
           dplyr::select(contains("NLSPE")) %>% 
           pivot_longer(names(.)) %>% 
           unnest_wider(value) %>%
+          dplyr::select(!contains("NLGE")) %>% 
           unnest(cols = names(.)) %>% 
           unnest(cols = NLRAS) %>% 
           
@@ -186,7 +212,8 @@ for (i in 1:length(filelist2)) {
           
           # bind_cols(data.frame(variable=rep(c("FA","EZ", "SR", "FE"), nrow(.)/4))) %>% 
           tidyr::pivot_wider(names_from = variable, values_from = NLRAS) %>% 
-          dplyr::select(-name)
+          dplyr::select(-name) 
+        
         
         # print("final")
         
@@ -284,14 +311,14 @@ for (i in 1:length(filelist2)) {
             tmp2 %>% 
             dplyr::select(!contains(c("NLSPE", "NLSPN"))) %>% 
             unnest_wider(NLGE) %>%
-            unnest(names(.)) %>% 
-            dplyr::select(-GE)
+            unnest(names(.)) 
           
           catch <-
             tmp2 %>% 
             dplyr::select(contains("NLSPE")) %>% 
             pivot_longer(names(.)) %>% 
             unnest_wider(value) %>%
+            dplyr::select(!contains("NLGE")) %>% 
             # 2nd time to nest the single list in each cell?
             unnest(cols = names(.)) %>% 
             unnest(cols = NLRAS) %>% 
@@ -339,20 +366,22 @@ far <-
   unnest(cols = names(.)) %>% 
   filter(is.na(NLERS_id)) %>% 
   mutate(WT   = as.numeric(WT)) %>% 
-  mutate(date = lubridate::ymd(RD)) %>% 
+  mutate(datetime = lubridate::ymd_hms(RD)) %>% 
+  mutate(date     = as.Date(datetime)) %>% 
   mutate(year = lubridate::year(date))
 
 corr <-
   raw %>% 
   unnest(cols = names(.)) %>% 
   filter(!is.na(NLERS_id)) %>% 
+  mutate(datetime = lubridate::ymd_hms(RD)) %>% 
+  mutate(date     = as.Date(datetime)) %>% 
+  mutate(year = lubridate::year(date)) %>% 
   group_by(RN) %>% 
-  filter(RD == max(RD), RT == max(RT)) %>% 
-  mutate(WT   = as.numeric(WT)) %>% 
-  mutate(date = lubridate::ymd(RD)) %>% 
-  mutate(year = lubridate::year(date))
+  filter(datetime == max(datetime)) %>% 
+  mutate(WT   = as.numeric(WT)) 
 
-ecatch20 <-
+ecatch33 <-
   far %>% 
   filter(RN %notin% corr$RN) %>% 
   bind_rows(corr) %>% 
@@ -364,6 +393,6 @@ remains <-
   filter(RN %notin% far$RN)
 
 
-save(ecatch20, file="C:/Users/MartinPastoors/Martin Pastoors/FLYSHOOT - General/data/ecatch20.RData")
-load(file="C:/Users/MartinPastoors/Martin Pastoors/FLYSHOOT - General/data/ecatch20.RData")
+save(ecatch33, file="C:/Users/MartinPastoors/Martin Pastoors/FLYSHOOT - General/data/ecatch33.RData")
+load(file="C:/Users/MartinPastoors/Martin Pastoors/FLYSHOOT - General/data/ecatch33.RData")
 

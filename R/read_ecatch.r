@@ -3,17 +3,37 @@
 #
 # 26/04/2023 Still not completely finished; some errors arising from missing RTP or DEP messages
 # 04/05/2023 Finalized the code to read ecatch 2.0 and 3.3
+# 08/05/2023 Finalized the code; seems to work OK. sqsql function to get tripnumber from date range in ecatch 2.0
 # ===============================================================================================
 
 library(xml2)
 library(tidyverse)
 library(lubridate)
 library(sqldf)
+library(RColorBrewer)                # colour schemes
 
 rm(list=ls())
 
 source("../prf/r/my utils.R")
 source("../mptools/R/get_onedrive.r")
+
+spatialdir <- "C:/DATA/RDATA"
+
+# spatial data files
+
+load(file.path(spatialdir, "world_lr_sf.RData"))
+load(file.path(spatialdir, "world_mr_sf.RData"))
+
+load(file.path(spatialdir, "world_lr_df.RData"))
+load(file.path(spatialdir, "world_mr_df.RData"))
+
+rect_df <-
+  loadRData(file.path(spatialdir, "rect_df.RData")) %>% 
+  rename(rect=ICESNAME) %>% 
+  group_by(rect) %>% 
+  filter(row_number() ==1) %>% 
+  dplyr::select(rect, lon=long, lat)
+
 
 onedrive <- get_onedrive(team="Martin Pastoors", site="FLYSHOOT - General")
 
@@ -378,158 +398,107 @@ load(file=file.path(onedrive, "rdata", "ecatch temp.RData"))
 # all corrections to DEP, RTP or FAR
 corr <-
   bind_rows(
-    dep %>% dplyr::select(NFR, RN, RD, RT, message, vessel, trip, DA, TI, PO, RN2, RE, AA),
-    rtp %>% dplyr::select(NFR, RN, RD, RT, message, vessel, trip, DA, TI, PO, RN2, RE),
-    far %>% distinct(NFR, RN, RD, RT, message, vessel, trip, RN2, RE)
+    dep %>% dplyr::select(NFR, RN, RD, RT, message, vessel, version, trip, DA, TI, PO, RN2, RE, AA),
+    rtp %>% dplyr::select(NFR, RN, RD, RT, message, vessel, version, trip, DA, TI, PO, RN2, RE),
+    far %>% distinct     (NFR, RN, RD, RT, message, vessel, version, trip, RN2, RE, FO, GE, ME, SN, WT, FA, EZ, SR)
   ) %>%
   filter(!is.na(RN2))
 
-# corr %>% filter(RN %in% corr$RN2) %>% View()
-# dep %>% filter(RN %notin% corr$RN2) %>% View()
-# dep %>% filter(RN %in% corr$RN2) %>% View()
-# dep %>% filter(RD == "2016-06-02") %>% View()
-# dep %>% group_by(AA) %>% summarise(n=n())
+# ------------------------------------------------------------------------------
+# Version 2.0 does not have tripnumber included
+# ------------------------------------------------------------------------------
 
-trips <-
-  
-  # DEP with FSH; handle corrections, RTP and FAR that are not in corrections
+dep20 <-
   bind_rows(
-    dep %>% filter(RN %notin% corr$RN2) %>% dplyr::select(NFR, RN, RD, RT, message, vessel, trip, DA, TI, PO, RN2, RE, AA),
-    corr %>% filter(message %in% c("NLDEP")) %>% dplyr::select(NFR, RN, RD, RT, message, vessel, trip, DA, TI, PO, RN2, RE, AA)
+    dep %>% filter(RN %notin% corr$RN2) %>% dplyr::select(NFR, RN, RD, RT, message, vessel, version, trip, DA, TI, PO, RN2, RE, AA),
+    corr %>% filter(message %in% c("NLDEP")) %>% dplyr::select(NFR, RN, RD, RT, message, version,  vessel, trip, DA, TI, PO, RN2, RE, AA)
   ) %>% 
   filter(AA == "FSH") %>% 
-  rename(departuredate = DA, departureport = PO) %>% 
-  
-  # RTP
-  left_join(
-    bind_rows(
-      rtp %>% filter(RN %notin% corr$RN2) %>% dplyr::select(NFR, RN, RD, RT, message, vessel, trip, DA, TI, PO, RN2, RE),
-      corr %>% filter(message %in% c("NLRTP")) %>% dplyr::select(NFR, RN, RD, RT, message, vessel, trip, DA, TI, PO, RN2, RE)
-    ) %>% 
-    rename(arrivaldate = DA, arrivalport = PO),
-    by=c("vessel","trip")
-  ) 
-    
-    # far %>% filter(RN %notin% corr$RN2) %>% distinct(NFR, RN, RD, RT, message, vessel, RN2, RE)
-    # corr %>% filter(message %in% c("NLFAR"))         %>% distinct(NFR, RN, RD, RT, message, vessel, RN2, RE)
-  ) %>%
-  mutate(
-    RD = ifelse(!is.na(RT), paste0(RD,"T",RT,":00"),RD),
-    DA = ifelse(!is.na(TI), paste0(DA,"T",TI,":00"),DA),
-  ) %>% 
-  mutate(DA = ifelse(is.na(DA), RD, DA)) %>% 
-  mutate(across(c(RD, DA), lubridate::ymd_hms)) %>% 
-  dplyr::select(-RT, -TI) %>% 
-  mutate(year = year(DA)) %>% 
-  arrange(vessel, year, DA) %>% 
-  group_by(vessel, year) %>% 
-  # mutate(id = ifelse(row_number()==1, 0, NA)) %>% 
-  mutate(id = ifelse(message == "NLDEP", 1, 0)) %>% 
-  mutate(trip = paste0(year, stringr::str_pad(cumsum(id), width=3, pad="0"))) %>% 
-  
-  # remove erroneous RTPs
-  group_by(vessel, year, trip) %>% 
-  arrange(vessel, year, trip, DA) %>%
-  mutate(id = row_number()) %>% 
-  filter(message != "NLRTP" | (message == "NLRTP" & id == max(id))) %>% 
-  ungroup()
-
-# rtp %>% filter(RN == "20170720000001103") 
-# rtp %>% filter(RN == "20170724000001105") 
-# test <- rtp %>% filter(!(rtp$RN %in% rtp$RN2)) 
-# test %>% filter(RN == "20170720000001103") 
-# test %>% filter(RN == "20170724000001105") 
-
-
-# trips_dep <- trips %>% filter(message == "NLDEP") %>% dplyr::select(vessel, trip, DA, PO) %>% distinct()
-# trips_rtp <- trips %>% filter(message == "NLRTP") %>% dplyr::select(vessel, trip, DA, PO) %>% distinct()
-# test <- left_join(trips_dep, trips_rtp, by=c("vessel","trip"), multiple="all")
-# test %>% filter(row_number() %in% 28) %>% View()
-# test %>% group_by(vessel, trip) %>% summarise(n=n()) %>% filter(n>1) %>% View()
-
-# trips_dep %>% filter(row_number() %in% 134:137) %>% View()
-# trips_rtp %>% filter(trip=="2017065") %>% View()
-# trips %>% filter(trip=="2016028") %>% View()
-# rtp %>% filter(RN=="20160831001000000228") %>% View()
-# rtp %>% filter(RN2=="20160831001000000228") %>% View()
-trips %>% 
-  
-# setup the final dataset
-ecatch <-
-  far %>% 
-  
-  # add tripnumber to FAR message
-  left_join(trips %>% 
-              dplyr::select("RN", "trip"),
-            by=c("RN")) %>% 
-
-  # add departure information  
-  left_join(trips %>% 
-              filter(message=="NLDEP") %>% 
-              dplyr::select(vessel, trip, departuredate=DA, departureport=PO),
-            by=c("vessel","trip")) %>% 
-  
-  # add return to port information
-  left_join(trips %>% 
-            filter(message=="NLRTP") %>% 
-            dplyr::select(vessel, trip, arrivaldate=DA, arrivalport=PO),
-          by=c("vessel","trip")) %>% 
-  
-  # catchdate
-  mutate(catchdate = ifelse(!is.na(RT), paste0(RD,"T",RT,":00"),RD)) %>% 
-  mutate(across(c(catchdate), lubridate::ymd_hms)) %>% 
-  mutate(year = year(catchdate) ) %>% 
-
-  # set arrival datetime to last FAR if missing
-  group_by(vessel, year, trip) %>% 
-  mutate(arrivaldate = ifelse(is.na(arrivaldate), max(catchdate, na.rm=TRUE), arrivaldate)) %>% 
-  mutate(arrivaldate = as_datetime(arrivaldate)) %>% 
+  # rename(departuredate = DA, departureport = PO) %>% 
+  filter(is.na(trip)) %>% 
   ungroup() %>% 
-  lowcase() %>% 
-  rename(meshsize          = me,
-         fishingoperations = fo,
-         species           = sn,
-         weight            = wt,
-         faozone           = fa,
-         rect              = sr, 
-         economiczone      = ez,
-         gear              = ge) %>%
-  mutate(faozone = tolower(faozone)) %>% 
-  mutate(source="ecatch") %>% 
-  mutate(version = ifelse(is.na(vrs), "2.0", vrs)) %>% 
-  dplyr::select(-c(swe,
-                   vrs,
-                   nad, 
-                   nfr,
-                   rn,
-                   gc,
-                   du,
-                   kv,
-                   rn2,
-                   re,
-                   et, 
-                   mv,
-                   rd,
-                   rt
-  )) %>% 
-  relocate(vessel, year, trip, catchdate)
+  distinct() 
 
+rtp20 <-  
+  bind_rows(
+    rtp %>% filter(RN %notin% corr$RN2) %>% dplyr::select(NFR, RN, RD, RT, message, vessel, trip, version, DA, TI, PO, RN2, RE),
+    corr %>% filter(message %in% c("NLRTP")) %>% dplyr::select(NFR, RN, RD, RT, message, vessel, trip, version, DA, TI, PO, RN2, RE)
+  ) %>% 
+  # rename(arrivaldate = DA, arrivalport = PO) %>% 
+  filter(is.na(trip)) %>% 
+  ungroup() %>% 
+  distinct()  
 
+# trip 2.0
+trip20 <-
+  bind_rows(
+    dplyr::select(dep20, message, vessel, version, DA, TI, PO, RE),
+    dplyr::select(rtp20, message, vessel, version, DA, TI, PO, RE),
+  ) %>% 
+  group_by(vessel) %>% 
 
+  mutate(date = lubridate::ymd_hms(paste0(DA,"T",TI,":00"))) %>% 
+  # dplyr::select(-DA, -TI) %>% 
+  arrange(vessel, date) %>% 
+  
+  # remove trips that start with RTP
+  filter(!(DA == "2016-06-02")) %>%
+  filter(!(DA == "2016-05-27")) %>%
 
-skimr::skim(ecatch)
-ecatch %>%  distinct(vrs)
-ecatch %>% filter(!is.na(mv)) %>% distinct(version)
+  # remove duplicated NLDEP or NLRTP
+  filter(!(message=="NLDEP" & lead(message) == "NLDEP")) %>% 
+  filter(!(message=="NLRTP" & lead(message) == "NLRTP")) %>% 
+  
+  # add tripnumber
+  mutate(counter = ifelse(message=="NLDEP", 1, 0)) %>% 
+  mutate(id      = cumsum(counter)) %>%
+  mutate(year    = lubridate::year(date)) %>% 
+  mutate(trip    = paste0(year, stringr::str_pad(id, width=3, pad="0"))) %>% 
+  
+  mutate(message = factor(message, levels=c("NLDEP", "NLRTP"))) %>% 
+  unite("z", c(date, PO, RE), sep="#", remove = TRUE) %>% 
+  dplyr::select(-DA, -TI, -counter, -id, -year) %>% 
+  
 
-# save(ecatch20, file="C:/Users/MartinPastoors/Martin Pastoors/FLYSHOOT - General/data/ecatch20.RData")
-# load(file="C:/Users/MartinPastoors/Martin Pastoors/FLYSHOOT - General/data/ecatch20.RData")
+  pivot_wider(names_from = message, values_from = z) %>% 
+  drop_na(NLRTP) %>% 
+  tidyr::separate(NLDEP, into=c("departuredate","departureport","departureremark"), sep="#") %>% 
+  tidyr::separate(NLRTP, into=c("arrivaldate","arrivalport","arrivalremark"), sep="#") %>% 
+  mutate(
+    departuredate = lubridate::ymd_hms(departuredate),
+    arrivaldate   = lubridate::ymd_hms(arrivaldate)
+  )
+  
+# Couple tripinformation to FAR2.0
+far20 <-
+  bind_rows(
+    far %>% filter(RN %notin% corr$RN2) %>% dplyr::select(NFR, RN, RD, RT, message, vessel, version, trip, RN2, RE, 
+                                                          GE, ME, SN, WT, FA, EZ, SR),
+    corr %>% filter(message %in% c("NLFAR")) %>% dplyr::select(NFR, RN, RD, RT, message, vessel, version, trip, RN2, RE,
+                                                               GE, ME, SN, WT, FA, EZ, SR)
+  ) %>% 
+  # rename(catchdate = RD) %>% 
+  mutate(catchdate = lubridate::ymd_hms(paste0(RD,"T",RT,":00"))) %>% 
+  
+  filter(is.na(trip)) %>% 
+  filter(!is.na(WT), WT>0) %>% 
+  distinct()  
 
+merged20 <-
+  sqldf::sqldf("select far20.NFR, far20.RN, far20.vessel, far20.version, far20.catchdate, 
+                       far20.GE, far20.ME, far20.SN, far20.WT, far20.FA, far20.EZ, far20.SR,
+                       trip20.departuredate, trip20.departureport, trip20.departureremark,
+                       trip20.arrivaldate, trip20.arrivalport, trip20.arrivalremark, 
+                       trip20.trip from far20
+                join trip20 on far20.vessel    == trip20.vessel and
+                               far20.catchdate >= trip20.departuredate and
+                               far20.catchdate <= trip20.arrivaldate")
+  
+# ------------------------------------------------------------------------------
+# Version 3.3 has tripnumber included
+# ------------------------------------------------------------------------------
 
-
-
-dep %>% left_join(rtp, by=c("vessel","trip"))
-
-dep2 <-
+dep33 <-
   bind_rows(
     dep %>% filter(RN %notin% corr$RN2) %>% dplyr::select(NFR, RN, RD, RT, message, vessel, version, trip, DA, TI, PO, RN2, RE, AA),
     corr %>% filter(message %in% c("NLDEP")) %>% dplyr::select(NFR, RN, RD, RT, message, version,  vessel, trip, DA, TI, PO, RN2, RE, AA)
@@ -541,7 +510,8 @@ dep2 <-
   group_by(vessel, trip) %>% 
   slice_tail() 
 
-rtp2 <-  
+  
+rtp33 <-  
   bind_rows(
     rtp %>% filter(RN %notin% corr$RN2) %>% dplyr::select(NFR, RN, RD, RT, message, vessel, trip, version, DA, TI, PO, RN2, RE),
     corr %>% filter(message %in% c("NLRTP")) %>% dplyr::select(NFR, RN, RD, RT, message, vessel, trip, version, DA, TI, PO, RN2, RE)
@@ -552,20 +522,98 @@ rtp2 <-
   group_by(vessel, trip) %>% 
   slice_tail() 
 
-far2 <-
+far33 <-
   bind_rows(
-    far %>% filter(RN %notin% corr$RN2) %>% dplyr::select(NFR, RN, RD, RT, message, vessel, trip, DA, TI, PO, RN2, RE),
-    corr %>% filter(message %in% c("NLRTP")) %>% dplyr::select(NFR, RN, RD, RT, message, vessel, trip, DA, TI, PO, RN2, RE)
+    far %>% filter(RN %notin% corr$RN2) %>% dplyr::select(NFR, RN, RD, RT, message, vessel, version, trip, RN2, RE, 
+                                                          FO, GE, ME, SN, WT, FA, EZ, SR),
+    corr %>% filter(message %in% c("NLFAR")) %>% dplyr::select(NFR, RN, RD, RT, message, vessel, version, trip, RN2, RE,
+                                                               FO, GE, ME, SN, WT, FA, EZ, SR)
   ) %>% 
-  rename(arrivaldate = DA, arrivalport = PO) %>% 
+  rename(catchdate = RD) %>% 
   drop_na(trip) %>% 
-  distinct() %>% 
-  group_by(vessel, trip) %>% 
-  slice_tail() 
+  filter(!is.na(WT), WT>0) %>% 
+  distinct()  
 
-merged <-
+merged33 <-
   left_join(
-    dplyr::select(dep2, vessel, trip, source, version, departureport, departuredate),
-    dplyr::select(rtp2, vessel, trip, arrivalport, arrivaldate),
-    by=c("vessel","trip")
+    far33, 
+    dplyr::select(dep33, vessel, trip, version, departureport, departuredate),
+    by=c("vessel","trip", "version")
+  ) %>% 
+  left_join(
+    dplyr::select(rtp33, vessel, trip, version, arrivalport, arrivaldate),
+    by=c("vessel","trip", "version")
+  ) %>% 
+  
+  mutate(
+    catchdate     = lubridate::ymd_hms(catchdate),
+    departuredate = lubridate::ymd_hms(departuredate),
+    arrivaldate   = lubridate::ymd_hms(arrivaldate)
   )
+
+
+
+# corr %>% filter(RN %in% corr$RN2) %>% View()
+# dep %>% filter(RN %notin% corr$RN2) %>% View()
+# dep %>% filter(RN %in% corr$RN2) %>% View()
+# dep %>% filter(RD == "2016-06-02") %>% View()
+# dep %>% group_by(AA) %>% summarise(n=n())
+
+# janitor::compare_df_cols(merged20, merged33)
+
+# setup the final dataset
+ecatch <-
+  bind_rows(merged20, merged33) %>% 
+  lowcase() %>% 
+  mutate(year = year(catchdate) ) %>% 
+  rename(meshsize          = me,
+         fishingoperations = fo,
+         species           = sn,
+         weight            = wt,
+         faozone           = fa,
+         rect              = sr, 
+         economiczone      = ez,
+         gear              = ge) %>%
+  mutate(faozone = tolower(faozone)) %>% 
+  mutate(source="ecatch") %>% 
+  dplyr::select(-c(nfr,
+                   rn,
+                   departureremark,
+                   arrivalremark,
+                   rn2,
+                   rt,
+                   re,
+                   message
+  )) %>% 
+  relocate(vessel, year, trip, catchdate) %>% 
+  mutate(across(c("meshsize","fishingoperations"), as.integer)) %>% 
+  mutate(across(c("weight"), as.numeric)) %>% 
+  left_join(rect_df, by="rect")
+
+save(ecatch, file="C:/Users/MartinPastoors/Martin Pastoors/FLYSHOOT - General/data/elog ecatch.RData")
+# load(file="C:/Users/MartinPastoors/Martin Pastoors/FLYSHOOT - General/data/ecatch20.RData")
+
+
+
+skimr::skim(ecatch)
+ecatch %>%  distinct(vrs)
+ecatch %>% filter(!is.na(mv)) %>% distinct(version)
+
+
+xlim <- range(ecatch$lon, na.rm=TRUE)
+ylim <- range(ecatch$lat, na.rm=TRUE)
+
+# plot by vessel and year
+ecatch %>% 
+  group_by(vessel, year, version, rect, lat, lon) %>% 
+  summarise(weight = sum(weight, na.rm=TRUE)) %>% 
+  
+  ggplot(aes(x=lon, y=lat)) +
+  theme_publication() +
+  coord_quickmap(xlim=xlim , ylim=ylim) +
+  
+  geom_polygon(data=world_mr_df, aes(x=long, y=lat, group=group), fill = "grey75") +
+  geom_point(aes(colour=version, size=weight), alpha=0.5) +
+  facet_grid(vessel~paste(year, version))
+
+
