@@ -1177,6 +1177,8 @@ _`r fig_nums("obsrevenue")`_
 
 # Standardized CPUE
 
+The CPUE calculation are based on `r ifelse(toprectanglesonly,"data for the top-10 rectangles per species ","all the available data"))`. 
+
 Calculating a standardized catch rate (CPUE) by species, is carried out in a number of steps. First, only the year trend is calculated. Then, in a series of three steps, we determine the most significant factors for the different species. The factors considered are: vessel, latitude, longitude, rectangle, quarter and target species. The evaluation is carried out by assessing the AIC values for each factor. The factor with the lowest AIC is then taken forward in each of the steps. 
 
 
