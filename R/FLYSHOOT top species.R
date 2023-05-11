@@ -65,6 +65,10 @@ top   <-
   ) %>% 
   dplyr::ungroup() %>% 
   dplyr::mutate(englishspecies = paste(englishname, species)) %>% 
+  mutate(
+    englishname = ifelse(species == "PIL", "European pilchard", englishname),
+    englishspecies = ifelse(species == "PIL", "European pilchard PIL", englishspecies)
+  ) %>% 
   arrange(desc(value)) %>% 
   slice_head(n=15)
 
