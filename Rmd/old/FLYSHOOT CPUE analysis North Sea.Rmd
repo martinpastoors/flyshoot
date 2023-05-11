@@ -1,0 +1,2669 @@
+---
+output:
+  word_document:
+    reference_docx: ../report_template.dotx
+---
+
+
+```{r setup, include=FALSE}
+
+# =====================================================================================================
+# FLYSHOOT CPUE analysis
+# 
+# 11/01/2023 first coding
+# 16/03/2023 full GLM modelling of top 15 species in the catch
+#
+# =====================================================================================================
+
+knitr::opts_chunk$set(echo = FALSE,	message = FALSE,	warning = FALSE,	comment = "",	crop = TRUE )
+knitr::opts_chunk$set(fig.width=10) 
+
+options(dplyr.summarise.inform = FALSE)
+
+# Reset lists
+rm(list=ls())
+
+recalculatemaps   <- TRUE            # recalculate catch maps (takes relatively long)
+toprectanglesonly <- TRUE            # CPUE analysis for top rectangles (by species) only?
+
+# Libraries
+library(rmarkdown)                   # note: requires knitr 1.21
+
+require(tidyverse, quietly=TRUE)     # combined package of dplyr, tidyr, ggplot, readr, purrr and tibble
+require(lubridate, quietly=TRUE)     # data handling
+require(reshape2, quietly=TRUE)      # reshaping data; e.g. cast
+require(RColorBrewer)                # colour schemes
+library(viridis)
+library(pander)
+library(patchwork)
+
+library(captioner)                   # for captions
+tab_nums <- captioner::captioner(prefix = "Table " , levels=1, type=c("n"), infix=".")
+fig_nums <- captioner::captioner(prefix = "Figure ", levels=1, type=c("n"), infix=".")
+
+# Source all the utils
+source("../../prf/R/my utils.r")
+
+get_onedrive <- function (team="Martin Pastoors", site="FLYSHOOT - General") {
+  
+  if (Sys.info()['sysname'] == 'Windows') {
+    
+    # set onedrive directory
+    if(dir.exists(file.path(Sys.getenv('USERPROFILE'), team, site))) {
+      onedrive <- file.path(Sys.getenv('USERPROFILE'), team, site)   
+    } else if(dir.exists(file.path('C:/DATA/PFA', team, site))) {
+      onedrive <- file.path('C:/DATA/PFA', team, site)
+    } else if(dir.exists(file.path('D:/DATA/PFA', team, site))) {
+      onedrive <- file.path('D:/DATA/PFA', team, site)
+    } else {
+      stop("Onedrive directory not found")
+    }
+  }
+  
+  return(onedrive)
+}
+
+spatialdir <- "C:/DATA/RDATA"
+
+# spatial data files
+
+load(file.path(spatialdir, "world_lr_sf.RData"))
+load(file.path(spatialdir, "world_mr_sf.RData"))
+load(file.path(spatialdir, "world_hr_sf.RData"))
+# load(file.path(onedrive, "rdata/eez.df.RData"))
+# load(file.path(onedrive, "rdata/fao.df.RData"))
+# load(file.path(onedrive, "rdata/depth200.df.RData"))
+load(file.path(spatialdir, "rect_lr_sf.RData"))
+icesrect <-
+  rect_lr_sf %>% 
+  sf::st_drop_geometry() %>% 
+  rename(rect=ICESNAME) %>% 
+  mutate(lat = (SOUTH + NORTH)/2) %>% 
+  mutate(lon = (EAST + WEST)/2) %>% 
+  dplyr::select(rect, lat, lon)
+
+load(file.path(spatialdir, "world_lr_df.RData"))
+load(file.path(spatialdir, "fao_sf.RData"))
+
+asfis <- 
+  loadRData(file.path(spatialdir, "asfis.RData")) %>% 
+  rename_all(tolower) %>% 
+  mutate(species = tolower(species))
+
+# ===============================================================================
+#  Load and filter the trip data
+# ===============================================================================
+
+# set onedrive directory
+onedrive <- get_onedrive(team="Martin Pastoors", site="FLYSHOOT - General")
+
+# load datasets
+haul   <- loadRData(file.path(onedrive, "rdata/haul.RData"))
+kisten <- loadRData(file.path(onedrive, "rdata/kisten.RData")) 
+elog   <- loadRData(file.path(onedrive, "rdata/elog.RData")) %>% 
+  mutate(species = toupper(species)) %>% 
+  mutate(species = ifelse(species == "JAX","HOM",species)) %>% 
+  mutate(species = ifelse(species == "SQU", "SQR", species)) %>% 
+  
+  mutate(species = tolower(species)) %>% 
+  left_join(dplyr::select(asfis,
+                          species, scientific_name, english_name, dutch_name),
+            by = "species") %>% 
+  mutate(species = toupper(species))  %>% 
+  
+  left_join(icesrect, by="rect") %>% 
+  mutate(
+    lat = ifelse(is.na(lat.x), lat.y, lat.x),
+    lon = ifelse(is.na(lon.x), lon.y, lon.x)) %>% 
+  dplyr::select(-lat.x, -lat.y, -lon.x, -lon.y) %>% 
+  ungroup()
+
+# elog %>% filter(!is.na(lat.x)) %>% View()
+
+price  <- 
+  readr::read_rds(file.path(onedrive, "rdata/prices.rds")) %>% 
+  dplyr::select(year, species, avgprice) %>% 
+  mutate(price_cat = cut(avgprice, breaks=c(0,0.5, 1,2,3,4,5,10,15,20), dig.lab=10 ))
+
+regulated  <- 
+  readr::read_rds(file.path(onedrive, "rdata/prices.rds")) %>% 
+  ungroup() %>% 
+  dplyr::distinct(species, regulated) 
+
+# skimr::skim(price)
+
+# sort(unique(elog$species))
+
+yrs       <- 2012:2022
+mnths     <- NA
+vessels   <- NA
+
+# divisions <- NA
+# divisions <- c("27.7.d", "27.7.e") # fix error in division 4.a
+divisions <- c("27.4.b", "27.4.c")
+
+n <- 10
+
+# Folder for storing figures  
+if(!any(is.na(divisions))) {
+  folder <- paste(divisions, collapse="-") } else {
+  folder <- "all"}
+
+dir.create(file.path(onedrive, "reports","figures",folder), showWarnings = FALSE)
+figuresdir <- file.path(onedrive, "reports","figures",folder)
+
+if (folder == "all") {
+  modelvars       <- c("rect", "quarter", "vessel")
+} else if (folder == "27.7.d-27.7.e") {
+  modelvars       <- c("rect", "quarter", "vessel")
+} else if (folder == "27.4.b-27.4.c") {
+  modelvars       <- c("rect", "quarter", "vessel")
+} else {
+  stop("Stop: need to define the model variables to be used")
+}
+
+# making the data selections
+e <- 
+  elog %>%
+  ungroup() %>% 
+  rename(division=faozone) %>% 
+  mutate(division =tolower(division)) %>% 
+  {if(!is.na(all(vessels))) filter(., vessel %in% vessels) else . } %>% 
+  {if(!is.na(all(yrs)))     filter(., year %in% yrs) else . } %>% 
+  {if(!is.na(all(mnths)))   filter(., month %in% mnths) else .} %>% 
+  {if(!any(is.na(divisions))) filter(., division %in% divisions) else .} %>% 
+  
+  filter(!(grepl("27.7.d", division) & lat >52)) %>%    # temporary fix
+  
+  left_join(regulated, by="species") %>% 
+  mutate(regulated = case_when(
+    is.na(regulated) & species %in% c("BSE","DGX","ANF","DGH","HER","PLE")             ~ "R",
+    is.na(regulated) & species %in% c("BRB","SBX","SQS","WEX","WEG","SQU","SDV",
+                                      "OCT","MUL","SCR","GAG","ANE","SQE","SQC","OCZ") ~ "NR",
+    TRUE ~ regulated
+  )) %>% 
+  ungroup()
+
+# e %>% distinct(species, regulated) %>% filter(is.na(regulated)) %>% View()
+
+# calculate the scaling of plots
+
+xmin <- floor(2 * (min(e$lon, na.rm=TRUE)-0.5))/2;
+xmax <- ceiling(2 * (max(e$lon, na.rm=TRUE)+0.5))/2;
+ymin <- floor(2 * (min(e$lat, na.rm=TRUE)-0.5))/2;
+ymax <- ceiling(2* (max(e$lat, na.rm=TRUE)+0.5))/2
+
+
+effort <-
+  e %>% 
+  dplyr::group_by(vessel, year) %>% 
+  dplyr::summarize(ndays = n_distinct(paste(vessel, date))) %>% 
+  ungroup()
+
+catch <-
+  e %>% 
+  dplyr::group_by(vessel, year, species, 
+                  scientific_name, english_name, dutch_name, regulated) %>% 
+  dplyr::summarize(weight = sum(weight, na.rm=TRUE)) %>% 
+  dplyr::group_by(vessel, year) %>% 
+  dplyr::mutate(perc = weight/sum(weight, na.rm=TRUE)) %>% 
+  left_join(effort, by=c("vessel", "year")) %>% 
+  mutate(catch_day = weight / ndays) %>% 
+  ungroup()
+
+effort_byweek <-
+  e %>% 
+  dplyr::group_by(vessel, year, quarter, month, week, division, rect) %>% 
+  dplyr::summarize(
+    effort  = n_distinct(date)
+  )  %>% 
+  ungroup()
+
+revenue_byweek <-
+  e %>% 
+  left_join(price, by=c("year","species")) %>% 
+  mutate(revenue = weight * avgprice) %>% 
+  drop_na(revenue) %>% 
+  group_by(vessel, year, week, species) %>% 
+  summarise(revenue = sum(revenue, na.rm=TRUE))
+    
+target_byweek <-
+  revenue_byweek %>% 
+  group_by(vessel, year, week) %>% 
+  arrange(desc(revenue)) %>% 
+  slice_head(n=1) %>% 
+  dplyr::select(-revenue) %>% 
+  rename(target=species)
+
+catch_byweek <-
+  e %>% 
+  dplyr::group_by(vessel, year, quarter, month, week, division, rect,  
+                  species, scientific_name, english_name, dutch_name, regulated) %>% 
+  dplyr::summarize(
+    catch = sum(weight, na.rm=TRUE),
+    # effort  = n_distinct(date)
+  ) %>% 
+  left_join(effort_byweek, by=c("vessel","year","quarter","month","week","division","rect")) %>% 
+  left_join(icesrect, by="rect") %>% 
+  left_join(price, by=c("year","species")) %>% 
+  left_join(target_byweek, by=c("vessel", "year","week")) %>% 
+  
+  ungroup() 
+  
+
+# catch_byweek %>% distinct(species, regulated) %>% filter(is.na(regulated)) %>% View()
+
+top_rectangles <-
+  catch_byweek %>%
+  group_by(species, rect) %>% 
+  summarise(n=n()) %>% 
+  group_by(species) %>% 
+  arrange(species, desc(n)) %>% 
+  filter(n >= 20,  row_number() <= 10)
+
+top <-
+  catch %>% 
+  dplyr::group_by(species, scientific_name, english_name, dutch_name) %>% 
+  dplyr::summarize(weight = sum(weight, na.rm=TRUE)) %>% 
+  dplyr::ungroup() %>% 
+  dplyr::mutate(english_species = paste(english_name, species)) %>% 
+  arrange(desc(weight)) %>% 
+  slice_head(n=n)
+
+rest <-
+  catch %>% 
+  dplyr::group_by(species, scientific_name, english_name, dutch_name) %>% 
+  dplyr::summarize(weight     = sum(weight, na.rm=TRUE)) %>% 
+  dplyr::ungroup() %>% 
+  dplyr::mutate(english_species = paste(english_name, species)) %>% 
+  arrange(desc(weight)) %>% 
+  filter(species %notin% top$species)
+
+readr::write_rds(top, file=file.path(onedrive,
+                                     "rdata",
+                                     paste0("top_",folder,".rds")))
+# writexl::write_xlsx(catch_byweek, path=file.path(onedrive, paste0("export",folder,".xlsx")))
+
+```
+
+
+# FLYSHOOT fishery CPUE analysis in `r paste(sort(unique(catch_byweek$division)), collapse=(", "))`
+
+M.A. Pastoors
+
+Date: `r format(Sys.time(), '%d/%m/%Y')`
+
+&nbsp;
+
+&nbsp;
+
+For: 
+
+Jaczon BV
+
+Eric van Linden en Anton Dekker
+
+Vissershavenweg 35
+
+2583 DK  Den Haag
+
+&nbsp;
+
+&nbsp;
+
+&nbsp;
+
+```{r, echo=FALSE, out.width = "200px", fig.align="left", message=FALSE, warning=FALSE, cache=FALSE}
+
+  knitr::include_graphics("../MPFF logo with text.png")
+
+```
+
+\newpage
+
+**Executive summary**
+
+[ summary here ]
+
+# Introduction
+
+The objective of this work is to analyse the electronic logbook data of the Jaczon Flyshoot vessel for trends in spatial and temporal dynamics. 
+
+The electronic logbook data contains total landings by day, by species and by ICES rectangle. For the current analysis, only the data for divisions 27.7.d and 27.7.e have been used. 
+
+Electronic logbook data is a requirement from fisheries authorities to document the composition of the landings. While this information is officially reported to the respective government, the information is also kept on the fishing vessels and stored in the electronic logbook systems. During the period 2012 - 2022, electronic logbook data was initially stored in the OLRAC software, later into version 2.0 of E-Catch and from 2018 onwards in the PEFA software and E-Catch 3.0. The old data, prior to 2018 has been retrieved from backups held on the vessels and were converted into useable formats using dedicated R-codes (https://github.com/martinpastoors/flyshoot/R/read_olrac.r and https://github.com/martinpastoors/flyshoot/R/read_ecatch 2.0.r ). The data from 2018 onwards could be exported from the current electonic logbook systems and have been added to the internal database.  
+
+Average price information per species was available from all landings of Jaczon flyshoot vessels in the years 2012-2022. 
+
+The analytical approach to estimating catch rates (Catch per Unit of Effort CPUE) was initiated by transforming all the catch (=landing) data to the total landings per vessel, per species, per rectangle and per week. In addition we counted the number of fishing days per vessel, per rectangle and per week. Catch rate is then expressed as the catch divided by effort. 
+
+Modelling was based on Generalized Linear Model (GLM) tools, whereby the predicted variable is the catch per week, effort was included as a log-link function and year as used as the main factor to describe the time trend. Then we explored other potential explanatory factors by sequentially adding different factors. We explored the AIC criteria for the different factors for each of the species and selected those factors by species that had the lowest AIC. Then we repeated this process for the second and third explanatory factor. In all cases we evaluated whether the factor contributed significantly (<5%) to the model. 
+
+It is well known that modelling fisheries catch rates could provide biased estimates because it only refers to landings and because it does not address technological developments in the fishery. Unfortunately, total catch per species is currently not available, so the CPUE trends can only be based on landings per effort. Technological creep could in principle be included, but given the relatively short time-series and the lack of total catches, it was considered to be of minor importance to include efficiency creep. 
+
+\newpage
+
+# Material and methods
+
+Electronic logbook data was available for the vessels `r paste(unique(e$vessel), collapse=", ")` and year  `r paste(c(min(yrs), max(yrs)), collapse="-")`. From the electronic logbook data, fishing effort can be derived (number of fishing days per vessel) and the landings by species and vessel. It should be noted that there is no data available on the total catches, because the logbooks only contain the landed catch. 
+
+**Fishing effort by vessel (fishing days by year)**
+
+```{r effort1, echo=FALSE, message=FALSE, warning=FALSE, comment=NA, fig.asp=0.6}
+
+fig_nums(
+  name    = "effort1", 
+  level = 1, display = FALSE,
+  caption = "Totaal number of fishing days per year")
+
+
+effort %>% 
+
+  ggplot(aes(x=year, y=ndays)) +
+  theme_publication() +
+  geom_bar(aes(fill=vessel), stat="identity") + 
+  scale_x_continuous(breaks=seq(min(effort$year), max(effort$year),1))
+
+
+```
+
+_`r fig_nums("effort1")`_
+
+**Fishing effort (fishing days by vessel, year and quarter)**  
+
+```{r effort2, echo=FALSE, message=FALSE, warning=FALSE, comment=NA, fig.asp=0.6}
+
+fig_nums(
+  name    = "effort2", 
+  level = 1, display = FALSE,
+  caption = "Totaal number of fishing days per vessel, year and quarter")
+
+
+catch_byweek %>% 
+  group_by(vessel, year, quarter) %>% 
+  summarise(ndays = sum(effort, na.rm=TRUE)) %>% 
+
+  ggplot(aes(x=quarter, y=ndays)) +
+  theme_publication() +
+  # theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  geom_bar(aes(fill=vessel), stat="identity") + 
+  scale_x_continuous(breaks=seq(1,12,1)) +
+  facet_grid(vessel~year)
+
+
+```
+
+_`r fig_nums("effort2")`_
+
+\newpage
+
+**Total landings by vessel and year**
+
+```{r catch1, echo=FALSE, message=FALSE, warning=FALSE, comment=NA, fig.asp=0.6}
+
+fig_nums(
+  name    = "catch1", 
+  level = 1, display = FALSE,
+  caption = "Total landings by year")
+
+catch_byweek %>% 
+  group_by(vessel, year) %>% 
+  summarise(catch = sum(catch, na.rm=TRUE)) %>% 
+  mutate(catch = catch/1000) %>% 
+
+  ggplot(aes(x=year, y=catch)) +
+  theme_publication() +
+  # theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  geom_bar(aes(fill=vessel), stat="identity") +
+  expand_limits(y=0) +
+  labs(y="landings (tonnes)") +
+  scale_x_continuous(breaks=seq(min(catch$year), max(catch$year),1)) 
+
+
+```
+
+_`r fig_nums("catch1")`_
+
+**Total landings by vessel, year and quarter**
+
+```{r catch2, echo=FALSE, message=FALSE, warning=FALSE, comment=NA, fig.asp=1.0}
+
+fig_nums(
+  name    = "catch2", 
+  level = 1, display = FALSE,
+  caption = "Total landings per vessel, year and quarter")
+
+catch_byweek %>% 
+  group_by(vessel, year, quarter) %>% 
+  summarise(catch = sum(catch, na.rm=TRUE)) %>% 
+  mutate(catch = catch/1000) %>% 
+  
+  ggplot(aes(x=quarter, y=catch)) +
+  theme_publication() +
+  # theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  geom_bar(aes(fill=vessel), stat="identity") + 
+  scale_x_continuous(breaks=seq(1, 12,1)) +
+  labs(y="landings (tonnes)") +
+  facet_grid(vessel~year)
+
+```
+
+_`r fig_nums("catch2")`_
+
+\newpage
+
+**Total landings by species and year**
+
+ The top `r n` species in the landings and an OTHER category. 
+ 
+```{r catch3a, echo=FALSE, message=FALSE, warning=FALSE, comment=NA, fig.asp=0.6}
+
+fig_nums(
+  name    = "catch3a", 
+  level = 1, display = FALSE,
+  caption = paste0("Total landings per species and year (top ",n," species)"))
+
+t <-
+  catch_byweek %>% 
+  mutate(english_species = paste(english_name, species)) %>% 
+  mutate(english_species = ifelse(species %notin% top$species, "Other", english_species)) %>% 
+  mutate(english_species = factor(english_species, 
+                                  levels=c("Other", rev(top$english_species)))) %>% 
+  group_by(english_species, year) %>% 
+  summarise(catch = sum(catch, na.rm=TRUE)) %>% 
+  mutate(catch = catch/1000) 
+  
+colourCount = n+1
+getPalette = colorRampPalette(rev(brewer.pal(9, "Set1")))
+
+p1 <-
+  t %>% 
+  # filter(regulated == "NR") %>% 
+  ggplot(aes(x=year, y=catch)) +
+  theme_publication() +
+  theme(legend.position = "none") +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  theme(plot.margin = margin(1,1,1,1, "mm")) +
+  theme(plot.title = element_text(hjust = 0.0)) +
+  geom_bar(aes(fill=english_species), stat="identity") + 
+  
+  scale_fill_manual(values = getPalette(colourCount)) +
+  guides(fill = guide_legend(order = 2)) +
+  scale_x_continuous(breaks=seq(min(catch_byweek$year), max(catch_byweek$year),1)) +
+  labs(y="Landings (tonnes)", title="Landings by species", x="",fill="") 
+
+p2 <-
+  t %>% 
+  # filter(regulated == "NR") %>% 
+  ggplot(aes(x=year, y=catch)) +
+  theme_publication() +
+  theme(legend.position = "right", legend.direction="vertical") +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  theme(plot.margin = margin(1,1,1,1, "mm")) +
+  theme(plot.title = element_text(hjust = 0.0)) +
+  # geom_bar(aes(fill=english_species), stat="identity") + 
+  geom_bar(aes(fill=english_species), stat="identity", position=position_fill()) + 
+  
+  scale_fill_manual(values = getPalette(colourCount)) +
+  guides(fill = guide_legend(order = 2)) +
+  # scale_fill_brewer(16, palette = "RdYlBu") +
+  scale_x_continuous(breaks=seq(min(catch_byweek$year), max(catch_byweek$year),1)) +
+  scale_y_continuous(labels=scales::percent) +
+  labs(y="", title="Proportions of landings by species", x="",fill="") 
+
+print( p1 +  p2   + plot_layout(widths = c(10, 11) ))
+
+```
+
+_`r fig_nums("catch3a")`_
+
+\newpage
+
+**Total landings by species and year**
+
+ The top `r n` species in the landings and an OTHER category, calculated as revenue (catch * avg price per year). 
+ 
+```{r catch3b, echo=FALSE, message=FALSE, warning=FALSE, comment=NA, fig.asp=0.6}
+
+fig_nums(
+  name    = "catch3b", 
+  level = 1, display = FALSE,
+  caption = paste0("Total revenue per species and year (top ",n," species)"))
+
+t <-
+  catch_byweek %>% 
+  mutate(english_species = paste(english_name, species)) %>% 
+  mutate(english_species = ifelse(species %notin% top$species, "Other", english_species)) %>% 
+  mutate(english_species = factor(english_species, 
+                                  levels=c("Other", rev(top$english_species)))) %>% 
+  mutate(revenue = catch * avgprice) %>% 
+  group_by(english_species, year) %>% 
+  summarise(revenue = sum(revenue, na.rm=TRUE)) %>% 
+  mutate(revenue = revenue/1000) 
+  
+colourCount = n+1
+getPalette = colorRampPalette(rev(brewer.pal(9, "Set1")))
+
+p1 <-
+  t %>% 
+  # filter(regulated == "NR") %>% 
+  ggplot(aes(x=year, y=revenue)) +
+  theme_publication() +
+  theme(legend.position = "none") +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  theme(plot.margin = margin(1,1,1,1, "mm")) +
+  theme(plot.title = element_text(hjust = 0.0)) +
+  geom_bar(aes(fill=english_species), stat="identity") + 
+  
+  scale_fill_manual(values = getPalette(colourCount)) +
+  guides(fill = guide_legend(order = 2)) +
+  scale_x_continuous(breaks=seq(min(catch_byweek$year), max(catch_byweek$year),1)) +
+  labs(y="Revenue (kEuro)", title="Revenue by species", x="",fill="") 
+
+p2 <-
+  t %>% 
+  # filter(regulated == "NR") %>% 
+  ggplot(aes(x=year, y=revenue)) +
+  theme_publication() +
+  theme(legend.position = "right", legend.direction="vertical") +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  theme(plot.margin = margin(1,1,1,1, "mm")) +
+  theme(plot.title = element_text(hjust = 0.0)) +
+  # geom_bar(aes(fill=english_species), stat="identity") + 
+  geom_bar(aes(fill=english_species), stat="identity", position=position_fill()) + 
+  
+  scale_fill_manual(values = getPalette(colourCount)) +
+  guides(fill = guide_legend(order = 2)) +
+  # scale_fill_brewer(16, palette = "RdYlBu") +
+  scale_x_continuous(breaks=seq(min(catch_byweek$year), max(catch_byweek$year),1)) +
+  scale_y_continuous(labels=scales::percent) +
+  labs(y="", title="Proportions of revenue by species", x="",fill="") 
+
+print( p1 +  p2   + plot_layout(widths = c(10, 11) ))
+
+```
+
+_`r fig_nums("catch3b")`_
+
+\newpage
+
+**Total landings by species and year**
+
+ Top 15 species in the landings.
+ 
+```{r catch3, echo=FALSE, message=FALSE, warning=FALSE, comment=NA, fig.asp=1.0}
+
+fig_nums(
+  name    = "catch3", 
+  level = 1, display = FALSE,
+  caption = "Total landings per species and year (top 15 species)")
+
+t <-
+  catch_byweek %>% 
+  filter(species %in% top$species) %>% 
+  left_join(top, by="species") %>% 
+  mutate(english_species = factor(english_species, levels=top$english_species)) %>% 
+  group_by(regulated, english_species, year) %>% 
+  summarise(catch = sum(catch, na.rm=TRUE)) %>% 
+  mutate(catch = catch/1000) 
+  
+# p1 <-
+  t %>% 
+  # filter(regulated == "NR") %>% 
+  ggplot(aes(x=year, y=catch)) +
+  theme_publication() +
+  theme(legend.position = "none") +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  theme(plot.margin = margin(1,1,1,1, "mm")) +
+  theme(plot.title = element_text(hjust = 0.0)) +
+  # geom_bar(aes(fill=english_species), stat="identity") + 
+  geom_bar(stat="identity") + 
+  scale_x_continuous(breaks=seq(min(catch_byweek$year), max(catch_byweek$year),1)) +
+  labs(y="Landings (tonnes)", title="Landings", x="") +
+  facet_wrap(~english_species, ncol=4)
+
+```
+
+_`r fig_nums("catch3")`_
+
+\newpage
+
+**Proportion of the landings per month (top 15 species)**
+
+```{r catch4, echo=FALSE, message=FALSE, warning=FALSE, comment=NA, fig.asp=1.0}
+
+fig_nums(
+  name    = "catch4", 
+  level = 1, display = FALSE,
+  caption = "Proportion of the catch per month (top 15 species)")
+
+t <-
+  catch_byweek %>% 
+  filter(species %in% top$species) %>% 
+  left_join(top, by="species") %>% 
+  mutate(english_species = factor(english_species, levels=top$english_species)) %>% 
+  group_by(regulated, english_species, month) %>% 
+  summarise(catch = sum(catch, na.rm=TRUE)) %>% 
+  mutate(catch = catch/1000) %>% 
+  group_by(regulated, english_species) %>% 
+  mutate(prop = catch/sum(catch)) 
+
+# p1 <-
+  t %>% 
+  # filter(regulated == "NR") %>% 
+  ggplot(aes(x=month, y=prop)) +
+  theme_publication() +
+  theme(legend.position = "none") +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  theme(plot.margin = margin(1,1,1,1, "mm")) +
+  theme(plot.title = element_text(hjust = 0.0)) +
+  # geom_bar(aes(fill=english_species), stat="identity") + 
+  geom_bar(stat="identity") + 
+  scale_x_continuous(breaks=seq(1,12,1)) +
+  scale_y_continuous(labels=scales::percent) +
+  labs(y="prop of landings by species and month", title="Proportions by month", x="") +
+  facet_wrap(~english_species, ncol=4)
+
+```
+
+_`r fig_nums("catch4")`_
+
+\newpage
+
+**Percentage of weeks targeting certain species**
+
+```{r catch5, echo=FALSE, message=FALSE, warning=FALSE, comment=NA, fig.asp=1.0}
+
+fig_nums(
+  name    = "catch5", 
+  level = 1, display = FALSE,
+  caption = "Number of weeks targeting certain species (highest value in the catch)")
+
+t <-
+  catch_byweek %>% 
+  ungroup() %>% 
+  distinct(vessel, year, week, target) %>%
+  group_by(year, target) %>% 
+  summarise(n=n()) %>% 
+  group_by(year) %>%
+  mutate(prop = n/sum(n, na.rm=TRUE)) %>% 
+  left_join(top, by=c("target"= "species")) %>% 
+  drop_na(english_species) %>% 
+  mutate(english_species = factor(english_species, levels=top$english_species))
+
+t %>% 
+  ggplot(aes(x=year, y=prop)) +
+  theme_publication() +
+  theme(legend.position = "none") +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  theme(plot.margin = margin(1,1,1,1, "mm")) +
+  theme(plot.title = element_text(hjust = 0.0)) +
+  geom_bar(stat="identity") + 
+  scale_x_continuous(breaks=seq(min(catch_byweek$year), max(catch_byweek$year),1)) +
+  scale_y_continuous(labels=scales::percent) +
+  labs(y="", title="Percentage of targeted weeks", x="") +
+  facet_wrap(~english_species, ncol=4)
+
+```
+
+_`r fig_nums("catch5")`_
+
+\newpage
+
+**Average price (Jaczon vessels) by species and year**
+
+```{r prices, echo=FALSE, fig.asp=1.0, message=FALSE, warning=FALSE, comment=NA}
+
+fig_nums(
+  name    = "prices", 
+  level = 1, display = FALSE,
+  caption = "Mean prices of Jaczon vessels by species and year")
+
+t <-
+  price %>% 
+  filter(species %in% top$species) %>%
+  left_join(top, by="species") %>% 
+  left_join(regulated, by="species") %>% 
+  mutate(english_species = factor(paste(english_name, species), levels=top$english_species)) %>% 
+  group_by(regulated, english_species, year) %>% 
+  summarise(
+    price = mean(avgprice, na.rm=TRUE)) %>% 
+  ungroup() 
+
+# p1 <-
+  t %>% 
+  # filter(regulated == "NR") %>% 
+  
+  ggplot() +
+  theme_publication() +
+  theme(plot.margin = margin(1,1,1,1, "mm")) +
+  theme(plot.title = element_text(hjust = 0.0)) +
+  theme(legend.position = "none") +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+
+  geom_point(aes(x=year, y=price)) +  
+  geom_line(aes(x=year, y=price)) +  
+  guides(fill=guide_legend(nrow = 1)) + 
+  scale_x_continuous(breaks=seq(min(e$year), max(e$year),1)) +
+  labs(x="",y="", title="Average price") +
+  facet_wrap(~english_species, ncol=4)
+  
+
+```
+
+_`r fig_nums("prices")`_
+
+\newpage
+
+**Average price (Jaczon vessels) against total landings by species (Jaczon vessels)**
+
+```{r prices2, echo=FALSE, fig.asp=1.0, message=FALSE, warning=FALSE, comment=NA}
+
+fig_nums(
+  name    = "prices2", 
+  level = 1, display = FALSE,
+  caption = "Mean prices of Jaczon vessels against total landings")
+
+catch_byweek %>% 
+  filter(species %in% top$species) %>%   
+  mutate(english_species = paste(english_name, species)) %>% 
+  mutate(english_species = factor(english_species, levels=top$english_species)) %>% 
+  group_by(english_species, species, year) %>% 
+  summarise(catch = sum(catch,na.rm=TRUE)/1000) %>% 
+  right_join(price, by=c("year","species")) %>% 
+  drop_na(english_species) %>% 
+  
+  ggplot(aes(x=catch, y=avgprice)) +
+  theme_publication() +
+  geom_point() +
+  geom_smooth(se=FALSE, method="lm", colour="black", linewidth=0.5) +
+  expand_limits(x=0, y=0) +
+  labs(x="catch (tonnes)") +
+  facet_wrap(~english_species, scales="free", ncol=4)
+
+
+```
+
+_`r fig_nums("prices2")`_
+
+\newpage
+
+**Map of total landings by species, ICES rectangle and year**
+
+```{r catch6, echo=FALSE, fig.asp=0.8, message=FALSE, warning=FALSE, comment=NA}
+
+fig_nums(
+  name    = "catch6", 
+  level = 1, display = FALSE,
+  caption = "Landings by species, rectangle and year")
+
+t <-
+  catch_byweek %>% 
+  filter(species %in% top$species) %>%
+  mutate(english_species = factor(paste(english_name, species), levels=top$english_species)) %>% 
+  drop_na(catch, lat, lon) %>% 
+  group_by(regulated, english_species, rect, lat, lon, year) %>% 
+  summarise(
+    catch = sum(catch, na.rm=TRUE)/1000) %>% 
+  ungroup() %>% 
+  left_join(rect_lr_sf, by=c("rect"= "ICESNAME")) %>% 
+  dplyr::select(-ID, -SOUTH, -NORTH, -WEST, -EAST) %>% 
+  
+  # mutate(catch_interval = cut(as.integer(catch), breaks=c(1 %o% 10^(0:12)), dig.lab=10 ) ) %>% 
+  mutate(., catch_interval = cut(catch, scales::trans_breaks("sqrt", function(x) x ^ 2)(c(0, max(catch, na.rm=TRUE))), 
+                               dig.lab=10 ) ) %>% 
+  
+  tidyr::complete(year, nesting(english_species)) %>% 
+  sf::st_as_sf()
+
+tmax <- 100*ceiling(max(t$catch, na.rm=TRUE)/100)
+
+# t %>% ungroup() %>% distinct(english_species, regulated) %>% View()
+# catch_byweek %>% ungroup() %>% distinct(species, regulated) %>% View()
+
+ttt <-
+  t %>% 
+  sf::st_drop_geometry() %>% 
+  group_by(regulated, english_species) %>% 
+  summarise(catch = as.integer(sum(catch, na.rm=TRUE))) %>% 
+  arrange(desc(catch)) 
+
+bb <- sf::st_bbox(t)
+
+# p1 <-
+  t %>% 
+  # filter(regulated == "NR") %>% 
+  
+  ggplot() +
+  theme_publication() +
+  theme(plot.margin = margin(1,1,1,1, "mm")) +
+  theme(plot.title = element_text(hjust = 0.0)) +
+  theme(legend.position = "none") +
+  
+  geom_sf(data=world_mr_sf, 
+          font = "Arial") +
+  geom_sf(aes(fill=catch_interval), 
+          font = "Arial") +
+  geom_text(data=ttt, 
+            aes(x=-Inf, y=Inf, label=paste(catch,"t")), 
+            hjust=0, vjust=1) +
+  coord_sf(xlim=c(bb$xmin,bb$xmax), ylim=c(bb$ymin, bb$ymax)) + 
+  scale_fill_viridis(option = "plasma", direction = -1, discrete=TRUE) +
+  guides(fill=guide_legend(nrow = 1)) + 
+  labs(x="",y="", title="Landings by rectangle") +
+  facet_wrap(~english_species, ncol=4)
+  
+
+```
+
+_`r fig_nums("catch6")`_
+
+\newpage
+
+**Observed catch rate (landings / week)**
+
+```{r cpue1, echo=FALSE, message=FALSE, warning=FALSE, comment=NA, fig.asp=1.0}
+
+fig_nums(
+  name    = "cpue1", 
+  level = 1, display = FALSE,
+  caption = "CPUE (landings/day, kg) on log-scale. Outliers not shown on the figures. Red dot indicates medians. Blue line is the linear slope through the medians. The slope refers to the slope of the regression line. ")
+
+winsorize      <- c(0.05, 0.95)
+
+calc_boxplot_stat <- function(x) {
+  coef <- 1.5
+  n <- sum(!is.na(x))
+  # calculate quantiles
+  stats <- quantile(x, probs = c(0.0, 0.25, 0.5, 0.75, 1.0))
+  names(stats) <- c("ymin", "lower", "middle", "upper", "ymax")
+  iqr <- diff(stats[c(2, 4)])
+  # set whiskers
+  outliers <- x < (stats[2] - coef * iqr) | x > (stats[4] + coef * iqr)
+  if (any(outliers)) {
+    stats[c(1, 5)] <- range(c(stats[2:4], x[!outliers]), na.rm = TRUE)
+  }
+  return(stats)
+}
+
+# catch %>% 
+t <-
+  e %>% 
+  filter(species %in% top$species) %>%
+  mutate(english_species = paste(english_name, species)) %>% 
+  mutate(english_species = factor(english_species, levels=top$english_species)) %>% 
+  drop_na(weight) %>% 
+  group_by(regulated, vessel, english_species, year, date) %>% 
+  summarise(catch_day = sum(weight, na.rm=TRUE)) %>% 
+  ungroup() 
+
+# t %>% distinct(english_species, regulated) %>% View()
+
+# remove outliers for display
+t2 <-
+  t %>% 
+  group_by(regulated, english_species) %>% 
+  mutate(cutoff = quantile(catch_day, na.rm=TRUE, c(0.9))) %>% 
+  mutate(catch_day   = ifelse(catch_day > cutoff, NA, catch_day))
+
+# t2 %>% group_by(test) %>% summarise(n=n())
+
+# median
+m <-
+  t %>% 
+  group_by(regulated, english_species, year) %>% 
+  summarise(median = median(catch_day, na.rm=TRUE))
+
+# slope
+s <-
+  m %>%
+  group_by(regulated, english_species) %>%
+  summarise(slope = scales::percent(lm(year ~ median)$coefficients[2], accuracy=1)) 
+
+# p1 <-
+  t2 %>%   
+  # filter(regulated =="NR") %>% 
+  
+  ggplot(aes(x=year, y=catch_day, group=year)) +
+  theme_publication() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  theme(plot.margin = margin(1,1,1,1, "mm")) +
+  theme(plot.title = element_text(hjust = 0.0)) +
+  
+  stat_summary(fun.data = calc_boxplot_stat, geom="boxplot") +  
+  geom_point(data=m, 
+             aes(x=year, y=median), 
+             colour="red", inherit.aes = FALSE) +
+  geom_smooth(data=m, 
+              aes(x=year, y=median), 
+              method="lm", colour="blue", inherit.aes = FALSE, se=FALSE) +
+  geom_text(data=s, 
+            aes(x=-Inf, y=1, label=paste("slope:", slope)), 
+            inherit.aes = FALSE, hjust="left", vjust="bottom", colour="blue") +
+  
+  expand_limits(y=0) +
+  scale_x_continuous(breaks=seq(min(e$year), max(e$year),1)) +
+  scale_y_log10() +
+  labs(x="", y="landings/day (kg)", title="Observed landings per week") +
+  facet_wrap(~english_species, ncol=4)
+
+
+```
+
+_`r fig_nums("cpuepersoort")`_
+
+\newpage
+
+# Results
+
+**Modelling only the year trend**
+
+*Catch ~ offset(log(effort)) + year*
+
+```{r zero_effect, echo=FALSE, fig.asp=0.7, fig.align="center", message=FALSE, warning=FALSE}
+
+fig_nums(
+  name    = "glm0", 
+  level = 1, display = FALSE,
+  caption = "GLM AIC criteria of zero linear effect (year)")
+
+myvars       <- c("vessel", "lat", "lon","rect", "quarter", "target")
+myefficiency <- 0
+# winsorize    <- c(0.05, 0.95)
+
+# create dataset to be used
+t <-
+  catch_byweek %>% 
+  filter(species %in% top$species) %>% 
+  mutate(species = factor(species, levels=top$species)) %>% 
+  
+  # focus on top rectangles by species only?
+  {if(toprectanglesonly) {  
+    filter(., paste(species, rect) %in% paste(top_rectangles$species, top_rectangles$rect))
+  } else {.}} %>%  
+
+  ungroup() %>% 
+  # mutate(catch = DescTools::Winsorize(catch, probs=winsorize)) %>% 
+  dplyr::mutate(efficiency  = myefficiency) %>%
+  dplyr::mutate(ef = (1 + efficiency)^(year - min(year, na.rm=TRUE))) %>%  
+  dplyr::mutate(year  = factor(year, levels=sort(unique(e$year)))) %>%
+  dplyr::mutate(effort = ef * effort) %>% 
+  dplyr::mutate(quarter = as.character(quarter)) %>% 
+  dplyr::mutate(lat = as.character(lat)) %>% 
+  dplyr::mutate(lon = as.character(lon)) 
+
+# years
+years <-
+  t %>%
+  ungroup() %>% 
+  distinct(species, year) %>% 
+  arrange(species, year)
+
+# Get the unique variables for predictions
+temp <-
+  t %>%
+  na.omit() %>% 
+  tidyr::unite("newvar", c(myvars), sep="/") %>%
+  group_by(species, efficiency, newvar) %>%
+  summarise(
+    n = n(), 
+    catch = sum(catch, na.rm=TRUE),
+    effort = sum(effort, na.rm=TRUE)
+  )  %>% 
+  group_by(species, efficiency) %>%
+  arrange(-catch) %>% 
+  group_by(species, efficiency) %>%
+  filter(row_number() == 1) %>% 
+  ungroup() %>% 
+  mutate(effort  = effort/n) %>% 
+  dplyr::select(-n, -catch) %>%
+  tidyr::separate(newvar, into=c(myvars), sep="/")  
+
+# get the predictor dataset
+newdat <-
+  left_join(years, temp, by=c("species")) %>% 
+  group_by(species, efficiency) %>% 
+  nest()
+
+# fit model
+x <-
+  t %>% 
+  na.omit() %>% 
+  filter(!is.na(species)) %>% 
+  group_by(species, efficiency) %>% 
+  nest() %>%  
+  mutate(model = "catch ~ offset(log(effort)) + year") %>% 
+  summarise(
+    fit       = purrr::map(data, ~MASS::glm.nb(formula=formula(model), data = .x)),
+    anova     = purrr::map(fit, stats::anova)
+  ) %>% 
+  
+  # add the prediction data
+  left_join(newdat, by=c("species","efficiency")) %>% 
+  
+  # do the prediction
+  group_by(species, efficiency) %>% 
+  rowwise() %>% 
+  mutate(pred =  list(
+                    data.frame(
+                      fit = predict(fit, unnest(data),se.fit=T,type="link")[c(1)],
+                      se  = predict(fit, unnest(data),se.fit=T,type="link")[c(2)]) %>% 
+                      setNames(c("pred","se")) %>% 
+                      as.tibble())) %>% 
+  ungroup()
+
+# generate predicted values data frame
+pred0 <-
+  x %>% 
+  dplyr::select(species, efficiency, pred, data) %>% 
+  unnest(c(pred, data))  %>% 
+  mutate(
+    est  = exp(pred),
+    upr  = exp(pred + (1.96 * se)),
+    lwr  = exp(pred - (1.96 * se))
+  ) %>% 
+  left_join(top) %>% 
+  mutate(english_species = factor(english_species, levels=top$english_species)) %>% 
+  left_join(regulated)
+
+```
+
+_`r fig_nums("glm0")`_
+
+\newpage
+
+**Modelling the first linear effect next to the year trend**
+
+*Catch ~ offset(log(effort)) + year + linear effect*
+
+Evaluation by AIC criteria
+
+Factors used: vessel, target (species with highest revenue), lat, lon, rect (ICES rectangle) and quarter. 
+
+```{r first_effect, echo=FALSE, fig.asp=0.7, fig.align="center", message=FALSE, warning=FALSE}
+
+fig_nums(
+  name    = "glm1", 
+  level = 1, display = FALSE,
+  caption = "GLM AIC criteria of first linear effects")
+
+# myvars       <- c("vessel", "lat", "lon","rect", "quarter", "target")
+# myefficiency <- 0
+# winsorize    <- c(0.05, 0.95)
+
+# create dataset to be used
+t <-
+  catch_byweek %>% 
+  filter(species %in% top$species) %>% 
+  mutate(species = factor(species, levels=top$species)) %>% 
+  
+  # focus on top rectangles by species only?
+  {if(toprectanglesonly) {  
+    filter(., paste(species, rect) %in% paste(top_rectangles$species, top_rectangles$rect))
+  } else {.}} %>%  
+
+  ungroup() %>% 
+  # mutate(catch = DescTools::Winsorize(catch, probs=winsorize)) %>% 
+  dplyr::mutate(efficiency  = myefficiency) %>%
+  dplyr::mutate(ef = (1 + efficiency)^(year - min(year, na.rm=TRUE))) %>%  
+  dplyr::mutate(year  = factor(year, levels=sort(unique(e$year)))) %>%
+  dplyr::mutate(effort = ef * effort) %>% 
+  dplyr::mutate(quarter = as.character(quarter)) %>% 
+  dplyr::mutate(lat = as.character(lat)) %>% 
+  dplyr::mutate(lon = as.character(lon)) 
+
+# Get the unique variables for predictions
+t_unique <-
+  t %>%
+  na.omit() %>% 
+  tidyr::unite("newvar", c(myvars), sep="/") %>%
+  group_by(species, efficiency, newvar) %>%
+  summarise(
+    n = n(), 
+    catch = sum(catch, na.rm=TRUE),
+    effort = sum(effort, na.rm=TRUE)
+  )  %>% 
+  group_by(species, efficiency) %>%
+  arrange(-catch) %>% 
+  group_by(species, efficiency) %>%
+  filter(row_number() == 1) %>% 
+  ungroup() %>% 
+  mutate(effort  = effort/n) %>% 
+  dplyr::select(-n, -catch) %>%
+  tidyr::separate(newvar, into=c(myvars), sep="/")  
+
+#- Select the combination of all first linear effect next to the year and species effect
+df <-
+  data.frame(var = factor(myvars,
+                          levels=myvars)) %>% 
+  bind_cols(
+    lapply(myvars,function(x) paste("catch ~ offset(log(effort)) + year + ",x)) %>%
+      do.call(rbind.data.frame, .) %>% 
+      setNames("model")  
+  )
+
+# create dataset to assess contrasts
+x0 <-
+  t %>% 
+  na.omit() %>% 
+  filter(!is.na(species)) %>% 
+  group_by(species, efficiency) %>% 
+  nest() %>% 
+  ungroup() %>%   
+  cross_join(df)
+
+# evaluate contrasts
+contrasts <-
+  x0 %>% 
+  unnest(data) %>% 
+  dplyr::select(one_of("species","efficiency", "var",
+                       "vessel", "quarter","month","week","rect","lat","lon", "target")) %>% 
+  distinct() %>% 
+  dplyr::mutate(across(c("quarter","month","week"), as.character)) %>% 
+  tidyr::pivot_longer(names_to = "variable", values_to = "data",
+                      c("vessel","quarter","month","week","rect","lat","lon","target")) %>% 
+  dplyr::filter(variable == var) %>% 
+  group_by(species, efficiency, var) %>% 
+  summarise(n = n_distinct(data)) %>% 
+  filter(n > 1)
+
+# only use data with sufficient contrasts
+x <-
+  x0 %>% 
+  filter(paste(species, var) %in% paste(contrasts$species, contrasts$var)) %>% 
+  group_by(species, efficiency, var, model ) %>% 
+  summarise(
+    fit       = purrr::map(data, ~MASS::glm.nb(formula=formula(model), data = .x)),
+    anova     = purrr::map(fit, stats::anova)
+  ) %>% 
+  cbind(
+    aic = do.call(rbind,lapply(.[["fit"]],stats::AIC))[,1]
+  ) %>% 
+  ungroup()
+
+# do.call(rbind,lapply(x[["fit"]],stats::AIC))[,1]
+selected <-
+  x %>% 
+  group_by(species, efficiency) %>% 
+  
+  # minimum of AIC per species
+  filter(aic == min(aic)) %>% 
+  
+  # add the prediction data
+  left_join(newdat, by=c("species","efficiency")) %>% 
+  
+  # do the prediction
+  group_by(species, efficiency) %>% 
+  rowwise() %>% 
+  mutate(pred =  list(
+                    data.frame(
+                      fit = predict(fit, unnest(data),se.fit=T,type="link")[c(1)],
+                      se  = predict(fit, unnest(data),se.fit=T,type="link")[c(2)]) %>% 
+                      setNames(c("pred","se")) %>% 
+                      as.tibble())) %>% 
+  group_by(species, efficiency) 
+
+# generate predicted values data frame
+pred1 <-
+  selected %>% 
+  dplyr::select(species, efficiency, pred, data) %>% 
+  unnest(c(pred, data))  %>% 
+  mutate(
+    est  = exp(pred),
+    upr  = exp(pred + (1.96 * se)),
+    lwr  = exp(pred - (1.96 * se))
+  ) %>% 
+  left_join(top) %>% 
+  mutate(english_species = factor(english_species, levels=top$english_species)) %>% 
+  left_join(regulated)
+
+
+vars <-
+  selected %>% 
+  ungroup() %>% 
+  dplyr::select(species, model) %>% 
+  separate(model, into=c("var1","var2"), sep=" ~ ") %>% 
+  mutate(var2=str_replace_all(var2, fixed(" "), "") )%>% 
+  separate(var2,  into=c("v1","v2","v3"), sep= "\\+") %>% 
+  pivot_longer(names_to = "temp", values_to = "var", "v1":"v3") %>% 
+  ungroup() %>% 
+  dplyr::select(-temp, -var1, -species)
+
+anovas <-
+  selected %>%
+  dplyr::select(anova) %>%
+  unnest(anova) %>% 
+  setNames(c("species","efficiency", "df","dev","residdf","residdev","prchi")) %>% 
+  bind_cols(., vars) %>% 
+  filter(!(grepl("effort|year", var))) %>% 
+  lowcase() %>% 
+  filter(prchi < 0.05)
+
+nextmodel1 <-
+  anovas %>% 
+  dplyr::select(species, efficiency) %>% 
+  left_join(dplyr::select(selected,
+                          species, efficiency, model),
+            by=c("species", "efficiency"))
+
+
+# plot 
+x %>%
+  ungroup() %>%
+  dplyr::select(species, var, aic) %>% 
+  left_join(top, by="species") %>%
+  mutate(english_species = factor(english_species, levels=top$english_species)) %>%
+  left_join(regulated, by="species") %>% 
+
+  ggplot(aes(x=var, y=aic)) +
+  theme_publication() +
+  theme(plot.margin = margin(1,1,1,1, "mm")) +
+  theme(plot.title = element_text(hjust = 0.0)) +
+
+  geom_point(size=3) +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  labs(x="", y="AIC", title="AIC for first linear factor") +
+  facet_wrap(~english_species, scales="free_y", ncol=5)
+
+
+rects <-
+  anovas %>% 
+  filter(var=="rect") %>% 
+  left_join(top, by="species") %>% 
+  dplyr::select(english_species) %>% 
+  ungroup() %>% 
+  summarise(english_species = paste(english_species, collapse=", ")) %>% 
+  as.character()
+
+quarters <-
+  anovas %>% 
+  filter(var=="quarter") %>% 
+  left_join(top, by="species") %>% 
+  dplyr::select(english_species) %>% 
+  ungroup() %>% 
+  summarise(english_species = paste(english_species, collapse=", ")) %>% 
+  as.character()
+
+targets <-
+  anovas %>% 
+  filter(var=="target") %>% 
+  left_join(top, by="species") %>% 
+  dplyr::select(english_species) %>% 
+  ungroup() %>% 
+  summarise(english_species = paste(english_species, collapse=", ")) %>% 
+  as.character()
+
+
+```
+
+_`r fig_nums("glm1")`_
+
+The following species have the following first linear factor:
+
+* Target: `r targets` 
+
+* Rectangle: `r rects` 
+
+* Quarter: `r quarters`
+
+\newpage
+
+**Modelling the second linear effect next to the year and rectangle**
+
+*Catch ~ offset(log(effort)) + year + 1st linear effort + 2nd linear effect*
+
+```{r second_effect, echo=FALSE, fig.asp=0.7, fig.align="center", message=FALSE, warning=FALSE}
+
+fig_nums(
+  name    = "glm2", 
+  level = 1, display = FALSE,
+  caption = "GLM AIC criteria of second linear effects")
+
+# myvars       <- c("vessel", "lat", "lon","rect", "quarter")
+# myefficiency <- 0
+
+
+# set up model
+df <-
+  nextmodel1 %>% 
+  mutate(myvars=paste(myvars, collapse="/")) %>% 
+  tidyr::separate(myvars, into=c("v1","v2","v3","v4","v5","v6"), sep="/") %>% 
+  tidyr::pivot_longer(names_to = "tmp", values_to = "var", v1:v6) %>% 
+  rowwise() %>% 
+  filter(!grepl(var, model)) %>% 
+  ungroup() %>% 
+  mutate(model = paste(model, var, sep = " + ")) %>% 
+  dplyr::select(species, model, var)
+
+# create dataset to assess contrasts
+x0 <-
+  t %>% 
+  na.omit() %>% 
+  filter(!is.na(species)) %>% 
+  group_by(species, efficiency) %>% 
+  nest() %>% 
+  ungroup() %>%   
+  left_join(df, by="species") 
+
+# evaluate contrasts
+contrasts <-
+  x0 %>% 
+  unnest(data) %>% 
+  dplyr::select(one_of("species","efficiency", 
+                       "var","vessel", "quarter","month","week","rect","lat","lon", "target")) %>% 
+  distinct() %>% 
+  dplyr::mutate(across(c("quarter","month","week"), as.character)) %>% 
+  tidyr::pivot_longer(names_to = "variable", values_to = "data",
+                      c("vessel","quarter","month","week","rect","lat","lon", "target")) %>% 
+  dplyr::filter(variable == var) %>% 
+  group_by(species, efficiency, var) %>% 
+  summarise(n = n_distinct(data)) %>% 
+  filter(n > 1)
+
+# only use data with sufficient contrasts
+x <-
+  x0 %>% 
+  filter(paste(species, var) %in% paste(contrasts$species, contrasts$var)) %>% 
+  group_by(species, efficiency, var, model ) %>% 
+  summarise(
+    fit       = purrr::map(data, ~MASS::glm.nb(formula=formula(model), data = .x)),
+    anova     = purrr::map(fit, stats::anova)
+  ) %>% 
+  cbind(
+    aic = do.call(rbind,lapply(.[["fit"]],stats::AIC))[,1]
+  ) %>% 
+  ungroup()
+
+# select lowest AICs
+selected <-
+  x %>% 
+  group_by(species, efficiency) %>% 
+  
+  # minimum of AIC per species
+  filter(aic == min(aic)) %>% 
+  
+  # add the prediction data
+  left_join(newdat, by=c("species","efficiency")) %>% 
+  
+  # do the prediction
+  group_by(species, efficiency) %>% 
+  rowwise() %>% 
+  mutate(pred =  list(
+                    data.frame(
+                      fit = predict(fit, unnest(data),se.fit=T,type="link")[c(1)],
+                      se  = predict(fit, unnest(data),se.fit=T,type="link")[c(2)]) %>% 
+                      setNames(c("pred","se")) %>% 
+                      as.tibble())) %>% 
+  group_by(species, efficiency) 
+
+# generate predicted values data frame
+pred2 <-
+  selected %>% 
+  dplyr::select(species, efficiency, pred, data) %>% 
+  unnest(c(pred, data))  %>% 
+  mutate(
+    est  = exp(pred),
+    upr  = exp(pred + (1.96 * se)),
+    lwr  = exp(pred - (1.96 * se))
+  ) %>% 
+  left_join(top) %>% 
+  mutate(english_species = factor(english_species, levels=top$english_species)) %>% 
+  left_join(regulated)
+
+  
+vars <-
+  selected %>% 
+  ungroup() %>% 
+  dplyr::select(species, model) %>% 
+  separate(model, into=c("var1","var2"), sep=" ~ ") %>% 
+  mutate(var2=str_replace_all(var2, fixed(" "), "") )%>% 
+  separate(var2,  into=c("v1","v2","v3","v4"), sep= "\\+") %>% 
+  pivot_longer(names_to = "temp", values_to = "var", "v1":"v4") %>% 
+  ungroup() %>% 
+  dplyr::select(-temp, -var1, -species)
+
+anovas <-
+  selected %>%
+  dplyr::select(anova) %>%
+  unnest(anova) %>% 
+  setNames(c("species","efficiency", "df","dev","residdf","residdev","prchi")) %>% 
+  bind_cols(., vars) %>% 
+  group_by(species) %>% 
+  filter(row_number() == 4) %>% 
+  # filter(!(grepl("effort|year", var))) %>% 
+  lowcase() %>% 
+  filter(prchi < 0.05)
+
+nextmodel2 <-
+  anovas %>% 
+  dplyr::select(species, efficiency) %>% 
+  left_join(dplyr::select(selected,
+                          species, efficiency, model),
+            by=c("species","efficiency")) 
+
+# plot
+x %>%
+  ungroup() %>%
+  filter(efficiency==0) %>% 
+  dplyr::select(species, var, aic) %>% 
+  left_join(top, by="species") %>%
+  mutate(english_species = factor(english_species, levels=top$english_species)) %>%
+  left_join(regulated, by="species") %>% 
+
+  ggplot(aes(x=var, y=aic)) +
+  theme_publication() +
+  theme(plot.margin = margin(1,1,1,1, "mm")) +
+  theme(plot.title = element_text(hjust = 0.0)) +
+
+  geom_point(size=3) +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  labs(x="", y="AIC", title="AIC for second linear factor") +
+  facet_wrap(~english_species, scales="free_y", ncol=5)
+
+
+rects <-
+  anovas %>% 
+  filter(var=="rect") %>% 
+  left_join(top, by="species") %>% 
+  dplyr::select(english_species) %>% 
+  ungroup() %>% 
+  summarise(english_species = paste(english_species, collapse=", ")) %>% 
+  as.character()
+
+quarters <-
+  anovas %>% 
+  filter(var=="quarter") %>% 
+  left_join(top, by="species") %>% 
+  dplyr::select(english_species) %>% 
+  ungroup() %>% 
+  summarise(english_species = paste(english_species, collapse=", ")) %>% 
+  as.character()
+
+vessels <-
+  anovas %>% 
+  filter(var=="vessel") %>% 
+  left_join(top, by="species") %>% 
+  dplyr::select(english_species) %>% 
+  ungroup() %>% 
+  summarise(english_species = paste(english_species, collapse=", ")) %>% 
+  as.character()
+
+targets <-
+  anovas %>% 
+  filter(var=="target") %>% 
+  left_join(top, by="species") %>% 
+  dplyr::select(english_species) %>% 
+  ungroup() %>% 
+  summarise(english_species = paste(english_species, collapse=", ")) %>% 
+  as.character()
+
+```
+
+_`r fig_nums("glm2")`_
+
+The following species have the following second linear factor:
+
+* Target: `r targets` 
+
+* Rectangle: `r rects` 
+
+* Quarter: `r quarters`
+
+* Vessel: `r vessels` 
+
+\newpage
+
+**Modelling the third linear effect next to the year and rectangle**
+
+*Catch ~ offset(log(effort)) + year + 1st linear effort + 2nd linear effect + 3rd linear effect*
+
+```{r third_effect, echo=FALSE, fig.asp=0.7, fig.align="center", message=FALSE, warning=FALSE}
+
+fig_nums(
+  name    = "glm3", 
+  level = 1, display = FALSE,
+  caption = "GLM AIC criteria of third linear effects")
+
+# myvars       <- c("vessel", "lat", "lon","rect", "quarter")
+# myefficiency <- 0
+
+
+# set up model
+df <-
+  nextmodel2 %>% 
+  mutate(myvars=paste(myvars, collapse="/")) %>% 
+  tidyr::separate(myvars, into=c("v1","v2","v3","v4","v5","v6"), sep="/") %>% 
+  tidyr::pivot_longer(names_to = "tmp", values_to = "var", v1:v6) %>% 
+  rowwise() %>% 
+  filter(!grepl(var, model)) %>% 
+  ungroup() %>% 
+  mutate(model = paste(model, var, sep = " + ")) %>% 
+  dplyr::select(species, model, var)
+
+x0 <-
+  t %>% 
+  na.omit() %>% 
+  filter(!is.na(species)) %>% 
+  group_by(species, efficiency) %>% 
+  nest() %>% 
+  ungroup() %>%   
+  left_join(df, by="species") 
+
+# evaluate contrasts
+contrasts <-
+  x0 %>% 
+  unnest(data) %>% 
+  dplyr::select(one_of("species","efficiency", 
+                       "var","vessel", "quarter","month","week","rect","lat","lon", "target")) %>% 
+  distinct() %>% 
+  dplyr::mutate(across(c("quarter","month","week"), as.character)) %>% 
+  tidyr::pivot_longer(names_to = "variable", values_to = "data",
+                      c("vessel","quarter","month","week","rect","lat","lon", "target")) %>% 
+  dplyr::filter(variable == var) %>% 
+  group_by(species, efficiency, var) %>% 
+  summarise(n = n_distinct(data)) %>% 
+  filter(n > 1)
+
+# only use data with sufficient contrasts
+x <-
+  x0 %>% 
+  filter(paste(species, var) %in% paste(contrasts$species, contrasts$var)) %>% 
+  group_by(species, efficiency, var, model ) %>% 
+  summarise(
+    fit       = purrr::map(data, ~MASS::glm.nb(formula=formula(model), data = .x)),
+    anova     = purrr::map(fit, stats::anova)
+  ) %>% 
+  cbind(
+    aic = do.call(rbind,lapply(.[["fit"]],stats::AIC))[,1]
+  ) %>% 
+  ungroup()
+
+# select lowest AICs
+selected <-
+  x %>% 
+  group_by(species, efficiency) %>% 
+  
+  # minimum of AIC per species
+  filter(aic == min(aic)) %>% 
+  
+  # add the prediction data
+  left_join(newdat, by=c("species","efficiency")) %>% 
+  
+  # do the prediction
+  group_by(species, efficiency) %>% 
+  rowwise() %>% 
+  mutate(pred =  list(
+                    data.frame(
+                      fit = predict(fit, unnest(data),se.fit=T,type="link")[c(1)],
+                      se  = predict(fit, unnest(data),se.fit=T,type="link")[c(2)]) %>% 
+                      setNames(c("pred","se")) %>% 
+                      as.tibble())) %>% 
+  group_by(species, efficiency) 
+ 
+# generate predicted values data frame
+pred3 <-
+  selected %>% 
+  dplyr::select(species, efficiency, pred, data) %>% 
+  unnest(c(pred, data))  %>% 
+  mutate(
+    est  = exp(pred),
+    upr  = exp(pred + (1.96 * se)),
+    lwr  = exp(pred - (1.96 * se))
+  ) %>% 
+  left_join(top) %>% 
+  mutate(english_species = factor(english_species, levels=top$english_species)) %>% 
+  left_join(regulated)
+ 
+vars <-
+  selected %>% 
+  dplyr::select(species, model) %>% 
+  separate(model, into=c("var1","var2"), sep=" ~ ") %>% 
+  mutate(var2=str_replace_all(var2, fixed(" "), "") )%>% 
+  separate(var2,  into=c("v1","v2","v3","v4","v5"), sep= "\\+") %>% 
+  pivot_longer(names_to = "temp", values_to = "var", "v1":"v5") %>% 
+  ungroup() %>% 
+  dplyr::select(-temp, -var1, -species, -efficiency)
+
+anovas <-
+  selected %>%
+  dplyr::select(anova) %>%
+  unnest(anova) %>% 
+  setNames(c("species","efficiency", "df","dev","residdf","residdev","prchi")) %>% 
+  bind_cols(., vars) %>% 
+  group_by(species) %>% 
+  filter(row_number() == 5) %>% 
+  # filter(!(grepl("effort|year", var))) %>% 
+  lowcase() %>% 
+  filter(prchi < 0.05)
+
+finalmodel <-
+  anovas %>% 
+  dplyr::select(species, efficiency) %>% 
+  left_join(dplyr::select(selected,
+                          species, efficiency, model),
+            by=c("species", "efficiency")) %>% 
+  bind_rows(nextmodel2 %>% filter(species %notin% anovas$species)) %>% 
+  bind_rows(nextmodel1 %>% filter(species %notin% anovas$species &
+                                    species %notin% nextmodel2$species)) 
+
+
+# plot
+x %>%
+  ungroup() %>%
+  filter(efficiency==0) %>% 
+  dplyr::select(species, var, aic) %>% 
+  left_join(top, by="species") %>%
+  mutate(english_species = factor(english_species, levels=top$english_species)) %>%
+  left_join(regulated, by="species") %>% 
+
+  ggplot(aes(x=var, y=aic)) +
+  theme_publication() +
+  theme(plot.margin = margin(1,1,1,1, "mm")) +
+  theme(plot.title = element_text(hjust = 0.0)) +
+
+  geom_point(size=3) +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  labs(x="", y="AIC", title="AIC for third linear factor") +
+  facet_wrap(~english_species, scales="free_y", ncol=5)
+
+
+rects <-
+  anovas %>% 
+  filter(var=="rect") %>% 
+  left_join(top, by="species") %>% 
+  dplyr::select(english_species) %>% 
+  ungroup() %>% 
+  summarise(english_species = paste(english_species, collapse=", ")) %>% 
+  as.character()
+
+quarters <-
+  anovas %>% 
+  filter(var=="quarter") %>% 
+  left_join(top, by="species") %>% 
+  dplyr::select(english_species) %>% 
+  ungroup() %>% 
+  summarise(english_species = paste(english_species, collapse=", ")) %>% 
+  as.character()
+
+vessels <-
+  anovas %>% 
+  filter(var=="vessel") %>% 
+  left_join(top, by="species") %>% 
+  dplyr::select(english_species) %>% 
+  ungroup() %>% 
+  summarise(english_species = paste(english_species, collapse=", ")) %>% 
+  as.character()
+
+targets <-
+  anovas %>% 
+  filter(var=="target") %>% 
+  left_join(top, by="species") %>% 
+  dplyr::select(english_species) %>% 
+  ungroup() %>% 
+  summarise(english_species = paste(english_species, collapse=", ")) %>% 
+  as.character()
+
+```
+
+_`r fig_nums("glm3")`_
+
+The following species have the following third linear factor:
+
+* Target: `r targets` 
+
+* Quarter: `r quarters`
+
+* Vessel: `r vessels` 
+
+
+```{r cpuemodel, echo=FALSE, fig.asp=1.0, message=FALSE, warning=FALSE, comment=NA}
+
+
+# fit final model
+x <-
+  t %>% 
+  na.omit() %>% 
+  # filter(!is.na(species)) %>% 
+  group_by(species, efficiency) %>% 
+  nest() %>% 
+  left_join(finalmodel, by=c("species","efficiency")) %>% 
+  
+  drop_na(model) %>% 
+  
+  summarise(
+    fit       = purrr::map(data, ~MASS::glm.nb(model, data = .x)),
+    tidied    = purrr::map(fit, broom::tidy),
+    augmented = purrr::map(fit, broom::augment),
+    anova     = purrr::map(fit, stats::anova),
+    coeff     = purrr::map(fit, stats::coefficients),
+    # resid     = purrr::map(fit, stats::residuals),
+    aic       = purrr::map(fit, stats::AIC)
+  ) %>% 
+  
+  # add the prediction data
+  left_join(newdat, by=c("species","efficiency")) %>% 
+  
+  # do the prediction
+  group_by(species, efficiency) %>% 
+  rowwise() %>% 
+  mutate(pred =  list(
+                    data.frame(
+                      fit = predict(fit, unnest(data),se.fit=T,type="link")[c(1)],
+                      se  = predict(fit, unnest(data),se.fit=T,type="link")[c(2)]) %>% 
+                      setNames(c("pred","se")) %>% 
+                      as.tibble())) %>% 
+  ungroup()
+
+# generate predicted values
+predfinal <-
+  x %>% 
+  dplyr::select(-fit, -augmented, -tidied, -anova, -coeff, -aic) %>% 
+  unnest(c(pred, data))  %>% 
+  mutate(
+    est  = exp(pred),
+    upr  = exp(pred + (1.96 * se)),
+    lwr  = exp(pred - (1.96 * se))
+  ) %>% 
+  left_join(top) %>% 
+  mutate(english_species = factor(english_species, levels=top$english_species)) %>% 
+  left_join(regulated)
+
+# generate obs and predicted dataset
+obspred <-
+  x %>% 
+  dplyr::select(-fit, -data, -tidied, -anova, -coeff, -aic, -pred) %>% 
+  unnest(c(augmented))  %>% 
+  mutate(pred = exp(.fitted)) %>% 
+  left_join(top) %>% 
+  mutate(english_species = factor(english_species, levels=top$english_species)) %>% 
+  left_join(regulated)
+
+
+readr::write_rds(predfinal, file=file.path(onedrive,
+                                   "rdata",
+                                   paste0("CPUE_",folder,".rds")))
+
+```
+
+\newpage
+
+**Final GLM Models applied to flyshoot fishery**
+
+Trends by year estimated with GLM models Using the significant factors by species outlined in the three figures above. 
+
+In general, we find increases in catch rates (for landed catch) for Common cuttlefish (CTC) and mackerel (MAC). For several species, we can observe a maximum in catch rates during the period 2014-2016 and lower catch-rates thereafter. This could point to lower availability of those species to the fishery, possibly due to lower abundance. 
+
+```{r timetrends, echo=FALSE, fig.asp=1.2, message=FALSE, warning=FALSE, comment=NA}
+
+fig_nums(name    = "timetrends", level = 1, display = FALSE, caption = "GLM, time trends")
+
+pp <-
+  bind_rows(
+    pred0     %>% mutate(model="zero"),
+    pred1     %>% mutate(model="first"),
+    pred2     %>% mutate(model="second"),
+    pred3     %>% mutate(model="third"),
+    predfinal %>% mutate(model="final")
+  ) %>%
+  mutate(model = factor(model, levels=c("zero","first","second","third","final"))) %>%
+  mutate(year = as.integer(as.character(year))) %>%
+  # filter(regulated == "NR") %>%
+
+  ggplot(aes(x=year, y=est, group=model)) +
+  theme_publication() +
+  theme(plot.margin = margin(1,1,1,1, "mm")) +
+  theme(plot.title = element_text(hjust = 0.0)) +
+  # theme(legend.position="none") +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+
+  geom_line(aes(colour=as.factor(model))) +
+  geom_point(aes(colour=as.factor(model))) +
+  geom_ribbon(aes(ymin=lwr, ymax=upr, fill=as.factor(model)), alpha=0.2) +
+
+  expand_limits(y=0) +
+  scale_x_continuous(breaks=seq(min(as.integer(ac(years$year))), max(as.integer(ac(years$year))),1)) +
+  labs(x="", y="landings/day (kg)", title="CPUE", fill="model") +
+  facet_wrap(~english_species, scales="free_y", ncol=5)
+
+jpeg(filename=file.path(figuresdir, "CPUE timetrends stepwise.jpg"),
+     width=10, height=8, units="in", res=300)
+print( pp) 
+dev.off()
+  
+pp <-
+  predfinal %>% 
+  mutate(year = as.integer(as.character(year))) %>% 
+
+  ggplot(aes(x=year, y=est, group=efficiency)) +
+  theme_publication() +
+  theme(plot.margin = margin(1,1,1,1, "mm")) +
+  theme(plot.title = element_text(hjust = 0.0)) +
+  theme(legend.position="none") +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  
+  geom_line(aes(colour=as.factor(efficiency))) +
+  geom_point(aes(colour=as.factor(efficiency))) +
+  geom_ribbon(aes(ymin=lwr, ymax=upr, fill=as.factor(efficiency)), alpha=0.2) +
+  
+  expand_limits(y=0) +
+  scale_x_continuous(breaks=seq(min(as.integer(ac(years$year))), max(as.integer(ac(years$year))),1)) +
+  labs(x="", y="landings/day (kg)", title="Standardized CPUE") +
+  facet_wrap(~english_species, scales="free_y", ncol=5)
+
+
+jpeg(filename=file.path(figuresdir, "CPUE timetrends.jpg"),
+     width=10, height=8, units="in", res=300)
+print( pp) 
+dev.off()
+
+
+```
+
+_`r fig_nums("timetrends")`_
+
+```{r timetrends2, echo=FALSE, fig.asp=0.8, message=FALSE, warning=FALSE, comment=NA}
+
+pp <-
+  predfinal %>% 
+  mutate(year = as.integer(as.character(year))) %>% 
+
+  group_by(english_species) %>% 
+  mutate(
+    est = est/mean(est, na.rm=TRUE),
+    upr = upr/mean(upr, na.rm=TRUE),
+    lwr = lwr/mean(lwr, na.rm=TRUE)
+  ) %>% 
+  # View()
+  ggplot(aes(x=year, y=(english_species), group=(english_species))) +
+  theme_publication() +
+  theme(plot.margin = margin(1,1,1,1, "mm")) +
+  theme(plot.title = element_text(hjust = 0.0)) +
+  theme(legend.position="none") +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  
+  ggridges::geom_ridgeline(aes(height=est), scale=0.5, fill="lightgray", alpha=0.5) + 
+  
+  scale_x_continuous(breaks=seq(min(as.integer(ac(years$year))), max(as.integer(ac(years$year))),1)) +
+  labs(x="", y="", title="relative CPUE by species") 
+
+jpeg(filename=file.path(figuresdir, "CPUE timetrends ggridges.jpg"),
+     width=8, height=8, units="in", res=300)
+print( pp) 
+dev.off()
+
+
+```
+
+\newpage
+
+**Observed vs. predicted catch rates**
+
+The observed vs. predicted catch rates are a diagnostic to assess how well the GLM model is fitting to the data. Ideally, one would expect the values to be close to the 1:1 line (blue dotted line). 
+
+We could expect that the GLM models for the regulated species would show deviations from the 1:1 line because the catch rates are in fact constrained by the (limited) quota availability. We can clearly observe these deviations in, for example, whiting, mackerel and horse mackerel. 
+
+For non-regulated species, we would not expect deviations between observed and predicted catch rates, but we still observe some overprediction in, for example, red mullet (surmullet MUR) and gurnards. It is not well understood what drivers lead to these patterns. 
+
+
+```{r obspred, echo=FALSE, fig.asp=1.2, message=FALSE, warning=FALSE, comment=NA}
+
+fig_nums(name    = "obspred", level = 1, display = FALSE, caption = "GLM, obs and predicted")
+
+pp <-
+  obspred %>% 
+  rename(obs=catch) %>% 
+  filter(efficiency==0) %>% 
+
+  ggplot(aes(x=obs, y=pred, group=efficiency)) +
+  theme_publication() +
+  theme(plot.margin = margin(1,1,1,1, "mm")) +
+  theme(plot.title = element_text(hjust = 0.0)) +
+  theme(legend.position="none") +
+  
+  geom_point(aes(colour=as.factor(efficiency)), alpha=0.2) +
+  geom_abline(slope=1, colour="blue", linetype="dashed") +
+  scale_x_continuous(limits=c(10,10000), trans='log10') +
+  scale_y_continuous(limits=c(10,10000), trans='log10') +
+  labs(x="", y="Predicted landings/day (kg)", title="Observed vs. Predicted CPUE") +
+  facet_wrap(~english_species, ncol=5)
+
+jpeg(filename=file.path(figuresdir, "CPUE obspred.jpg"),
+     width=10, height=8, units="in", res=300)
+print( pp) 
+dev.off()
+
+```
+
+_`r fig_nums("obspred")`_
+
+\newpage
+
+```{r coefficients, echo=FALSE, fig.asp=1.2, message=FALSE, warning=FALSE, comment=NA}
+
+# fig_nums(name    = "coefficients", level = 1, display = FALSE, caption = "GLM, coefficients")
+
+# i <- 1
+
+coeff <- data.frame(stringsAsFactors = FALSE)
+for (i in 1:nrow(x)) {
+  coeff <-
+    bind_rows(
+      coeff,
+      x[i,"coeff"][["coeff"]][[1]] %>% 
+        as.data.frame() %>% 
+        setNames("data") %>% 
+        rownames_to_column(var="tmp") %>% 
+        mutate(
+          species    = as.character(x[[i,"species"]]),
+          efficiency = x[[i,"efficiency"]]
+        ) %>% 
+        
+      
+        # set variable
+        mutate(
+          var = case_when(
+            grepl("rect", tmp)                            ~ "rect",
+            grepl("quarter", tmp)&grepl("division", tmp)  ~ "quarter*division",
+            grepl("quarter", tmp)                         ~ "quarter",
+            grepl("division", tmp)                        ~ "division",
+            grepl("vessel", tmp)                          ~ "vessel",
+            grepl("year", tmp)                            ~ "year",
+            grepl("lat", tmp)                             ~ "lat",
+            grepl("lon", tmp)                             ~ "lon",
+            grepl("target", tmp)                          ~ "target",
+            grepl("price_cat", tmp)                       ~ "price_cat",
+            grepl("intercept", tolower(tmp))              ~ "intercept",
+            TRUE                                          ~ NA
+          ) 
+        ) %>% 
+        
+        mutate(
+          value = case_when(
+            grepl("rect", tmp)               ~ gsub("rect","",tmp),
+            grepl("quarter", tmp)            ~ gsub("quarter","",tmp),
+            grepl("division", tmp)           ~ gsub("division","",tmp),
+            grepl("vessel", tmp)             ~ gsub("vessel","",tmp),
+            grepl("year", tmp)               ~ gsub("year","",tmp),
+            grepl("lat", tmp)                ~ gsub("lat","",tmp),
+            grepl("lon", tmp)                ~ gsub("lon","",tmp),
+            grepl("target", tmp)             ~ gsub("target","",tmp),
+            grepl("price_cat", tmp)          ~ gsub("price_cat","",tmp),
+            grepl("intercept", tolower(tmp)) ~ NA,
+            TRUE                             ~ NA
+          )
+        ) %>% 
+        left_join(top, by="species")
+    )
+}
+
+# _`r fig_nums("coefficients")`_
+
+```
+
+
+
+```{r anova, echo=FALSE, message=FALSE, warning=FALSE, comment=NA, fig.asp=1.2}
+
+# anova data.frame
+anova <- data.frame(stringsAsFactors = FALSE)
+for (i in 1:nrow(x)) {
+  anova <-
+    bind_rows(
+      anova,
+      data.frame(species    = as.character(paste(x[i, "species"][["species"]]))) %>% 
+        mutate(efficiency = scales::percent(x[i, "efficiency"][["efficiency"]], accuracy=0.1)) %>% 
+        bind_cols(as.data.frame(x[i, "anova"][["anova"]][[1]]) %>% 
+                    rownames_to_column() %>% 
+                    setNames(c("var","df","deviance", "resid_df", "resid_dev","pr_chi"))) %>% 
+        left_join(top, by="species")
+
+    )
+}
+
+# aic data.frame (no difference between efficiencies?)
+aic <- data.frame(stringsAsFactors = FALSE)
+for (i in 1:nrow(x)) {
+  aic <-
+    bind_rows(
+      aic,
+      data.frame(species    = as.character(paste(x[i, "species"][["species"]]))) %>% 
+        mutate(efficiency = scales::percent(x[i, "efficiency"][["efficiency"]], accuracy=0.1)) %>% 
+        mutate(aic        = as.integer(x[i, "aic"][["aic"]][[1]]))
+    )
+}
+
+# significance
+significance <-
+  anova %>% 
+  drop_na(pr_chi) %>% 
+  dplyr::select(species, efficiency, var, pr_chi) %>% 
+  mutate(signific = ifelse(pr_chi <= 0.05, TRUE, FALSE))
+
+nonsignificant <-
+  significance %>% 
+  filter(signific==FALSE)
+
+
+```
+
+```{r residuals, echo=FALSE, message=FALSE, warning=FALSE, comment=NA, fig.asp=1.2}
+
+# residuals data.frame
+i <- 1
+resid <- data.frame(stringsAsFactors = FALSE)
+for (i in 1:nrow(x)) {
+  resid <-
+    bind_rows(
+      resid,
+      data.frame(species    = as.character(paste(x[i, "species"][["species"]]))) %>% 
+        mutate(efficiency = scales::percent(x[i, "efficiency"][["efficiency"]], accuracy=0.1)) %>% 
+        bind_cols(x[i, "augmented"][["augmented"]] %>% 
+                    as.data.frame() %>% 
+                    dplyr::select(.fitted, .resid)
+                  ) %>%  
+        left_join(top, by="species")
+    )
+}
+
+# resid %>% 
+#   # filter(efficiency==0) %>% 
+#   # filter(regulated=="NR") %>% 
+#   
+#   ggplot(aes(x=.fitted, y=.resid, group=efficiency)) +
+#   theme_publication() +
+#   theme(plot.margin = margin(1,1,1,1, "mm")) +
+#   theme(plot.title = element_text(hjust = 0.0)) +
+#   theme(legend.position="none") +
+#   
+#   geom_point(aes(colour=as.factor(efficiency)), alpha=0.2) +
+#   # geom_abline(slope=1, colour="blue", linetype="dashed") +
+#   # scale_x_continuous(limits=c(10,10000), trans='log10') +
+#   # scale_y_continuous(limits=c(10,10000), trans='log10') +
+#   # labs(x="", y="Predicted landings/day (kg)", title="Non-regulated") +
+#   facet_wrap(~english_species, ncol=5)
+
+
+```
+
+<!-- Prepare the detailed results --> 
+
+```{r detailed, echo=FALSE, fig.asp=1.4, message=FALSE, warning=FALSE, comment=NA}
+
+fig_nums(name    = "detailed", level = 1, display = FALSE, caption = "GLM, detailed")
+
+# i <- 1
+# sp <- as.character(top$english_species[i])
+
+# run by species
+if(recalculatemaps == TRUE) {
+  for (sp in top$english_species) {
+  
+    sp2 <- filter(top, english_species==sp) %>% dplyr::select(species) %>% as.character()
+    reg <- filter(regulated, species==sp2) %>% dplyr::select(regulated) %>% as.character()
+    
+    # cpue map
+    tmap <-
+      catch_byweek %>% 
+      mutate(english_species = paste(english_name, species)) %>% 
+      filter(english_species == sp) %>%
+      group_by(regulated, english_species, rect, lat, lon, year) %>% 
+      summarise(
+        catch = sum(catch, na.rm=TRUE),
+        effort = sum(effort, na.rm=TRUE)
+      ) %>% 
+      ungroup() %>%
+      mutate(
+        cpue = catch/effort
+      ) %>% 
+      left_join(rect_lr_sf, by=c("rect"= "ICESNAME")) %>% 
+      dplyr::select(-ID, -SOUTH, -NORTH, -WEST, -EAST) %>% 
+      
+      tidyr::complete(year, nesting(english_species), fill=list(cpue=0.1)) %>% 
+      
+      # mutate(catch_interval = cut(as.integer(catch), breaks=c(1 %o% 10^(0:12)), dig.lab=10 ) ) %>% 
+      mutate(., cpue_interval = 
+                     cut(cpue, 
+                         scales::trans_breaks("sqrt", function(x) x ^ 2)(c(0, max(cpue, na.rm=TRUE))), 
+                         dig.lab=10 ) ) %>% 
+      sf::st_as_sf()
+    
+    # levels / breaks
+    lvl <- sort(unique(tmap$cpue_interval))
+  
+    # bounding box
+    bb <- sf::st_bbox(tmap)
+    
+    tt <-
+      tmap %>%
+      group_by(regulated, english_species, year) %>% 
+      summarise(cpue = as.integer(mean(cpue, na.rm=TRUE))) %>% 
+      sf::st_drop_geometry()
+    
+    p0 <- 
+      tmap %>% 
+      drop_na() %>% 
+  
+      ggplot() +
+      theme_publication() +
+      theme(plot.margin = margin(1,1,1,1, "mm")) +
+      geom_sf(data=world_mr_sf, font = "Arial") +
+      geom_sf(aes(fill=cpue_interval), font = "Arial", alpha=0.6) +
+      geom_point(aes(size = cpue, geometry = geometry), stat = "sf_coordinates", shape=1, font = "Arial") + 
+      geom_text(data=tt, 
+                aes(x=-Inf, y=Inf, label=paste(cpue,"kg/day")), 
+                hjust=0, vjust=1) +
+      coord_sf(xlim=c(bb$xmin,bb$xmax), ylim=c(bb$ymin, bb$ymax)) + 
+      scale_fill_viridis(option = "plasma", direction = -1, discrete=TRUE, breaks=lvl, limits=lvl) +
+      guides(fill=guide_legend(nrow = 1), size = "none") + 
+      labs(x="", y="", 
+           title=paste0("Average catch/day (kg): ", 
+                        sp, 
+                        ", (",
+                        ifelse(reg=="NR","Non-regulated", "Regulated"),")"), 
+           fill="CPUE (kg/day)") +
+      facet_wrap(~year, ncol=3)
+      
+    jpeg(filename=file.path(figuresdir, paste(sp, "cpuemap.jpg", sep="_")),
+         width=10, height=8, units="in", res=300)
+    print(p0)
+    dev.off()
+   
+    # year trend
+    p1 <-
+      predfinal %>% 
+      filter(english_species    == sp) %>% 
+      # left_join(top, by="species") %>% 
+      mutate(year = as.integer(as.character(year))) %>% 
+      
+      ggplot(aes(x=year, y=est, group=efficiency)) +
+      theme_publication() +
+      theme(plot.margin = margin(1,1,1,1, "mm")) +
+      theme(legend.direction="vertical") +
+      theme(legend.justification=c(1,1), legend.position=c(0.95 ,0.95)) +
+      theme(strip.background = element_blank(), strip.text.x = element_blank()) +
+      
+      geom_line(aes(colour=as.factor(efficiency))) +
+      geom_point(aes(colour=as.factor(efficiency))) +
+      geom_ribbon(aes(ymin=lwr, ymax=upr, fill=as.factor(efficiency)), alpha=0.2) +
+      expand_limits(y=0) +
+      scale_x_continuous(breaks=seq(min(as.integer(ac(years$year))), max(as.integer(ac(years$year))),2)) +
+      labs(fill="efficiency", colour="efficiency", y="catch/day", x="") 
+    
+    jpeg(filename=file.path(figuresdir, paste(sp, "cpuetrend.jpg", sep="_")),
+         width=10, height=4, units="in", res=300)
+    print(p1)
+    dev.off()
+    
+    # factors/parameters
+    p2 <-
+      coeff %>% 
+      filter(english_species    == sp) %>% 
+      # filter(species    == as.character(x[i, "species"][["species"]])) %>% 
+      filter(!is.na(value)) %>% 
+      filter(var != "year") %>% 
+      filter(efficiency==0) %>% 
+      
+      ggplot(aes(x=value, y=data, group=efficiency)) +
+      theme_publication() +
+      theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+      theme(legend.position = "none") +
+      theme(plot.margin = margin(1,1,1,1, "mm")) +
+      
+      # geom_line(aes(colour=as.factor(efficiency))) +
+      geom_point(aes(colour=as.factor(efficiency)), size=2) +
+      labs(x="", y="coefficient")  +
+      facet_grid(.~var, scales = "free_x", space = "free_x")
+    
+    jpeg(filename=file.path(figuresdir, paste(sp, "cpuecoefficients.jpg", sep="_")),
+         width=10, height=3, units="in", res=300)
+    print(p2)
+    dev.off()
+  
+    # obs vs predicted
+    p3 <-
+      obspred %>% 
+      # left_join(top, by="species") %>% 
+      filter(english_species    == sp) %>% 
+      rename(obs=catch) %>% 
+      filter(efficiency==0) %>% 
+      
+      ggplot(aes(x=obs, y=pred, group=efficiency)) +
+      theme_publication() +
+      theme(plot.margin = margin(1,1,1,1, "mm")) +
+      theme(legend.position = "none") +
+      geom_point(aes(colour=as.factor(efficiency)), alpha=0.2) +
+      geom_abline(slope=1, colour="blue", linetype="dashed") +
+      scale_x_continuous(limits=c(10,10000), trans='log10') +
+      scale_y_continuous(limits=c(10,10000), trans='log10') 
+      # expand_limits(x=0,y=0) +
+      # facet_wrap(~english_species)
+  
+    jpeg(filename=file.path(figuresdir, paste(sp, "cpueobspred.jpg", sep="_")),
+         width=5, height=5, units="in", res=300)
+    print(p3)
+    dev.off()
+    
+    # print(p0 + p1 + p2   + plot_layout(ncol = 1, heights = unit(c(14, 8, 4), c('null'))))
+    # print( p1 / (p2 | p3)   + plot_layout(heights = unit(c(10, 10), c('null'))))
+    
+    jpeg(filename=file.path(figuresdir, paste(sp, "cpuecomb.jpg", sep="_")),
+         width=10, height=5, units="in", res=300)
+    print( (p2 | p3)   + plot_layout(heights = unit(c(10, 10), c('null'))))
+    dev.off()
+    
+  }
+}
+
+
+```
+
+\newpage
+
+**Detailed results by species**
+
+In the following sections, we are presenting detailed results by species. The presentation will consist of a map of catch rates by rectangle and year, the GLM estimated time trend in catch rate, the estimated GLM coefficients, the observed vs. predicted catch rates and the ANOVA Analysis of Deviance table.  
+
+<!-- =============================================================================================== --> 
+
+\newpage
+
+**Red mullet (Surmullet) MUR**
+
+Catch rates of red mullet are highest in the eastern Channel area. High catch rates were observed in 2015 and 2020. The trend from the GLM modelled catch rates show a maximum in 2015 and 2016, with lower values thereafter. Catch rates in 2022 are still double the catch rates of 2012. The fit of the GLM model is problematic for the lower catch rates where the model overpredicts the values. It is unknown what is causing this behaviour. 
+
+```{r echo=FALSE, fig.asp=1.0, message=FALSE, warning=FALSE, comment=NA}
+i   <- 1
+sp  <- top$english_species[i] 
+sp2 <- filter(top, english_species==sp) %>% dplyr::select(species) %>% as.character()
+reg <- filter(regulated, species==sp2) %>% dplyr::select(regulated) %>% as.character()
+
+```
+
+**`r paste0(sp," (", ifelse(reg=="NR", "Non-regulated", "Regulated"), ")" )`**
+
+```{r echo=FALSE, fig.asp=1.0, message=FALSE, warning=FALSE, comment=NA}
+
+fig_nums(
+  name    = paste0(sp, "cpue"), level = 1, display = FALSE,
+  caption = paste(sp, "CPUE by year and rectangle (kg/day) and standardized CPUE trend by year (kg/day)"))
+
+knitr::include_graphics(path=file.path(figuresdir, paste(top$english_species[[i]], "cpuemap.jpg", sep="_")))
+```
+
+```{r echo=FALSE, fig.asp=1.0, message=FALSE, warning=FALSE, comment=NA}
+knitr::include_graphics(path=file.path(figuresdir, paste(top$english_species[[i]], "cpuetrend.jpg", sep="_")))
+```
+
+_`r fig_nums(paste0(sp, "cpue"))`_
+
+\newpage
+
+```{r echo=FALSE, fig.asp=1.0, message=FALSE, warning=FALSE, comment=NA}
+fig_nums(
+  name    = paste0(sp, "comb"), level = 1, display = FALSE,
+  caption = paste(sp, "GLM coefficients for rectangles (left) and observed vs. predicted CPUE values (kg/day)"))
+
+knitr::include_graphics(path=file.path(figuresdir, paste(top$english_species[[i]], "cpuecomb.jpg", sep="_")))
+```
+
+_`r fig_nums(paste0(sp, "comb"))`_
+
+```{r echo=FALSE, fig.asp=1.0, message=FALSE, warning=FALSE, comment=NA}
+tab_nums(
+  name    = paste0(sp, "anova"), level = 1, display = FALSE,
+  caption = paste(sp, "Anova table of CPUE GLM by year and rectangle (kg/day) "))
+
+  print(x[x$species==sp2, "anova"][["anova"]][[1]])
+```
+
+_`r tab_nums(paste0(sp, "anova"))`_
+
+<!-- =============================================================================================== --> 
+
+\newpage
+
+**European squid (SQR)**
+
+```{r echo=FALSE, fig.asp=1.0, message=FALSE, warning=FALSE, comment=NA}
+i   <- 2
+sp  <- top$english_species[i] 
+sp2 <- filter(top, english_species==sp) %>% dplyr::select(species) %>% as.character()
+reg <- filter(regulated, species==sp2) %>% dplyr::select(regulated) %>% as.character()
+
+```
+
+**`r paste0(sp," (", ifelse(reg=="NR", "Non-regulated", "Regulated"), ")" )`**
+
+```{r echo=FALSE, fig.asp=1.0, message=FALSE, warning=FALSE, comment=NA}
+
+fig_nums(
+  name    = paste0(sp, "cpue"), level = 1, display = FALSE,
+  caption = paste(sp, "CPUE by year and rectangle (kg/day) and standardized CPUE trend by year (kg/day)"))
+
+knitr::include_graphics(path=file.path(figuresdir, paste(top$english_species[[i]], "cpuemap.jpg", sep="_")))
+```
+
+```{r echo=FALSE, fig.asp=1.0, message=FALSE, warning=FALSE, comment=NA}
+knitr::include_graphics(path=file.path(figuresdir, paste(top$english_species[[i]], "cpuetrend.jpg", sep="_")))
+```
+
+_`r fig_nums(paste0(sp, "cpue"))`_
+
+\newpage
+
+```{r echo=FALSE, fig.asp=1.0, message=FALSE, warning=FALSE, comment=NA}
+fig_nums(
+  name    = paste0(sp, "comb"), level = 1, display = FALSE,
+  caption = paste(sp, "GLM coefficients for rectangles (left) and observed vs. predicted CPUE values (kg/day)"))
+
+knitr::include_graphics(path=file.path(figuresdir, paste(top$english_species[[i]], "cpuecomb.jpg", sep="_")))
+```
+
+_`r fig_nums(paste0(sp, "comb"))`_
+
+```{r echo=FALSE, fig.asp=1.0, message=FALSE, warning=FALSE, comment=NA}
+tab_nums(
+  name    = paste0(sp, "anova"), level = 1, display = FALSE,
+  caption = paste(sp, "Anova table of CPUE GLM by year and rectangle (kg/day) "))
+
+  print(x[x$species==sp2, "anova"][["anova"]][[1]])
+```
+
+_`r tab_nums(paste0(sp, "anova"))`_
+
+<!-- =============================================================================================== --> 
+
+\newpage
+
+**Tub gurnard (GUU, "rode poon")**
+
+```{r echo=FALSE, fig.asp=1.0, message=FALSE, warning=FALSE, comment=NA}
+i   <- 3
+sp  <- top$english_species[i] 
+sp2 <- filter(top, english_species==sp) %>% dplyr::select(species) %>% as.character()
+reg <- filter(regulated, species==sp2) %>% dplyr::select(regulated) %>% as.character()
+
+```
+
+**`r paste0(sp," (", ifelse(reg=="NR", "Non-regulated", "Regulated"), ")" )`**
+
+```{r echo=FALSE, fig.asp=1.0, message=FALSE, warning=FALSE, comment=NA}
+
+fig_nums(
+  name    = paste0(sp, "cpue"), level = 1, display = FALSE,
+  caption = paste(sp, "CPUE by year and rectangle (kg/day) and standardized CPUE trend by year (kg/day)"))
+
+knitr::include_graphics(path=file.path(figuresdir, paste(top$english_species[[i]], "cpuemap.jpg", sep="_")))
+```
+
+```{r echo=FALSE, fig.asp=1.0, message=FALSE, warning=FALSE, comment=NA}
+knitr::include_graphics(path=file.path(figuresdir, paste(top$english_species[[i]], "cpuetrend.jpg", sep="_")))
+```
+
+_`r fig_nums(paste0(sp, "cpue"))`_
+
+\newpage
+
+```{r echo=FALSE, fig.asp=1.0, message=FALSE, warning=FALSE, comment=NA}
+fig_nums(
+  name    = paste0(sp, "comb"), level = 1, display = FALSE,
+  caption = paste(sp, "GLM coefficients for rectangles (left) and observed vs. predicted CPUE values (kg/day)"))
+
+knitr::include_graphics(path=file.path(figuresdir, paste(top$english_species[[i]], "cpuecomb.jpg", sep="_")))
+```
+
+_`r fig_nums(paste0(sp, "comb"))`_
+
+```{r echo=FALSE, fig.asp=1.0, message=FALSE, warning=FALSE, comment=NA}
+tab_nums(
+  name    = paste0(sp, "anova"), level = 1, display = FALSE,
+  caption = paste(sp, "Anova table of CPUE GLM by year and rectangle (kg/day) "))
+
+  print(x[x$species==sp2, "anova"][["anova"]][[1]])
+```
+
+_`r tab_nums(paste0(sp, "anova"))`_
+
+<!-- =============================================================================================== --> 
+
+\newpage
+
+**Common cuttlefish (CTC)**
+
+```{r echo=FALSE, fig.asp=1.0, message=FALSE, warning=FALSE, comment=NA}
+i   <- 4
+sp  <- top$english_species[i] 
+sp2 <- filter(top, english_species==sp) %>% dplyr::select(species) %>% as.character()
+reg <- filter(regulated, species==sp2) %>% dplyr::select(regulated) %>% as.character()
+
+```
+
+**`r paste0(sp," (", ifelse(reg=="NR", "Non-regulated", "Regulated"), ")" )`**
+
+```{r echo=FALSE, fig.asp=1.0, message=FALSE, warning=FALSE, comment=NA}
+
+fig_nums(
+  name    = paste0(sp, "cpue"), level = 1, display = FALSE,
+  caption = paste(sp, "CPUE by year and rectangle (kg/day) and standardized CPUE trend by year (kg/day)"))
+
+knitr::include_graphics(path=file.path(figuresdir, paste(top$english_species[[i]], "cpuemap.jpg", sep="_")))
+```
+
+```{r echo=FALSE, fig.asp=1.0, message=FALSE, warning=FALSE, comment=NA}
+knitr::include_graphics(path=file.path(figuresdir, paste(top$english_species[[i]], "cpuetrend.jpg", sep="_")))
+```
+
+_`r fig_nums(paste0(sp, "cpue"))`_
+
+\newpage
+
+```{r echo=FALSE, fig.asp=1.0, message=FALSE, warning=FALSE, comment=NA}
+fig_nums(
+  name    = paste0(sp, "comb"), level = 1, display = FALSE,
+  caption = paste(sp, "GLM coefficients for rectangles (left) and observed vs. predicted CPUE values (kg/day)"))
+
+knitr::include_graphics(path=file.path(figuresdir, paste(top$english_species[[i]], "cpuecomb.jpg", sep="_")))
+```
+
+_`r fig_nums(paste0(sp, "comb"))`_
+
+```{r echo=FALSE, fig.asp=1.0, message=FALSE, warning=FALSE, comment=NA}
+tab_nums(
+  name    = paste0(sp, "anova"), level = 1, display = FALSE,
+  caption = paste(sp, "Anova table of CPUE GLM by year and rectangle (kg/day) "))
+
+  print(x[x$species==sp2, "anova"][["anova"]][[1]])
+```
+
+_`r tab_nums(paste0(sp, "anova"))`_
+
+<!-- =============================================================================================== --> 
+
+\newpage
+
+**Whiting (WHG)**
+
+```{r echo=FALSE, fig.asp=1.0, message=FALSE, warning=FALSE, comment=NA}
+i   <- 5
+sp  <- top$english_species[i] 
+sp2 <- filter(top, english_species==sp) %>% dplyr::select(species) %>% as.character()
+reg <- filter(regulated, species==sp2) %>% dplyr::select(regulated) %>% as.character()
+
+```
+
+**`r paste0(sp," (", ifelse(reg=="NR", "Non-regulated", "Regulated"), ")" )`**
+
+```{r echo=FALSE, fig.asp=1.0, message=FALSE, warning=FALSE, comment=NA}
+
+fig_nums(
+  name    = paste0(sp, "cpue"), level = 1, display = FALSE,
+  caption = paste(sp, "CPUE by year and rectangle (kg/day) and standardized CPUE trend by year (kg/day)"))
+
+knitr::include_graphics(path=file.path(figuresdir, paste(top$english_species[[i]], "cpuemap.jpg", sep="_")))
+```
+
+```{r echo=FALSE, fig.asp=1.0, message=FALSE, warning=FALSE, comment=NA}
+knitr::include_graphics(path=file.path(figuresdir, paste(top$english_species[[i]], "cpuetrend.jpg", sep="_")))
+```
+
+_`r fig_nums(paste0(sp, "cpue"))`_
+
+\newpage
+
+```{r echo=FALSE, fig.asp=1.0, message=FALSE, warning=FALSE, comment=NA}
+fig_nums(
+  name    = paste0(sp, "comb"), level = 1, display = FALSE,
+  caption = paste(sp, "GLM coefficients for rectangles (left) and observed vs. predicted CPUE values (kg/day)"))
+
+knitr::include_graphics(path=file.path(figuresdir, paste(top$english_species[[i]], "cpuecomb.jpg", sep="_")))
+```
+
+_`r fig_nums(paste0(sp, "comb"))`_
+
+```{r echo=FALSE, fig.asp=1.0, message=FALSE, warning=FALSE, comment=NA}
+tab_nums(
+  name    = paste0(sp, "anova"), level = 1, display = FALSE,
+  caption = paste(sp, "Anova table of CPUE GLM by year and rectangle (kg/day) "))
+
+  print(x[x$species==sp2, "anova"][["anova"]][[1]])
+```
+
+_`r tab_nums(paste0(sp, "anova"))`_
+
+<!-- =============================================================================================== --> 
+
+\newpage
+
+**Mackerel (MAC)**
+
+```{r echo=FALSE, fig.asp=1.0, message=FALSE, warning=FALSE, comment=NA}
+i   <- 6
+sp  <- top$english_species[i] 
+sp2 <- filter(top, english_species==sp) %>% dplyr::select(species) %>% as.character()
+reg <- filter(regulated, species==sp2) %>% dplyr::select(regulated) %>% as.character()
+
+```
+
+**`r paste0(sp," (", ifelse(reg=="NR", "Non-regulated", "Regulated"), ")" )`**
+
+```{r echo=FALSE, fig.asp=1.0, message=FALSE, warning=FALSE, comment=NA}
+
+fig_nums(
+  name    = paste0(sp, "cpue"), level = 1, display = FALSE,
+  caption = paste(sp, "CPUE by year and rectangle (kg/day) and standardized CPUE trend by year (kg/day)"))
+
+knitr::include_graphics(path=file.path(figuresdir, paste(top$english_species[[i]], "cpuemap.jpg", sep="_")))
+```
+
+```{r echo=FALSE, fig.asp=1.0, message=FALSE, warning=FALSE, comment=NA}
+knitr::include_graphics(path=file.path(figuresdir, paste(top$english_species[[i]], "cpuetrend.jpg", sep="_")))
+```
+
+_`r fig_nums(paste0(sp, "cpue"))`_
+
+\newpage
+
+```{r echo=FALSE, fig.asp=1.0, message=FALSE, warning=FALSE, comment=NA}
+fig_nums(
+  name    = paste0(sp, "comb"), level = 1, display = FALSE,
+  caption = paste(sp, "GLM coefficients for rectangles (left) and observed vs. predicted CPUE values (kg/day)"))
+
+knitr::include_graphics(path=file.path(figuresdir, paste(top$english_species[[i]], "cpuecomb.jpg", sep="_")))
+```
+
+_`r fig_nums(paste0(sp, "comb"))`_
+
+```{r echo=FALSE, fig.asp=1.0, message=FALSE, warning=FALSE, comment=NA}
+tab_nums(
+  name    = paste0(sp, "anova"), level = 1, display = FALSE,
+  caption = paste(sp, "Anova table of CPUE GLM by year and rectangle (kg/day) "))
+
+  print(x[x$species==sp2, "anova"][["anova"]][[1]])
+```
+
+_`r tab_nums(paste0(sp, "anova"))`_
+
+\newpage
+
+**Horse mackerel (HOM)**
+
+<!-- Red gurnard GUR --> 
+
+```{r echo=FALSE, fig.asp=1.0, message=FALSE, warning=FALSE, comment=NA}
+i   <- 7
+sp  <- top$english_species[i] 
+sp2 <- filter(top, english_species==sp) %>% dplyr::select(species) %>% as.character()
+reg <- filter(regulated, species==sp2) %>% dplyr::select(regulated) %>% as.character()
+
+```
+
+**`r paste0(sp," (", ifelse(reg=="NR", "Non-regulated", "Regulated"), ")" )`**
+
+```{r echo=FALSE, fig.asp=1.0, message=FALSE, warning=FALSE, comment=NA}
+
+fig_nums(
+  name    = paste0(sp, "cpue"), level = 1, display = FALSE,
+  caption = paste(sp, "CPUE by year and rectangle (kg/day) and standardized CPUE trend by year (kg/day)"))
+
+knitr::include_graphics(path=file.path(figuresdir, paste(top$english_species[[i]], "cpuemap.jpg", sep="_")))
+```
+
+```{r echo=FALSE, fig.asp=1.0, message=FALSE, warning=FALSE, comment=NA}
+knitr::include_graphics(path=file.path(figuresdir, paste(top$english_species[[i]], "cpuetrend.jpg", sep="_")))
+```
+
+_`r fig_nums(paste0(sp, "cpue"))`_
+
+\newpage
+
+```{r echo=FALSE, fig.asp=1.0, message=FALSE, warning=FALSE, comment=NA}
+fig_nums(
+  name    = paste0(sp, "comb"), level = 1, display = FALSE,
+  caption = paste(sp, "GLM coefficients for rectangles (left) and observed vs. predicted CPUE values (kg/day)"))
+
+knitr::include_graphics(path=file.path(figuresdir, paste(top$english_species[[i]], "cpuecomb.jpg", sep="_")))
+```
+
+_`r fig_nums(paste0(sp, "comb"))`_
+
+```{r echo=FALSE, fig.asp=1.0, message=FALSE, warning=FALSE, comment=NA}
+tab_nums(
+  name    = paste0(sp, "anova"), level = 1, display = FALSE,
+  caption = paste(sp, "Anova table of CPUE GLM by year and rectangle (kg/day) "))
+
+  print(x[x$species==sp2, "anova"][["anova"]][[1]])
+```
+
+_`r tab_nums(paste0(sp, "anova"))`_
+
+\newpage
+
+# Discussion
+
+[discussion here]
+
+Quality of the data
+
+E.g. the issue with landings as indicator for catch rate
+
+Targetting
+
+```{r eval=FALSE, fig.asp=1.0, message=FALSE, warning=FALSE, comment=NA, include=FALSE}
+
+# NOT SHOWN 
+
+i <- 1
+
+fig_nums(
+  name    = paste0(tolower(top$species[[i]]), "catch"), level = 1, display = FALSE,
+  caption = paste(top$english_species[[i]], "landings per rectangle and year (tonnes)"))
+
+knitr::include_graphics(path=file.path(figuresdir, paste(top$english_species[[i]], "catchbyrect.jpg", sep="_")))
+
+# _`r fig_nums(paste0(tolower(top$species[[i]]), "catch"))`_
+
+```
+
+
+
+
