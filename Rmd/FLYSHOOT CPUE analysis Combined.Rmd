@@ -8,12 +8,13 @@ output:
 ```{r setup, include=FALSE}
 
 # =====================================================================================================
-# FLYSHOOT CPUE analysis - North Sea
+# FLYSHOOT CPUE analysis - North Sea and Channel
 # 
 # 11/01/2023 first coding
 # 16/03/2023 full GLM modelling of top 15 species in the catch
 # 21/04/2023 TO DO: convert totals to total per vessel
-# 09/05/2023 Finalized the code to include the reworked Ecatch and Mcatch data (previously problem with number of days)
+# 11/05/2023 Finalized the code to include the reworked Ecatch and Mcatch data 
+#            and the combination of North Sea and Channel
 # =====================================================================================================
 
 knitr::opts_chunk$set(echo = FALSE,	message = FALSE,	warning = FALSE,	comment = "",	crop = TRUE )
@@ -24,7 +25,7 @@ options(dplyr.summarise.inform = FALSE)
 # Reset lists
 rm(list=ls())
 
-recalculatemaps   <- TRUE            # recalculate catch maps (takes relatively long)
+recalculatemaps   <- FALSE           # recalculate catch maps (takes relatively long)
 toprectanglesonly <- TRUE            # CPUE analysis for top rectangles (by species) only?
 
 # Libraries
@@ -146,8 +147,9 @@ mnths     <- NA
 vessels   <- NA
 
 # divisions <- NA
-# divisions <- c("27.7.d", "27.7.e") # fix error in division 4.a
-divisions <- c("27.4.b", "27.4.c")
+# divisions <- c("27.7.d", "27.7.e")
+# divisions <- c("27.4.b", "27.4.c")
+divisions <- c("27.4.b", "27.4.c", "27.7.d", "27.7.e")
 
 # Folder for storing figures  
 if(!any(is.na(divisions))) {
@@ -155,6 +157,8 @@ if(!any(is.na(divisions))) {
 } else {
   folder <- "CPUE northsea-channel"
 }
+
+dir.create   (file.path(onedrive, "report",folder), showWarnings = FALSE)
 
 dir.create   (file.path(onedrive, "report",folder, "figures"), showWarnings = FALSE)
 figuresdir <- file.path(onedrive, "report",folder, "figures")
@@ -356,7 +360,7 @@ myTargetColors          <- c(myTopColors, myAddedColors)
 ```
 
 
-# FLYSHOOT fishery CPUE analysis in `r paste(sort(unique(catch_byweek$division)), collapse=(", "))`
+# CPUE analysis of the Jaczon flyshoot fishery in the Channel and North Sea
 
 M.A. Pastoors
 
@@ -385,6 +389,12 @@ Vissershavenweg 35
   knitr::include_graphics("../MPFF logo with text.png")
 
 ```
+\newpage
+
+
+Please cite as:
+
+Pastoors, M.A. (2023) CPUE analysis of the Jaczon flyshoot fishery in the Channel and North Sea. MPFF report 2023/02, published 11/5/2023
 
 \newpage
 
@@ -392,18 +402,19 @@ Vissershavenweg 35
 
 The objective of this work was to analyse the electronic logbook data of the Jaczon Flyshoot vessel for trends in spatial and temporal dynamics. The electronic logbook data for the years 2012-2022 has been compiled. The data contains information on catch and effort per vessel, rectangle, species and day. Average price information by vessel and year has been used to convert landings to revenue. The data was available for the vessels SCH65, SL9, SCH135, Z99 and years 2012-2022. For the years 2012-2016, data was only available for two vessels (SCH65 and SL9). From 2017 onwards, data became available for the SCH135 and the Z99 was added in 2022. The data coverage is not complete. The year 2012 is only covered for part of the year and the data for 2015-2017 is also incomplete for some vessels. 
 
-For each year, the proportion of weeks targeting a certain species was calculated. The target species of a vessel-year-week combination was derived by determining the species with the highest revenue for each vessel-year-week combination. Then the number of vessel-year-week-target combinations were counted and expresses as percentages per year and species. Surmullet (MUR) and European Squid (SQR) have been the main target species during the period considered. The number of Tub gurnard targeted weeks has declined over time. Since 2018 the contribution of targeted trips on Common Cuttlefish (CTC) has strongly increased.
+For each year, the proportion of weeks targeting a certain species was calculated. The target species of a vessel-year-week combination was derived by determining the species with the highest revenue for each vessel-year-week combination. Then the number of vessel-year-week-target combinations were counted and expresses as percentages per year and species. European Squid (SQR), Surmullet (MUR) and mackerel (MAC) have been the main target species during the period considered, with Cuttlefish (CTC) increasing in importance from 2018 onwards. The number of Tub gurnard targeted weeks has declined over time.
 
 The analytical approach to estimating catch rates (Catch per Unit of Effort CPUE) was initiated by transforming all the catch (=landing) data to the total landings per vessel, per species, per rectangle and per week. In addition we counted the number of fishing days per vessel, per rectangle and per week. Catch rate is then expressed as the catch divided by effort. Modelling was based on Generalized Linear Model (GLM) tools, whereby the predicted variable is the catch per week, effort was included as a log-link function and year as used as the main factor to describe the time trend. Then we explored other potential explanatory factors (vessel, latitude, longitude, rectangle, quarter and target species) by sequentially adding different factors. We explored the AIC criteria for the different factors for each of the species and selected those factors by species that had the lowest AIC. Then we repeated this process for the second and third explanatory factor. In all cases we evaluated whether the factor contributed significantly (<5%) to the model.
 
-The standardized CPUE for the different species, taking into account the significant factors per species, differ substantially from the raw CPUE. For the four main target species (i.e. the top row in the figures), standardized catch rates for European squid and Surmullet have decreased in the recent period, whereas catch rates for Common cuttlefish and mackerel have increased. For several species, we can observe a maximum in catch rates during the period 2014-2016 and lower catch-rates thereafter. This could point to different targeting behaviour in the fishery and therefore, lower availability of those species to the fishery.
+The standardized CPUE for the different species, taking into account the significant factors per species, differ substantially from the raw CPUE. For the  main target species in the overall flyshoot fishery, catch rates for European squid and Surmullet have decreased in the recent period whereas the catch rates for mackerel and Common cuttlefish have increased. For several species, we can observe a general decline in catch rates. Those species are mostly non-target species for the flyshoot fishery.
 
-The observed vs. predicted catch rates are a diagnostic to assess how well the GLM model is fitting to the data. Ideally, one would expect the values to be close to the 1:1 line (blue dotted line). The explained deviance (blue text) describes the proportion of the deviance that is explained by the model. The three main target species (SQR, MUR, MAC) have explained deviances of 68, 44 and 45% respectively. This indicates that the GLM models can provide a reasonable explanation of the variance in the data.
+The observed vs. predicted catch rates are a diagnostic to assess how well the GLM model is fitting to the data. Ideally, one would expect the values to be close to the 1:1 line (blue dotted line). The explained deviance (blue text) describes the proportion of the deviance that is explained by the model. The four main target species (SQR, MUR, CTC, MAC) have explained deviances of 51, 39, 66 and 39% respectively. This indicates that the GLM models can provide some explanation of the variance in the data.
 
 For several species, we observe some overprediction of catch rates at lower values, for example, for red mullet (surmullet MUR), mackerel and horse mackerel. It is not well understood what drivers lead to these patterns.
-Overall, the patterns observed in CPUE for the species shown, make it difficult to interpret the CPUE as indicator of abundance, because the targeting behaviour and the quota limitations may affect the catch rates in different ways in different years.
 
-However, the information from the logbooks does provide usable information on the spatial distribution of the fishery and the catches by species. For example, in `r fig_nums("catch6", display="cite")`, we can see that the spatial distribution of mackerel catches are quite distinct from most other species, thereby indicating that the CPUE for mackerel may a very different from other species. 
+Overall, the patterns observed in CPUE for the species shown, **make it difficult to interpret the CPUE as indicator of abundance**, because the targeting behaviour and the quota limitations may affect the catch rates in different ways in different years.
+
+However, the information from the logbooks does provide usable information on the spatial distribution of the fishery and the catches by species. For example, the spatial distribution of cuttlefish catches are quite distinct from most other species, thereby indicating that the CPUE for cuttlefish may a very different from other species. 
 
 An important consideration for the overall analysis, is that the logbook information only contains data on the landed catch. This is in fact a severe limitation on the possibility to interpret the results as indicators of abundance because an unknown part of the catch may not have been landed. 
 
@@ -430,7 +441,7 @@ Electronic logbook data was available for the vessels `r paste(unique(e$vessel),
 
 **Fishing effort by vessel**
 
-The number of fishing days by vessel and year (top), and by vessel, year and quarter (bottom) demonstrates that the data coverage is not complete. The year 2012 is only covered from the quarter onwards and the data for 2015-2017 is also incomplete for some vessels. From 2018 onwards, the effort data covers around 200-300 fishing days per year, which is lower than the around 500 fishing days in the channel.  
+The number of fishing days by vessel and year (top), and by vessel, year and quarter (bottom) demonstrates that the data coverage is not complete. The year 2012 is only covered from the middel of the year and the data for 2015-2017 is also incomplete for one vessel. From 2018 onwards, the effort data covers around 700-800 fishing days per year.  
 
 ```{r effort1, echo=FALSE, message=FALSE, warning=FALSE, comment=NA, fig.asp=1.0}
 
@@ -475,6 +486,8 @@ gridExtra::grid.arrange(p1, p2, left = "Effort (days)", ncol=1, heights=c(10,20)
 _`r fig_nums("effort1")`_
 
 \newpage
+
+**Number of fishing days per week**
 
 To check the consistency of the effort data, we calculated the average number of fishing days per week from the different elog sources. Within the flyshoot fishery, there can be different patterns in the number of fishing days per week, depending on the number of crews per vessel and the preferences of the crews. Generally, the number of fishing days per week will be around 4, except when multiple crews are being used, which results in more fishing days per week. 
 
@@ -521,7 +534,7 @@ _`r fig_nums("effort0")`_
 
 **Total landings by vessel and year**
 
-From the electronic logbook data, landings by species and vessel can be derived. It should be noted that there is no data available on the total catches, because the logbooks only contain the landed catch. The landings per vessel, show the same gaps in coverage as shown for the effort data. Landings have generally been between 600 and 700 tonnes. Landings in 2021 and 2022 were substantially lower.  
+From the electronic logbook data, landings by species and vessel can be derived. It should be noted that there is no data available on the total catches, because the logbooks only contain the landed catch. The landings per vessel, show the same gaps in coverage as shown for the effort data. Landings have generally been between 1500 and 2000 tonnes.  
 
 ```{r catch1, echo=FALSE, message=FALSE, warning=FALSE, comment=NA, fig.asp=1.2}
 
@@ -575,7 +588,7 @@ _`r fig_nums("catch1")`_
 
 **Total landings by species and year**
 
-The top `r n` species in the overall flyshoot landings are shown in the figure below, together with a mixed grouping of species (OTHER). The proportions of the landings by species, show some clear patterns in targeting of certain species over certain years, for example the increase in proportions of mackerel and surmullet over time.  Common cuttlefish is almost absent in the catches in the North Sea.
+The top `r n` species in the overall flyshoot landings are shown in the figure below, together with a mixed grouping of species (OTHER). The proportions of the landings by species, show some clear patterns in targeting of certain species over certain years, for example the increase in proportions of squid, surmullet and cuttlefish over time. 
  
 ```{r catch3a, echo=FALSE, message=FALSE, warning=FALSE, comment=NA, fig.asp=0.6}
 
@@ -700,7 +713,7 @@ _`r fig_nums("catch4")`_
 
 **Total revenue by species and year**
 
-The total revenue by species and year was calculated from the landed catch multiplied by the average price per species and year. The value of the top `r n` species in the landings (and an OTHER category), are shown below, both in kEuro and in proportions. From 2018 onwards, 75% of the value is generated from three species (SQR, MUR, MAC).
+The total revenue by species and year was calculated from the landed catch multiplied by the average price per species and year. The value of the top `r n` species in the landings (and an OTHER category), are shown below, both in kEuro and in proportions. From 2016 onwards, over 75% of the value is generated from four species (SQR, MUR, MAC, CTC).
  
 ```{r catch3b, echo=FALSE, message=FALSE, warning=FALSE, comment=NA, fig.asp=0.6}
 
@@ -777,7 +790,7 @@ _`r fig_nums("catch3b")`_
 
 **Percentage of weeks targeting certain species**
 
-For each year, the proportion of weeks targeting a certain species was calculated. The target species of a vessel-year-week combination was derived by determining the species with the highest revenue for each vessel-year-week combination. Then the number of vessel-year-week-target combinations were counted and expresses as percentages per year and species. Surmullet (MUR), European Squid (SQR) and mackerel (MAC) have been the main target species during the period considered. The number of Tub gurnard targeted weeks has declined over time. 
+For each year, the proportion of weeks targeting a certain species was calculated. The target species of a vessel-year-week combination was derived by determining the species with the highest revenue for each vessel-year-week combination. Then the number of vessel-year-week-target combinations were counted and expresses as percentages per year and species. European Squid (SQR), Surmullet (MUR) and mackerel (MAC) have been the main target species during the period considered, with Cuttlefish (CTC) increasing in importance from 2018 onwards. The number of Tub gurnard targeted weeks has declined over time. 
 
 
 ```{r catch5, echo=FALSE, message=FALSE, warning=FALSE, comment=NA, fig.asp=0.6}
@@ -893,7 +906,7 @@ _`r fig_nums("prices")`_
 
 **Average price (Jaczon vessels) against total landings by species (Jaczon vessels)**
 
-To check whether there could be a relationship between landings and price, we plotted the total landings per species against the average price per species. Each dot in the graphs below indicate a specific year. For some species, there appears to be a negative relationship between the amount of landings and the average price (e.g. Surmullet, gurnards and horse mackerel). European squid and mackerel suggest no relationship between landings and price. 
+To check whether there could be a relationship between landings and price, we plotted the total landings per species against the average price per species. Each dot in the graphs below indicate a specific year. For most  species, there appears to be a negative relationship between the amount of landings and the average price (e.g. Surmullet, gurnards and horse mackerel). European squid, cuttlefish and mackerel suggest no relationship between landings and price. 
 
 ```{r prices2, echo=FALSE, fig.asp=1.0, message=FALSE, warning=FALSE, comment=NA}
 
@@ -931,7 +944,7 @@ _`r fig_nums("prices2")`_
 
 **Map of total landings by species and ICES rectangle, cumulative over years**
 
-The landings by species and rectangle were summed over all vessels and years and categorized in different bins (square root transformed). The figure below demonstrates the spatial distribution of the landings by species. 
+The landings by species and rectangle were summed over all vessels and years and categorized in different bins (square root transformed). The figure below demonstrates the spatial distribution of the landings by species. Squid, cuttlefish and mullet are mostly caught in the Channel, whereas most of the mackerel catches are taken in the North Sea. 
 
 ```{r catch6, echo=FALSE, fig.asp=1.0, message=FALSE, warning=FALSE, comment=NA}
 
@@ -1005,7 +1018,7 @@ _`r fig_nums("catch6")`_
 
 **Observed catch rate (landings / week)**
 
-The observed catch rates (as average landings per day) were expressed by year and plotted as box-plot. Note that the extreme values, that are sometimes observed, have been removed with the Desctools::Winsorize function whereby all observations larger than the 95th percentile are set to the value at the 95th percentile. The two main target species of the flyshoot fishery in the North Sea, surmullet and mackerel, show a stable trend. Catch rates for gurnards show a decreasing trend as do the catch rates for most of the bycatch species. 
+The observed catch rates (as average landings per day) were expressed by year and plotted as box-plot. Note that the extreme values, that are sometimes observed, have been removed with the Desctools::Winsorize function whereby all observations larger than the 95th percentile are set to the value at the 95th percentile. The four main target species of the flyshoot fishery show relatively stable trends. Catch rates for gurnards show a decreasing trend as do the catch rates for most of the bycatch species. 
 
 ```{r cpue1, echo=FALSE, message=FALSE, warning=FALSE, comment=NA, fig.asp=1.0}
 
@@ -1162,7 +1175,7 @@ _`r fig_nums("obsrevenue")`_
 
 \newpage
 
-# Results
+# Standardized CPUE
 
 Calculating a standardized catch rate (CPUE) by species, is carried out in a number of steps. First, only the year trend is calculated. Then, in a series of three steps, we determine the most significant factors for the different species. The factors considered are: vessel, latitude, longitude, rectangle, quarter and target species. The evaluation is carried out by assessing the AIC values for each factor. The factor with the lowest AIC is then taken forward in each of the steps. 
 
@@ -1498,7 +1511,7 @@ effects <-
                           species, englishspecies), 
             by="species") %>% 
   group_by(var, n) %>% 
-  summarise(species = paste(englishspecies, collapse=" / ")) %>% 
+  summarise(species = paste(englishspecies, collapse="\n")) %>% 
   rename(effect=var) %>% 
   arrange(desc(n), effect) %>% 
   dplyr::select(-n)
@@ -1509,10 +1522,23 @@ _`r fig_nums("glm1")`_
 
 The following species have the following first linear factor:
 
-```{r message=FALSE, warning=FALSE}
-effects %>% 
-  pander::pandoc.table(style="simple", justify="left", split.tables=400) 
+```{r message=FALSE, warning=FALSE, out.width="400px"}
+ft <-
+  effects %>% 
+  flextable::flextable() %>%
+  flextable::fontsize(size =12, part = "all") %>% 
+  flextable::valign(valign = "top", part = "all") %>% 
+  flextable::align(align="left", part="all") %>% 
+  flextable::width(width=6) %>% 
+  flextable::autofit()
 
+  png(filename=file.path(tablesdir, "firsteffect.png"),
+      width=6, height=3, units="in", res=300)
+  plot(ft, fit = "fixed", just = "left")
+  invisible(dev.off())
+
+  knitr::include_graphics(file.path(tablesdir, "firsteffect.png"))
+  
 ```
 
 \newpage
@@ -1717,7 +1743,7 @@ effects <-
                           species, englishspecies), 
             by="species") %>% 
   group_by(var, n) %>% 
-  summarise(species = paste(englishspecies, collapse=" / ")) %>% 
+  summarise(species = paste(englishspecies, collapse="\n")) %>% 
   rename(effect=var) %>% 
   arrange(desc(n), effect) %>% 
   dplyr::select(-n)
@@ -1727,11 +1753,23 @@ effects <-
 _`r fig_nums("glm2")`_
 
 The following species have the following second linear factor:
+```{r message=FALSE, warning=FALSE, out.width="400px"}
+ft <-
+  effects %>% 
+  flextable::flextable() %>%
+  flextable::fontsize(size =12, part = "all") %>% 
+  flextable::valign(valign = "top", part = "all") %>% 
+  flextable::align(align="left", part="all") %>% 
+  flextable::width(width=6) %>% 
+  flextable::autofit()
 
-```{r message=FALSE, warning=FALSE}
-effects %>% 
-  pander::pandoc.table(style="simple", justify="left", split.tables=400) 
+  png(filename=file.path(tablesdir, "secondeffect.png"),
+      width=6, height=3, units="in", res=300)
+  plot(ft, fit = "fixed", just = "left")
+  invisible(dev.off())
 
+  knitr::include_graphics(file.path(tablesdir, "secondeffect.png"))
+  
 ```
 
 \newpage
@@ -1937,7 +1975,7 @@ effects <-
                           species, englishspecies), 
             by="species") %>% 
   group_by(var, n) %>% 
-  summarise(species = paste(englishspecies, collapse=" / ")) %>% 
+  summarise(species = paste(englishspecies, collapse="\n")) %>% 
   rename(effect=var) %>% 
   arrange(desc(n), effect) %>% 
   dplyr::select(-n)
@@ -1947,11 +1985,23 @@ effects <-
 _`r fig_nums("glm3")`_
 
 The following species have the following third linear factor:
+```{r message=FALSE, warning=FALSE, out.width="400px"}
+ft <-
+  effects %>% 
+  flextable::flextable() %>%
+  flextable::fontsize(size =12, part = "all") %>% 
+  flextable::valign(valign = "top", part = "all") %>% 
+  flextable::align(align="left", part="all") %>% 
+  flextable::width(width=6) %>% 
+  flextable::autofit()
 
-```{r message=FALSE, warning=FALSE}
-effects %>% 
-  pander::pandoc.table(style="simple", justify="left", split.tables=400) 
+  png(filename=file.path(tablesdir, "thirdeffect.png"),
+      width=6, height=3, units="in", res=300)
+  plot(ft, fit = "fixed", just = "left")
+  invisible(dev.off())
 
+  knitr::include_graphics(file.path(tablesdir, "thirdeffect.png"))
+  
 ```
 
 
@@ -2184,7 +2234,7 @@ for (i in 1:nrow(x)) {
 
 **Final GLM Models for to flyshoot fishery**
 
-The standardized CPUE for the different species, taking into account the significant factors per species, are shown in the figure below. If this figure is compared to `r fig_nums("cpue1", display="cite")`, it becomes clear that standardized CPUE may differ from raw CPUE. For the four main target species in the overall flyshoot fishery (i.e. the top row in the figure), catch rates for European squid and Surmullet have decreased in the recent period. Catch rates for mackerel have decreased. Catch rates for Common cuttlefish can be ignored here, as they are almost absent from the catches.  
+The standardized CPUE for the different species, taking into account the significant factors per species, are shown in the figure below. If this figure is compared to `r fig_nums("cpue1", display="cite")`, it becomes clear that standardized CPUE may differ from raw CPUE. For the four main target species in the overall flyshoot fishery (i.e. the top row in the figure), catch rates for European squid and Surmullet have decreased in the recent period whereas the catch rates for mackerel and Common cuttlefish have increased.  
 
 For several species, we can observe a general decline in catch rates. Those species are mostly non-target species for the flyshoot fishery. 
 
@@ -2312,9 +2362,9 @@ _`r fig_nums("timetrends")`_
 
 **Observed vs. predicted catch rates**
 
-The observed vs. predicted catch rates are a diagnostic to assess how well the GLM model is fitting to the data. Ideally, one would expect the values to be close to the 1:1 line (blue dotted line). The explained deviance (blue text) describes the proportion of the deviance that is explained by the model. The three main target species (SQR, MUR, MAC) have explained deviances of 68, 44 and 45% respectively. This indicates that the GLM models can provide a reasonable explanation of the variance in the data. 
+The observed vs. predicted catch rates are a diagnostic to assess how well the GLM model is fitting to the data. Ideally, one would expect the values to be close to the 1:1 line (blue dotted line). The explained deviance (blue text) describes the proportion of the deviance that is explained by the model. The four main target species (SQR, MUR, CTC, MAC) have explained deviances of 51, 39, 66 and 39% respectively. This indicates that the GLM models can provide some explanation of the variance in the data. 
 
-For several species, we observe some overprediction of catch rates at lower values, for example, for red mullet (surmullet MUR), mackerel and horse mackerel. It is not well understood what drivers lead to these patterns. 
+For most species, we observe some overprediction of catch rates at lower values, for example, for red mullet (surmullet MUR), mackerel and horse mackerel. It is not well understood what drivers lead to these patterns. 
 
 Overall, the patterns observed in CPUE for the species shown, make it difficult to interpret the CPUE as indicator of abundance, because the targeting behaviour and the quota limitations may affect the catch rates in different ways in different years. 
 
@@ -2376,21 +2426,20 @@ The objective of this work was to analyse the electronic logbook data of the Jac
 
 An overview of the available data has been presented in the Material and Methods section. The data was available for the vessels SCH65, SL9, SCH135, Z99 and years 2012-2022. For the years 2012-2016, data was only available for two vessels (SCH65 and SL9), from 2017 onwards, data became available for the SCH135 and the Z99 was added in 2022.. The data coverage is not complete. The year 2012 is only covered for part of the year and the data for 2015-2017 is also incomplete for some vessels. 
 
-For each year, the proportion of weeks targeting a certain species was calculated. The target species of a vessel-year-week combination was derived by determining the species with the highest revenue for each vessel-year-week combination. Then the number of vessel-year-week-target combinations were counted and expresses as percentages per year and species. Surmullet (MUR), European Squid (SQR) and mackerel (MAC) have been the main target species during the period considered. The number of Tub gurnard targeted weeks has declined over time.
+For each year, the proportion of weeks targeting a certain species was calculated. The target species of a vessel-year-week combination was derived by determining the species with the highest revenue for each vessel-year-week combination. Then the number of vessel-year-week-target combinations were counted and expresses as percentages per year and species. European Squid (SQR), Surmullet (MUR) and mackerel (MAC) have been the main target species during the period considered, with Cuttlefish (CTC) increasing in importance from 2018 onwards. The number of Tub gurnard targeted weeks has declined over time. 
 
 The analytical approach to estimating catch rates (Catch per Unit of Effort CPUE) was initiated by transforming all the catch (=landing) data to the total landings per vessel, per species, per rectangle and per week. In addition we counted the number of fishing days per vessel, per rectangle and per week. Catch rate is then expressed as the catch divided by effort.
 
 Modelling was based on Generalized Linear Model (GLM) tools, whereby the predicted variable is the catch per week, effort was included as a log-link function and year as used as the main factor to describe the time trend. Then we explored other potential explanatory factors (vessel, latitude, longitude, rectangle, quarter and target species) by sequentially adding different factors. We explored the AIC criteria for the different factors for each of the species and selected those factors by species that had the lowest AIC. Then we repeated this process for the second and third explanatory factor. In all cases we evaluated whether the factor contributed significantly (<5%) to the model.
 
-The standardized CPUE for the different species, taking into account the significant factors per species, are shown in `r fig_nums("timetrends", display="cite")`. If that figure is compared to `r fig_nums("cpue1", display="cite")` with the raw catch rates, it is clear that standardized CPUE may differ from raw CPUE. For the  main target species in the overall flyshoot fishery (i.e. the top row in the figure), catch rates for European squid and Surmullet have decreased in the recent period. Catch rates for mackerel have decreased. For several species, we can observe a general decline in catch rates. Those species are mostly non-target species for the flyshoot fishery.
+The standardized CPUE for the different species, taking into account the significant factors per species, are shown in `r fig_nums("timetrends", display="cite")`. If that figure is compared to `r fig_nums("cpue1", display="cite")` with the raw catch rates, it is clear that standardized CPUE may differ from raw CPUE. For the  main target species in the overall flyshoot fishery (i.e. the top row in the figure), catch rates for European squid and Surmullet have decreased in the recent period whereas the catch rates for mackerel and Common cuttlefish have increased. For several species, we can observe a general decline in catch rates. Those species are mostly non-target species for the flyshoot fishery.
 
-
-The observed vs. predicted catch rates are a diagnostic to assess how well the GLM model is fitting to the data. Ideally, one would expect the values to be close to the 1:1 line (blue dotted line). The explained deviance (blue text) describes the proportion of the deviance that is explained by the model. The three main target species (SQR, MUR, MAC) have explained deviances of 68, 44 and 45% respectively. This indicates that the GLM models can provide a reasonable explanation of the variance in the data.
+The observed vs. predicted catch rates are a diagnostic to assess how well the GLM model is fitting to the data. Ideally, one would expect the values to be close to the 1:1 line (blue dotted line). The explained deviance (blue text) describes the proportion of the deviance that is explained by the model. The four main target species (SQR, MUR, CTC, MAC) have explained deviances of 51, 39, 66 and 39% respectively. This indicates that the GLM models can provide some explanation of the variance in the data.
 
 For several species, we observe some overprediction of catch rates at lower values, for example, for red mullet (surmullet MUR), mackerel and horse mackerel. It is not well understood what drivers lead to these patterns.
 Overall, the patterns observed in CPUE for the species shown, make it difficult to interpret the CPUE as indicator of abundance, because the targeting behaviour and the quota limitations may affect the catch rates in different ways in different years.
 
-However, the information from the logbooks does provide usable information on the spatial distribution of the fishery and the catches by species. For example, in `r fig_nums("catch6", display="cite")`, we can see that the spatial distribution of mackerel catches are quite distinct from most other species, thereby indicating that the CPUE for mackerel may a very different from other species.  
+However, the information from the logbooks does provide usable information on the spatial distribution of the fishery and the catches by species. For example, in `r fig_nums("catch6", display="cite")`, we can see that the spatial distribution of cuttlefish catches are quite distinct from most other species, thereby indicating that the CPUE for cuttlefish may a very different from other species.  
 
 An important consideration for the overall analysis, is that the logbook information only contains data on the landed catch. This is in fact a severe limitation on the possibility to interpret the results as indicators of abundance because an unknown part of the catch may not have been landed. 
 
@@ -2671,8 +2720,6 @@ sp3 <- paste(top$englishname[i], top$dutchname[i], top$species[i], sep=" / ")
 ```
 
 **`r sp3`**
-
-Catch rates of red mullet are highest in the eastern Channel area. High catch rates were observed in 2015 and 2020. The trend from the GLM modelled catch rates show a maximum in 2015 and 2016, with lower values thereafter. Catch rates in 2022 are still double the catch rates of 2012. The fit of the GLM model is problematic for the lower catch rates where the model overpredicts the values. It is unknown what is causing this behaviour. 
 
 ```{r echo=FALSE, fig.asp=1.0, message=FALSE, warning=FALSE, comment=NA}
 
