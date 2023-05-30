@@ -98,7 +98,7 @@ elog   <-
   mutate(species = toupper(species))  %>% 
   
   # remove 348 records without rectangle information
-  drop_na(rect) %>% 
+  drop_na(rect, lat, lon) %>% 
   
   sf::st_as_sf(coords = c("lon", "lat"), crs = 4326, remove = FALSE)  %>%  
   
