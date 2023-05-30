@@ -22,9 +22,9 @@ rm(list=ls())
 # Select vessel and trip
 # ------------------------------------------------------------
 
-setvessel<-"SCH135"   ;settrip<-"2023332" ;
-# setvessel<-"SCH65"   ;settrip<-"2023250" ;
-# setvessel<-"SL9"   ;settrip<-c("2023421") ;
+setvessel<-"SCH135"   ;settrip<-c("2023334", "2023335") ;
+# setvessel<-"SCH65"   ;settrip<-c("2023251", "2023252") ;
+# setvessel<-"SL9"   ;settrip<-c("2023422","2023423") ;
 # setvessel<-"Z99"   ;settrip<-"2023074" ;
 
 # ------------------------------------------------------------
