@@ -22,10 +22,10 @@ rm(list=ls())
 # Select vessel and trip
 # ------------------------------------------------------------
 
-setvessel<-"SCH135"   ;settrip<-c("2023334", "2023335") ;
-# setvessel<-"SCH65"   ;settrip<-c("2023251", "2023252") ;
-# setvessel<-"SL9"   ;settrip<-c("2023422","2023423") ;
-# setvessel<-"Z99"   ;settrip<-"2023074" ;
+# setvessel<-"SCH135"   ;settrip<-c("2023341") ;
+setvessel<-"SCH65"   ;settrip<-c("2023255") ;
+# setvessel<-"SL9"   ;settrip<-c("2023428","2023429","2023430") ;
+# setvessel<-c("Z99", "SCH99")   ;settrip<-"2023003" ;
 
 # ------------------------------------------------------------
 
@@ -582,7 +582,7 @@ _`r fig_nums("catchperhaul")`_
 <!-- Figure: vangst per soort en klasse --------------------------- -->
 <!-- ########################################################################################## -->
 
-```{r vangstpersoortenklasse, echo=FALSE, fig.asp=1.0, fig.align="center", message=FALSE, warning=FALSE}
+```{r vangstpersoortenklasse, echo=FALSE, fig.asp=1.2, fig.align="center", message=FALSE, warning=FALSE}
 
 nspecies <- 10
 
@@ -636,7 +636,87 @@ _`r fig_nums("totalcatchperclass")`_
 <!-- Figure: aanvoer en discards                                                                -->
 <!-- ########################################################################################## -->
 
-```{r aanvoerendiscards, eval=FALSE, fig.align="center", fig.asp=1.2, message=FALSE, warning=FALSE, include=FALSE}
+```{r aanvoerendiscards, echo=FALSE, fig.align="center", fig.asp=1.2, message=FALSE, warning=FALSE}
+
+print_option <- FALSE
+
+# create list of catch by species by haul. From hm, or sph or else species = "oth"
+if (nrow(m) > 0 & sum(!is.na(h$totalcatch))>0) {
+
+  print_option <- TRUE
+
+  fig_nums(
+    name    = "aanvoerentotalevangst", level   = 1, display = FALSE,
+    caption = "Vergelijking van aanvoer (Marelec weegschaal) en totale vangst (marelec meetpen). Het percentage is het berekende percentage discards per trek")
+
+  t1 <-
+    h %>%
+    filter(totalcatch>0) %>% 
+    group_by(vessel, trip, haul) %>%
+    summarise(data = sum(totalcatch, na.rm=TRUE)) %>%
+    mutate(variable = "totaal")
+
+  t2 <-
+    m %>%
+    filter(haul %in% t1$haul) %>%
+    group_by(vessel, trip, haul) %>%
+    summarise(data = sum(gewicht, na.rm=TRUE)) %>%
+    mutate(variable = "aanvoer")
+
+  tt <-
+    bind_rows(t1, t2) %>% 
+    arrange(vessel, trip, haul) %>% 
+    tidyr::pivot_wider(names_from = variable, values_from = data) %>% 
+    mutate(aanvoer = ifelse(is.na(aanvoer),0,aanvoer)) %>% 
+    mutate(perc_discards = round((totaal - aanvoer) / totaal, digits=2)) %>% 
+    mutate(perc_discards = scales::percent(perc_discards, accuracy=1))
+
+  tt2 <-
+    tt %>% 
+    ungroup() %>% 
+    summarise(
+      aanvoer = sum(aanvoer),
+      totaal  = sum(totaal)
+    ) %>% 
+    mutate(perc_discards = round((totaal - aanvoer) / totaal, digits=2)) %>% 
+    mutate(perc_discards = scales::percent(perc_discards, accuracy=1))
+    
+  p <-
+    t1 %>%
+    ggplot(aes(x=haul, y=data)) +
+    theme_publication() +
+    theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+    geom_bar(aes(fill="totale vangst"),
+             stat="identity", alpha=0.5, width=0.5, just=0.8) +
+    geom_bar(data=t2,
+             aes(fill="aanvoer"),
+             stat="identity", alpha=0.5, width=0.5, just=0.2) +
+    geom_text(data=tt,
+              aes(x=haul, y=totaal, label=perc_discards),
+              inherit.aes = FALSE, hjust=0, vjust=1, size=3) +
+    geom_text(data=tt2,
+              aes(x = min(t1$haul), label=paste("Overall discards", perc_discards,"    ")),
+              y = Inf,  hjust=1, vjust=1, nudge_y=-1, inherit.aes = FALSE, size=4, fontface="bold") +
+    scale_fill_manual(name='',
+                     breaks=c('aanvoer', 'totale vangst'),
+                     values=c('aanvoer'='blue', 'totale vangst'='red')) +
+    # scale_x_continuous(breaks=seq(1,max(t1$haul, m$haul, na.rm=TRUE), 1)) +
+    labs(x="trek", y="kg", title="totale vangst en aanvoer per trek") +
+    coord_flip() +
+    scale_x_reverse(breaks=seq(min(t1$haul), max(t1$haul), 1)) +
+    facet_wrap(~trip, ncol=1)
+
+  p
+
+
+}
+
+my_caption   <- ifelse(print_option, paste0("_", fig_nums("aanvoerentotalevangst"),"_"), "")
+
+
+
+
+
 
 # print_option <- FALSE
 # 
@@ -651,22 +731,25 @@ _`r fig_nums("totalcatchperclass")`_
 #   
 #   t1 <-
 #     h %>% 
-#     group_by(vessel, trip, haul) %>% 
+#     filter(totalcatch > 0) %>% 
+#     group_by(vessel, trip, date) %>% 
 #     summarise(data = sum(totalcatch, na.rm=TRUE)) %>% 
 #     mutate(variable = "totale vangst")
 # 
 #   t2 <-
 #     m %>% 
-#     group_by(vessel, trip, haul) %>% 
+#     mutate(date = as.Date(datetime)) %>% 
+#     filter(date %in% t1$date) %>% 
+#     group_by(vessel, trip, date) %>% 
 #     summarise(data = sum(gewicht, na.rm=TRUE)) %>% 
 #     mutate(variable = "aanvoer")
 #     
 # 
 #   p <-
 #     t1 %>% 
-#     ggplot(aes(x=haul, y=data)) +
+#     ggplot(aes(x=date, y=data)) +
 #     theme_publication() +
-#     theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+#     # theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
 #     geom_bar(aes(fill="totale vangst"),
 #              stat="identity", alpha=0.5, width=0.5, just=0.8) +
 #     geom_bar(data=t2,
@@ -675,9 +758,9 @@ _`r fig_nums("totalcatchperclass")`_
 #     scale_fill_manual(name='',
 #                      breaks=c('aanvoer', 'totale vangst'),
 #                      values=c('aanvoer'='blue', 'totale vangst'='red')) +
-#     scale_x_continuous(breaks=seq(1,max(t1$haul, m$haul, na.rm=TRUE), 1)) +
+#     # scale_x_continuous(breaks=seq(1,max(t1$haul, m$haul, na.rm=TRUE), 1)) +
 #     labs(x="trek", y="kg", title="totale vangst en aanvoer per trek") +
-#     facet_wrap(~trip, ncol=1)
+#     facet_wrap(~trip, ncol=1, scales = "free")
 #     
 #   p
 #   
@@ -685,55 +768,6 @@ _`r fig_nums("totalcatchperclass")`_
 # }
 # 
 # my_caption   <- ifelse(print_option, paste0("_", fig_nums("aanvoerentotalevangst"),"_"), "")
-
-print_option <- FALSE
-
-# create list of catch by species by haul. From hm, or sph or else species = "oth"
-if (nrow(m) > 0 & sum(!is.na(h$totalcatch))>0) {
-
-  print_option <- TRUE
-  
-  fig_nums(
-    name    = "aanvoerentotalevangst", level   = 1, display = FALSE,
-    caption = "Vergelijking van aanvoer (Marelec) en totale vangst (schatting)")
-  
-  t1 <-
-    h %>% 
-    group_by(vessel, trip, date) %>% 
-    summarise(data = sum(totalcatch, na.rm=TRUE)) %>% 
-    mutate(variable = "totale vangst")
-
-  t2 <-
-    m %>% 
-    mutate(date = as.Date(datetime)) %>% 
-    group_by(vessel, trip, date) %>% 
-    summarise(data = sum(gewicht, na.rm=TRUE)) %>% 
-    mutate(variable = "aanvoer")
-    
-
-  p <-
-    t1 %>% 
-    ggplot(aes(x=date, y=data)) +
-    theme_publication() +
-    # theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
-    geom_bar(aes(fill="totale vangst"),
-             stat="identity", alpha=0.5, width=0.5, just=0.8) +
-    geom_bar(data=t2,
-             aes(fill="aanvoer"),
-             stat="identity", alpha=0.5, width=0.5, just=0.2) +
-    scale_fill_manual(name='',
-                     breaks=c('aanvoer', 'totale vangst'),
-                     values=c('aanvoer'='blue', 'totale vangst'='red')) +
-    # scale_x_continuous(breaks=seq(1,max(t1$haul, m$haul, na.rm=TRUE), 1)) +
-    labs(x="trek", y="kg", title="totale vangst en aanvoer per trek") +
-    facet_wrap(~trip, ncol=1, scales = "free")
-    
-  p
-  
-  
-}
-
-my_caption   <- ifelse(print_option, paste0("_", fig_nums("aanvoerentotalevangst"),"_"), "")
 
 
 ```
@@ -751,7 +785,7 @@ if (nrow(m) > 0) {
   
   s <-
     elog %>% 
-    filter(vessel == setvessel, year == 2023) %>% 
+    filter(vessel %in% setvessel, year == 2023) %>% 
     
     group_by(species) %>% 
     summarise(weight = sum(weight, na.rm=TRUE)) %>% 
@@ -767,7 +801,7 @@ if (nrow(m) > 0) {
 
   t <-
     elog %>% 
-    filter(vessel == setvessel, year == 2023) %>% 
+    filter(vessel %in% setvessel, year == 2023) %>% 
     
     mutate(species = ifelse(species %in% s$species, species, "ZZZ")) %>%
 
@@ -791,7 +825,7 @@ if (nrow(m) > 0) {
     theme(legend.position = "right", legend.direction = "vertical") +
     geom_bar(aes(fill=english_species), 
              stat="identity", position = position_stack(reverse = TRUE), colour="lightgray", linewidth=0.3) +
-    labs(y="aanvoer (kg)", title=paste(setvessel, "aanvoer per soort en week"), fill="") +
+    labs(y="aanvoer (kg)", title=paste(paste(setvessel,collapse="/"), "aanvoer per soort en week"), fill="") +
     scale_fill_brewer(palette="Paired")
   
 }

@@ -75,21 +75,21 @@ load(file.path(onedrive, "trip.RData"))
 # trip <- trip %>% filter(vessel!="SCH153") 
 # save(trip,  file = file.path(onedrive,  "trip.RData"))
 
-haul %>% filter(vessel=="Z99") %>% group_by(vessel, trip) %>% summarise(n=n())
+# haul %>% filter(vessel=="Z99") %>% group_by(vessel, trip) %>% summarise(n=n())
 
-haul <- haul %>% mutate(trip = ifelse(vessel=="SL9"& trip=="2023420", "2023421",trip)) # %>% View()
-trip <- trip %>% mutate(trip = ifelse(vessel=="SL9"& trip=="2023320", "2023421",trip))
+# haul <- haul %>% mutate(trip = ifelse(vessel=="SL9"& trip=="2023420", "2023421",trip)) # %>% View()
+# trip <- trip %>% mutate(trip = ifelse(vessel=="SL9"& trip=="2023320", "2023421",trip))
 
-haul <- haul %>% mutate(trip = ifelse(vessel=="SL9"& trip=="2023418", "2023417",trip))
-trip <- trip %>% mutate(trip = ifelse(vessel=="SL9"& trip=="2023418", "2023417",trip))
-kisten <- kisten %>% mutate(trip = ifelse(vessel=="SL9"& trip=="2023418", "2023417",trip))
-elog <- elog %>% mutate(trip = ifelse(vessel=="SL9"& trip=="2023418", "2023417",trip)) 
+# haul <- haul %>% mutate(trip = ifelse(vessel=="SL9"& trip=="2023418", "2023417",trip))
+# trip <- trip %>% mutate(trip = ifelse(vessel=="SL9"& trip=="2023418", "2023417",trip))
+# kisten <- kisten %>% mutate(trip = ifelse(vessel=="SL9"& trip=="2023418", "2023417",trip))
+# elog <- elog %>% mutate(trip = ifelse(vessel=="SL9"& trip=="2023418", "2023417",trip)) 
 
-elog <-
-  elog %>% 
-  filter(!(vessel=="SL9" & year == 2018 &  week == 52 & source=="m-catch")) %>% 
-  filter(!(vessel=="SCH135" & year == 2019 &  week == 1 & source=="m-catch")) %>% 
-  filter(!(vessel=="SL65" & year == 2018 &  week == 5 & source=="m-catch")) 
+# elog <-
+#   elog %>% 
+#   filter(!(vessel=="SL9" & year == 2018 &  week == 52 & source=="m-catch")) %>% 
+#   filter(!(vessel=="SCH135" & year == 2019 &  week == 1 & source=="m-catch")) %>% 
+#   filter(!(vessel=="SL65" & year == 2018 &  week == 5 & source=="m-catch")) 
   
 
 # save(haul,   file = file.path(onedrive, "haul.RData"))
@@ -115,141 +115,141 @@ elog <-
 # --------------------------------------------------------------------------------
 # Replacing M-Catch elog data
 # --------------------------------------------------------------------------------
-tripdir    = "C:/Users/MartinPastoors/Martin Pastoors/FLYSHOOT - General/tripdata/m-catch"
-
-filelist <- list.files(
-  path=tripdir,
-  pattern="m-catch export",
-  full.names = TRUE)
-
-i <- 1
-new  <- data.frame(stringsAsFactors = FALSE)
-for (i in 1:length(filelist)) {
-  print(paste(i, filelist[[i]]))
-  
-  new  <-
-    bind_rows(
-      new,
-      readxl::read_excel(filelist[i],
-                         sheet="catch details table", 
-                         col_names=TRUE, 
-                         col_types="text",
-                         .name_repair =  ~make.names(., unique = TRUE))  %>% 
-        data.frame() %>% 
-        lowcase() %>% 
-        rename(
-          rect         = icesrectangle,
-          catchdate    = activitydate,
-          weight       = catchweight,
-          economiczone = economicalzone,
-          species      = fishspecie,
-          vesselnumber = vesselhullnumber
-        ) %>% 
-        # mutate(catchdate       = as.Date(as.numeric(catchdate), origin="1899-12-30")) %>% 
-        # mutate(arrivaldate     = as.Date(as.numeric(arrivaldate), origin="1899-12-30")) %>% 
-        mutate(file            = basename(filelist[i])) %>% 
-        mutate(vessel          = stringr::word(file, 3)) %>% 
-        mutate(source          = "m-catch") %>% 
-        
-        mutate(across (c("meshsize"), as.integer)) %>%
-        mutate(across (c("lat","lon", "weight",
-                         "catchdate", "departuredate", "arrivaldate","landingdate"), as.numeric)) %>%
-        mutate(across(c("catchdate", "departuredate", "arrivaldate","landingdate"), ~excel_timezone_to_utc(.,"UTC"))) %>% 
-        mutate(month   = lubridate::month(catchdate),
-               quarter = lubridate::quarter(catchdate),
-               week    = lubridate::week(catchdate),
-               yday    = lubridate::yday(catchdate),
-               year    = lubridate::year(catchdate),
-               date    = as.Date(catchdate)) %>% 
-        mutate(
-          tmp = lat,
-          lat = lon,
-          lon = tmp
-        ) %>% 
-      dplyr::select(-c(activitydayofyear,
-                         activitydayofyearbst,
-                         activitydayofyearcet,
-                         catchamount,
-                         discard,
-                         entryid,
-                         faoarea, faodivision, faosubarea, faosubdivision, faounit,
-                         gearactivity, gearamount, gearlength,
-                         juliandate,
-                         juvenile,
-                         tmp,
-                         tripid,
-                         vesselcallsign, vesselcfr, vesselflagstate, vesselgbrrss,
-                         vesselid, vesselname,
-                         zoneactivity))
-    )
-}
-
-janitor::compare_df_cols(t, new)
-skimr::skim(elog)
-t %>% distinct(lat) %>% View()
-
-tmp <-
-  bind_rows(t, new)
-
-tmp %>% 
-  ggplot(aes(x=lon, y=lat)) +
-  theme_publication() +
-  geom_point(aes(colour=source)) +
-  facet_wrap(~year)
-
-t <-
-  elog %>% 
-  filter(!(source=="m-catch"))
-
-  group_by(vessel, year, source) %>% 
-  distinct(week) %>% 
-  group_by(vessel, year, source) %>% 
-  summarise(minweek = min(week), maxweek=max(week))
-
-# plot of elog data by year
-elog %>% 
-  left_join(rect_df, by="rect") %>%
-  mutate(lat = ifelse(is.na(lat.x), lat.y, lat.x),
-         lon = ifelse(is.na(lon.x), lon.y, lon.x)) %>% 
-  ggplot(aes(x=lon, y=lat)) + theme_publication() +
-  geom_sf(data=world_mr_sf, font = "Arial", inherit.aes = FALSE) +
-  coord_sf(xlim=c(-10,10), ylim=c(46,57)) + 
-  geom_point(aes(colour=source)) +
-  facet_wrap(~year)
-
-# plot of pefa 2023 elog data by date
-elog %>% filter(date == dmy("17-03-2023")) %>% View()
-elog %>% 
-  left_join(rect_df, by="rect") %>%
-  filter(year == 2023, source=="pefa") %>% 
-  mutate(lat = ifelse(is.na(lat.x), lat.y, lat.x),
-         lon = ifelse(is.na(lon.x), lon.y, lon.x)) %>% 
-  filter(month==3, lon > 0, lat < 50) %>% 
-  View()
-
-  ggplot(aes(x=lon, y=lat)) + theme_publication() + theme(legend.position = "none") +
-  geom_sf(data=world_mr_sf, font = "Arial", inherit.aes = FALSE) +
-  coord_sf(xlim=c(-10,10), ylim=c(46,57)) + 
-  geom_point(aes(colour=as.character(date))) +
-  facet_wrap(~month)
-
-  group_by(vessel, year, source, week) %>% 
-  summarise(ndays = n_distinct(date)) %>% 
-  group_by(vessel, year, source) %>% 
-  tidyr::pivot_wider(names_from = week, values_from = ndays, values_fill = 0) %>% 
-  tidyr::pivot_longer(names_to = "week", values_to = "ndays", 4:56) %>% 
-  mutate(week= as.numeric(week)) %>% 
-  
-  # check if in applicable week
-  left_join(elog_weeks, by=c("vessel","year","source")) %>% 
-  filter(week >= minweek, week <= maxweek) %>% 
-  
-  ggplot(aes(x=week, y=ndays)) +
-  theme_publication() +
-  geom_point(aes(colour=source), size=0.75, shape=1) +
-  expand_limits(y=0) +
-  labs(x="weeknummer", y="visdagen per week", title="Aantal visdagen per week") +
-  facet_grid(vessel~year)
+# tripdir    = "C:/Users/MartinPastoors/Martin Pastoors/FLYSHOOT - General/tripdata/m-catch"
+# 
+# filelist <- list.files(
+#   path=tripdir,
+#   pattern="m-catch export",
+#   full.names = TRUE)
+# 
+# i <- 1
+# new  <- data.frame(stringsAsFactors = FALSE)
+# for (i in 1:length(filelist)) {
+#   print(paste(i, filelist[[i]]))
+#   
+#   new  <-
+#     bind_rows(
+#       new,
+#       readxl::read_excel(filelist[i],
+#                          sheet="catch details table", 
+#                          col_names=TRUE, 
+#                          col_types="text",
+#                          .name_repair =  ~make.names(., unique = TRUE))  %>% 
+#         data.frame() %>% 
+#         lowcase() %>% 
+#         rename(
+#           rect         = icesrectangle,
+#           catchdate    = activitydate,
+#           weight       = catchweight,
+#           economiczone = economicalzone,
+#           species      = fishspecie,
+#           vesselnumber = vesselhullnumber
+#         ) %>% 
+#         # mutate(catchdate       = as.Date(as.numeric(catchdate), origin="1899-12-30")) %>% 
+#         # mutate(arrivaldate     = as.Date(as.numeric(arrivaldate), origin="1899-12-30")) %>% 
+#         mutate(file            = basename(filelist[i])) %>% 
+#         mutate(vessel          = stringr::word(file, 3)) %>% 
+#         mutate(source          = "m-catch") %>% 
+#         
+#         mutate(across (c("meshsize"), as.integer)) %>%
+#         mutate(across (c("lat","lon", "weight",
+#                          "catchdate", "departuredate", "arrivaldate","landingdate"), as.numeric)) %>%
+#         mutate(across(c("catchdate", "departuredate", "arrivaldate","landingdate"), ~excel_timezone_to_utc(.,"UTC"))) %>% 
+#         mutate(month   = lubridate::month(catchdate),
+#                quarter = lubridate::quarter(catchdate),
+#                week    = lubridate::week(catchdate),
+#                yday    = lubridate::yday(catchdate),
+#                year    = lubridate::year(catchdate),
+#                date    = as.Date(catchdate)) %>% 
+#         mutate(
+#           tmp = lat,
+#           lat = lon,
+#           lon = tmp
+#         ) %>% 
+#       dplyr::select(-c(activitydayofyear,
+#                          activitydayofyearbst,
+#                          activitydayofyearcet,
+#                          catchamount,
+#                          discard,
+#                          entryid,
+#                          faoarea, faodivision, faosubarea, faosubdivision, faounit,
+#                          gearactivity, gearamount, gearlength,
+#                          juliandate,
+#                          juvenile,
+#                          tmp,
+#                          tripid,
+#                          vesselcallsign, vesselcfr, vesselflagstate, vesselgbrrss,
+#                          vesselid, vesselname,
+#                          zoneactivity))
+#     )
+# }
+# 
+# janitor::compare_df_cols(t, new)
+# skimr::skim(elog)
+# t %>% distinct(lat) %>% View()
+# 
+# tmp <-
+#   bind_rows(t, new)
+# 
+# tmp %>% 
+#   ggplot(aes(x=lon, y=lat)) +
+#   theme_publication() +
+#   geom_point(aes(colour=source)) +
+#   facet_wrap(~year)
+# 
+# t <-
+#   elog %>% 
+#   filter(!(source=="m-catch"))
+# 
+#   group_by(vessel, year, source) %>% 
+#   distinct(week) %>% 
+#   group_by(vessel, year, source) %>% 
+#   summarise(minweek = min(week), maxweek=max(week))
+# 
+# # plot of elog data by year
+# elog %>% 
+#   left_join(rect_df, by="rect") %>%
+#   mutate(lat = ifelse(is.na(lat.x), lat.y, lat.x),
+#          lon = ifelse(is.na(lon.x), lon.y, lon.x)) %>% 
+#   ggplot(aes(x=lon, y=lat)) + theme_publication() +
+#   geom_sf(data=world_mr_sf, font = "Arial", inherit.aes = FALSE) +
+#   coord_sf(xlim=c(-10,10), ylim=c(46,57)) + 
+#   geom_point(aes(colour=source)) +
+#   facet_wrap(~year)
+# 
+# # plot of pefa 2023 elog data by date
+# elog %>% filter(date == dmy("17-03-2023")) %>% View()
+# elog %>% 
+#   left_join(rect_df, by="rect") %>%
+#   filter(year == 2023, source=="pefa") %>% 
+#   mutate(lat = ifelse(is.na(lat.x), lat.y, lat.x),
+#          lon = ifelse(is.na(lon.x), lon.y, lon.x)) %>% 
+#   filter(month==3, lon > 0, lat < 50) %>% 
+#   View()
+# 
+#   ggplot(aes(x=lon, y=lat)) + theme_publication() + theme(legend.position = "none") +
+#   geom_sf(data=world_mr_sf, font = "Arial", inherit.aes = FALSE) +
+#   coord_sf(xlim=c(-10,10), ylim=c(46,57)) + 
+#   geom_point(aes(colour=as.character(date))) +
+#   facet_wrap(~month)
+# 
+#   group_by(vessel, year, source, week) %>% 
+#   summarise(ndays = n_distinct(date)) %>% 
+#   group_by(vessel, year, source) %>% 
+#   tidyr::pivot_wider(names_from = week, values_from = ndays, values_fill = 0) %>% 
+#   tidyr::pivot_longer(names_to = "week", values_to = "ndays", 4:56) %>% 
+#   mutate(week= as.numeric(week)) %>% 
+#   
+#   # check if in applicable week
+#   left_join(elog_weeks, by=c("vessel","year","source")) %>% 
+#   filter(week >= minweek, week <= maxweek) %>% 
+#   
+#   ggplot(aes(x=week, y=ndays)) +
+#   theme_publication() +
+#   geom_point(aes(colour=source), size=0.75, shape=1) +
+#   expand_limits(y=0) +
+#   labs(x="weeknummer", y="visdagen per week", title="Aantal visdagen per week") +
+#   facet_grid(vessel~year)
 
 
 
@@ -258,80 +258,167 @@ elog %>%
 # fixing kisten problem
 # --------------------------------------------------------------------------------
 
-tmp <-
-  kisten %>% 
-  filter(trip=="2023409-412") %>% 
-  distinct(datetime, .keep_all = TRUE) 
-
-kisten <-
-  kisten %>% 
-  filter(trip !="2023409-412") %>% 
-  bind_rows(tmp)
-
-save(kisten,  file = file.path(onedrive, "kisten.RData"))  
+# tmp <-
+#   kisten %>% 
+#   filter(trip=="2023409-412") %>% 
+#   distinct(datetime, .keep_all = TRUE) 
+# 
+# kisten <-
+#   kisten %>% 
+#   filter(trip !="2023409-412") %>% 
+#   bind_rows(tmp)
+# 
+# save(kisten,  file = file.path(onedrive, "kisten.RData"))  
 
 # --------------------------------------------------------------------------------
 # Fix linking between marelec and hauls
 # --------------------------------------------------------------------------------
-kisten <-
-  kisten %>% 
-  mutate(haul = ifelse(vessel == "SCH135" & trip=="2023321" & haul >= 28, haul+1, haul))
-
-save(kisten, file=file.path(onedrive, "kisten.RData"))
+# kisten <-
+#   kisten %>% 
+#   mutate(haul = ifelse(vessel == "SCH135" & trip=="2023321" & haul >= 28, haul+1, haul))
+# 
+# save(kisten, file=file.path(onedrive, "kisten.RData"))
 
 # --------------------------------------------------------------------------------
 # Redoing link between marelec and hauls
 # --------------------------------------------------------------------------------
+
+# mytrip <- "2023002"
+# 
+# h <-
+#   haul %>% 
+#   # filter(date >= lubridate::dmy("9/1/2023")) %>% 
+#   filter(trip==mytrip) %>% 
+#   # group_by(vessel, trip) %>% 
+#   # mutate(nexthaultime = lead(haultime)) %>% 
+#   # mutate(nexthaultime = ifelse(is.na(nexthaultime), lubridate::dmy_hm("31/12/2023 23:59"), nexthaultime)) %>% 
+#   # mutate(nexthaultime = as_datetime(nexthaultime))
+# 
+# m <- 
+#   kisten %>% 
+#   filter(trip == mytrip) %>% 
+#   rename(haulm = haul, haul2m=haul2)
+#   # filter(datetime >= lubridate::dmy("9/1/2023")) %>% 
+#   # rename(haul2=haul)
+# 
+# h %>% 
+#   ggplot(aes(x=haultime, y=1)) +
+#   theme_publication() +
+#   geom_point(colour="red", size=3, shape=21) +
+#   geom_point(data=m, aes(x=datetime, y=1.02), colour="blue", size=1) +
+#   # geom_point(data=m, aes(x=datetime, y=0.8), colour="blue", size=1)
+#   expand_limits(y=0)
+# 
+# h %>% 
+#   ggplot(aes(x=haul, y=haulm)) +
+#   theme_publication() +
+#   geom_point(colour="red", size=3, shape=21) +
+#   geom_point(data=m, aes(x=datetime, y=1.02), colour="blue", size=1) +
+#   # geom_point(data=m, aes(x=datetime, y=0.8), colour="blue", size=1)
+#   expand_limits(y=0)
+# 
+# t <-
+#   sqldf::sqldf("select m.vessel, m.trip, m.lotnummer, m.soorten, m.maat, m.gewicht, m.datetime, 
+#   m.haul2, h.haul from m
+#                 join h on m.vessel   == h.vessel and
+#                           m.trip     == h.trip and
+#                           m.datetime >= h.haultime and
+#                           m.datetime <  h.nexthaultime") %>%
+#   as_tibble() 
+# 
+# 
+# kisten <-
+#   kisten %>% 
+#   rename(haul2=haul) %>% 
+#   left_join(dplyr::select(t,
+#                           vessel, trip, datetime, haul),
+#             by=c("vessel","trip", "datetime")) 
+# 
+# save(kisten,  file = file.path(onedrive, "kisten.RData"))  
+
+# --------------------------------------------------------------------------------
+# checking hauls in haul and kisten
+# --------------------------------------------------------------------------------
+
+mytrip <- c("2023003")
+
 h <-
   haul %>% 
-  # filter(date >= lubridate::dmy("9/1/2023")) %>% 
-  filter(trip=="2023239") 
-  # group_by(vessel, trip) %>% 
-  # mutate(nexthaultime = lead(haultime)) %>% 
-  # mutate(nexthaultime = ifelse(is.na(nexthaultime), lubridate::dmy_hm("31/12/2023 23:59"), nexthaultime)) %>% 
-  # mutate(nexthaultime = as_datetime(nexthaultime))
+  filter(trip %in% mytrip) %>% 
+  dplyr::select(vessel, trip, haul, date, shoottime, haultime) %>% 
+  mutate(haul = stringr::str_pad(haul, width=2, pad="0")) %>% 
+  mutate(shoottime = hour(shoottime) + (minute(shoottime) + second(shoottime)/60)/100 ) %>% 
+  mutate(haultime  = hour(haultime) + (minute(haultime) + second(haultime)/60)/100 ) %>% 
+  mutate(source="haul")
 
 m <- 
   kisten %>% 
-  filter(trip == "2023239") %>% 
-  rename(haulm = haul, haul2m=haul2)
-  # filter(datetime >= lubridate::dmy("9/1/2023")) %>% 
-  # rename(haul2=haul)
+  filter(trip %in% mytrip) %>% 
+  mutate(source="kisten") %>% 
+  mutate(haul = stringr::str_pad(haul, width=2, pad="0")) %>% 
+  mutate(date = as.Date(datetime)) %>% 
+  mutate(time = hour(datetime) + (minute(datetime) + second(datetime)/60)/100 ) 
+# mutate(time = hms(str_extract(datetime, "[0-9]{2}:[0-9]{2}:[0-9]{2}")))
+
+
+m1 <-
+  m %>% 
+  group_by(vessel, trip, haul) %>% 
+  filter(row_number()==1)
+
+coord_y_datetime <- function(xlim = NULL, ylim = NULL, expand = TRUE) {
+  if (!is.null(ylim)) {
+    ylim <- lubridate::as_datetime(ylim)
+  }
+  ggplot2::coord_cartesian(xlim = xlim, ylim = ylim, expand = expand)
+}
+
+coord_y_date <- function(xlim = NULL, ylim = NULL, expand = TRUE) {
+  if (!is.null(ylim)) {
+    ylim <- lubridate::as_date(ylim)
+  }
+  ggplot2::coord_cartesian(xlim = xlim, ylim = ylim, expand = expand)
+}
 
 h %>% 
-  ggplot(aes(x=haultime, y=1)) +
+  ggplot(aes(y=date)) +
   theme_publication() +
-  geom_point(colour="red", size=3, shape=21) +
-  geom_point(data=m, aes(x=datetime, y=1.02), colour="blue", size=1) +
-  # geom_point(data=m, aes(x=datetime, y=0.8), colour="blue", size=1)
-  expand_limits(y=0)
+  theme(legend.position = "none") +
+  # geom_point(colour="red", size=3, shape=21) +
+  ggalt::geom_dumbbell(aes(x = shoottime, xend = haultime, colour=haul),
+                       size=3, size_x = 1, size_xend = 1, alpha=0.5) +
+  geom_text(aes(x=shoottime, label=haul, colour=haul), 
+            vjust=1, nudge_y=0.02) +
+  
+  geom_point(data=m,
+             aes(x=time, y=date , colour=haul),
+             size=1, position = position_nudge(y = -0.05)) +
+  geom_line(data=m,
+             aes(x=time, y=date , colour=haul),
+             linewidth=0.5, position = position_nudge(y = -0.05)) +
+  geom_text(data=m1,
+            aes(x=time, y=date, label=haul, colour=haul),
+            vjust=0, nudge_y=-0.07, inherit.aes = FALSE) +
+  coord_y_date(ylim=c(max(m1$date),min(m1$date))) +
+  facet_wrap(~trip, scales="free_y")
 
-h %>% 
-  ggplot(aes(x=haul, y=haulm)) +
-  theme_publication() +
-  geom_point(colour="red", size=3, shape=21) +
-  geom_point(data=m, aes(x=datetime, y=1.02), colour="blue", size=1) +
-  # geom_point(data=m, aes(x=datetime, y=0.8), colour="blue", size=1)
-  expand_limits(y=0)
+# --------------------------------------------------------------------------------
+# Check overlaps between haultime and next shoottime
+# --------------------------------------------------------------------------------
 
 t <-
-  sqldf::sqldf("select m.vessel, m.trip, m.lotnummer, m.soorten, m.maat, m.gewicht, m.datetime, 
-  m.haul2, h.haul from m
-                join h on m.vessel   == h.vessel and
-                          m.trip     == h.trip and
-                          m.datetime >= h.haultime and
-                          m.datetime <  h.nexthaultime") %>%
-  as_tibble() 
+  haul %>%
+  filter(year == 2023) %>% 
+  group_by(vessel, trip) %>%
+  mutate(nextshoottime = lead(shoottime)) %>% 
+  filter(haultime > nextshoottime)
+
+haul %>% filter(vessel=="SCH65", trip=="2023243", haul %in% 11:13) %>% View()
+# t %>% mutate(diff=as.integer(difftime(nexthaultime, haultime, units="min"))) %>% pull(diff) %>% hist()
+t %>% mutate(diff=as.integer(difftime(nexthaultime, haultime, units="min"))) %>%
+  filter(diff < 60) %>% dplyr::select(vessel, trip, haul, shoottime, haultime, nexthaultime, diff) %>% View()
 
 
-kisten <-
-  kisten %>% 
-  rename(haul2=haul) %>% 
-  left_join(dplyr::select(t,
-                          vessel, trip, datetime, haul),
-            by=c("vessel","trip", "datetime")) 
-
-save(kisten,  file = file.path(onedrive, "kisten.RData"))  
 
 
 # --------------------------------------------------------------------------------
@@ -596,3 +683,47 @@ t %>%
   theme_publication() +
   geom_bar(stat="identity") + 
   facet_wrap(~trip_code, scales = "free_x")
+
+
+# --------------------------------------------------------------------------------
+# checking aanvoer en discards van Aravis
+# --------------------------------------------------------------------------------
+
+mytrip <- c("2023002", "2023003")
+
+h <-
+  haul %>% 
+  filter(trip %in% mytrip) %>% 
+  filter(!is.na(totalcatch)) %>% 
+  dplyr::select(vessel, trip, haul, date, shoottime, haultime, totalcatch) %>% 
+  mutate(haul = stringr::str_pad(haul, width=2, pad="0")) 
+
+m <- 
+  kisten %>% 
+  mutate(haul = stringr::str_pad(haul, width=2, pad="0")) %>% 
+  filter(paste(trip, haul) %in% paste(h$trip,h$haul)) %>% 
+  group_by(vessel, trip, haul) %>% 
+  summarise(landings=sum(gewicht, na.rm=TRUE))
+
+t <-
+  left_join(h, m, by=c("vessel","trip","haul")) %>% 
+  mutate(landings=ifelse(is.na(landings), 0, landings)) %>% 
+  mutate(discards = totalcatch - landings) %>% 
+  filter(discards >= 0) %>% 
+  ungroup()  
+  # summarise(
+  #   discards = median(discards),
+  #   landings = median(landings)
+  # )
+
+t %>% 
+  dplyr::select(-totalcatch) %>% 
+  tidyr::pivot_longer(names_to = "variable", values_to = "data",c("landings","discards")) %>% 
+  
+  ggplot(aes(x=data)) +
+  theme_publication() +
+  geom_histogram(aes(fill=variable)) +
+  facet_wrap(~variable, scales = "free_x")
+
+
+

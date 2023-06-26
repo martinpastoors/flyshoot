@@ -2086,6 +2086,14 @@ obspred <-
   mutate(englishspecies = factor(englishspecies, levels=top$englishspecies)) %>% 
   left_join(regulated)
 
+obsfit <-
+  x %>% 
+  dplyr::select(-fit, -data, -tidied, -anova, -coeff, -aic, -pred) %>% 
+  unnest(c(augmented))  %>% 
+  mutate(obs = log(catch, base=exp(1))) %>% 
+  left_join(top) %>% 
+  mutate(englishspecies = factor(englishspecies, levels=top$englishspecies)) %>% 
+  left_join(regulated)
 
 
 coeff <- data.frame(stringsAsFactors = FALSE)
@@ -2381,17 +2389,38 @@ exd <-
   summarise(expl_dev= max(expl_dev, na.rm=TRUE)) %>% 
   mutate(englishspecies = factor(englishspecies, levels=top$englishspecies))
 
+# pp <-
+#   obsfit %>% 
+#   rename(fit=.fitted) %>% 
+#   filter(efficiency==0) %>% 
+# 
+#   ggplot(aes(x=obs, y=fit, group=efficiency)) +
+#   theme_publication() +
+#   theme(plot.margin = margin(1,1,1,1, "mm")) +
+#   theme(plot.title = element_text(hjust = 0.0)) +
+#   theme(legend.position="none") +
+#   
+#   geom_point(aes(colour=as.factor(efficiency)), alpha=0.2) +
+#   geom_abline(slope=1, colour="blue", linetype="dashed") +
+#   geom_text(data=exd,
+#             aes(x=10, y=Inf, label=paste0("expl. dev: ", scales::percent(expl_dev, accuracy=1))),
+#             inherit.aes = FALSE, hjust=0,vjust=1, colour="blue") +
+#   # scale_x_continuous(limits=c(10,10000), trans='log10') +
+#   # scale_y_continuous(limits=c(10,10000), trans='log10') +
+#   labs(x="", y="Predicted landings/day (kg)", title="Observed vs. Predicted CPUE") +
+#   facet_wrap(~englishspecies, ncol=5)
+
 pp <-
-  obspred %>% 
-  rename(obs=catch) %>% 
-  filter(efficiency==0) %>% 
+  obspred %>%
+  rename(obs=catch) %>%
+  filter(efficiency==0) %>%
 
   ggplot(aes(x=obs, y=pred, group=efficiency)) +
   theme_publication() +
   theme(plot.margin = margin(1,1,1,1, "mm")) +
   theme(plot.title = element_text(hjust = 0.0)) +
   theme(legend.position="none") +
-  
+
   geom_point(aes(colour=as.factor(efficiency)), alpha=0.2) +
   geom_abline(slope=1, colour="blue", linetype="dashed") +
   geom_text(data=exd,

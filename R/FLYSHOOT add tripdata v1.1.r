@@ -22,8 +22,8 @@ options(dplyr.summarise.inform = FALSE)
 rm(list=ls())
 
 check_data = TRUE
-add_data = TRUE
-move_data = TRUE
+add_data   = TRUE
+move_data  = TRUE
 
 onedrive   = "C:/Users/MartinPastoors/Martin Pastoors/FLYSHOOT - General/rdata"
 tripdir    = "C:/Users/MartinPastoors/Martin Pastoors/FLYSHOOT - General/tripdata"
@@ -87,7 +87,88 @@ load(file.path(onedrive, "trip.RData"))
 #   mutate(distance = ifelse(distance == 0, 4.0, distance)) %>% 
 #   dplyr::select(-lat2, -lon2)
   
+# ----------------------------------------------------------------------------
+# Just in case: calculate hauls from marelec lot data
+# ----------------------------------------------------------------------------
+
+filelist <- list.files(
+  path=file.path(tripdir, "/_te verwerken"),
+  pattern="kisten",
+  full.names = TRUE)
+
+if(!is_empty(filelist)){
   
+  hh <- data.frame(stringsAsFactors = FALSE)
+  
+  i <- 1
+  for (i in 1:length(filelist)) {
+    
+    myvessel <- stringr::word(basename(filelist[i]), 1, sep=" ") %>%
+      unlist()     
+    mytrip <- stringr::word(basename(filelist[i]), 2, sep=" ") %>%
+      gsub("_","",.) %>%
+      unlist()     
+    mystartrow <-
+      readxl::read_excel(filelist[i],
+                         range="A1:A20",
+                         col_names=FALSE, 
+                         col_types="text",
+                         .name_repair =  ~make.names(., unique = TRUE))  %>% 
+      mutate(rownumber = row_number()) %>% 
+      filter(tolower(X) == "lotnummer") %>% 
+      dplyr::select(rownumber) %>% 
+      as.integer()
+    
+    print(paste("getting hauls from marelec kisten", myvessel, mytrip))
+    
+    hh  <-
+      bind_rows(
+        
+        hh,
+        
+        readxl::read_excel(filelist[i],
+                           skip=mystartrow-1,
+                           col_names=TRUE, 
+                           col_types="text",
+                           .name_repair =  ~make.names(., unique = TRUE))  %>% 
+          data.frame() %>% 
+          lowcase() %>% 
+          filter(!grepl("totaal", tolower(soorten))) %>%
+          filter(!grepl("^einde", tolower(soorten))) %>%
+          tidyr::drop_na(soorten) %>% 
+          
+          mutate(vessel = myvessel) %>% 
+          mutate(trip = mytrip) %>% 
+          
+          mutate(datetime = lubridate::dmy_hms(paste(datum, tijd))) %>% 
+          arrange(datetime) %>% 
+          mutate(lotnummer = row_number()) %>% 
+          
+          arrange(datetime) %>% 
+          mutate(time_diff = as.numeric(datetime - lag(datetime))/60) %>% 
+          filter(time_diff > 20 | row_number()==1) %>% 
+          mutate(haul = row_number()) %>% 
+          mutate(haultime = datetime - minutes(5)) %>% 
+          mutate(shoottime = haultime - lubridate::hm("1:20")) %>% 
+          mutate(shoottime2 = shoottime + (haultime - shoottime)/2) %>% 
+          rename(date=datum) %>%
+          mutate(date=dmy(date)) %>% 
+          
+          # add next haul time  
+          group_by(vessel, trip) %>% 
+          mutate(nexthaultime = lead(haultime)) %>% 
+          mutate(nexthaultime = ifelse(is.na(nexthaultime), lubridate::dmy_hm("31/12/2023 23:59"), nexthaultime)) %>% 
+          mutate(nexthaultime = as_datetime(nexthaultime)) %>% 
+          
+          dplyr::select(vessel, trip, haul, date, shoottime, shoottime2, haultime, nexthaultime) 
+        
+      )
+    
+  } # end of marelec for loop
+  
+} # end of not empty filelist
+
+
 # ----------------------------------------------------------------------------
 # read the treklijst data
 # ----------------------------------------------------------------------------
@@ -97,7 +178,7 @@ filelist <- list.files(
   pattern="treklijst",
   full.names = TRUE)
 
-# i <- 1
+i <- 1
 if(!is_empty(filelist)){
   
   for (i in 1:length(filelist)) {
@@ -136,21 +217,104 @@ if(!is_empty(filelist)){
     if(r > 0) {
       
       # check in trip number
-      if (c(readxl::read_excel(filelist[i], sheet = "Haul",  col_names=TRUE) %>% filter(row_number()==1) %>% dplyr::pull(trip)) != mytrip) 
+      if (c(readxl::read_excel(filelist[i], 
+                               sheet = "Haul",  
+                               col_names=TRUE, 
+                               .name_repair =  ~make.names(., unique = TRUE)) %>% 
+            filter(row_number()==1) %>% 
+            dplyr::pull(trip)) != mytrip) 
         stop(paste(basename(filelist[i]), ": tripnumber problem in list not equal to tripnumber in filename"))
-      
-      h  <-
+
+      # first read the haul data
+      t <-
         readxl::read_excel(filelist[i],
                            sheet = "Haul",  col_names=TRUE, col_types="text",
                            .name_repair =  ~make.names(., unique = TRUE))  %>% 
         data.frame() %>% 
         lowcase() %>% 
-        
         filter(!is.na(vessel), row_number() <= r ) %>% 
+        mutate(timezone = case_when(
+          timezone == "CET"   ~ "Europe/Amsterdam", 
+          timezone == "UTC+1" ~ "Europe/Amsterdam", 
+          timezone == "UTC-5" ~ "America/Santiago",
+          is.na(timezone)     ~ "UTC",    
+          TRUE                ~ timezone) ) %>% 
+        mutate(date   = as.Date(as.integer(date), origin="1899-12-30", tz=timezone)) 
+        
+      
+      # if times are used, get haul data from this list; otherwise get haul data from hh (marelec)      
+      if(sum(!is.na(t$tijdbeginuitzetten)) + sum(!is.na(t$tijdeindeuitzetten)) + sum(!is.na(t$tijdeindehalen))  > 0) {
+
+        # case 1: read all data-time data from haullist
+        
+        h  <-
+          t %>% 
+          dplyr::rename(
+            shoottime    = berekentijdbeginuitzetten,
+            shoottime2   = berekentijdeindeuitzetten,
+            haultime     = berekentijdeindehalen
+          )  %>%  
+          
+          mutate(across (c("shoottime", "shoottime2", "haultime"), 
+                         as.numeric)) %>%
+          
+          mutate(across (c("shoottime","shoottime2", "haultime"),
+                         ~calculate_time(.))) %>%
+          
+          mutate( 
+            shoottime  = ifelse(!is.na(shoottime), date + shoottime, NA),
+            shoottime  = as_datetime(shoottime),
+            shoottime2 = ifelse(!is.na(shoottime2), date + shoottime2, NA),
+            shoottime2 = as_datetime(shoottime2),
+            haultime   = ifelse(!is.na(haultime), date + haultime, NA),
+            haultime   = as_datetime(haultime)
+          ) %>%
+          
+          # add haultime if missing
+          mutate(
+            haultime = ifelse(is.na(haultime) & !is.na(shoottime), 
+                              shoottime+lubridate::hm("1:20"), 
+                              haultime),
+            haultime = lubridate::as_datetime(haultime)
+          ) %>% 
+          
+          # add haultime and shoottime if missing and shoottime2 is available
+          mutate(
+            test     = ifelse(is.na(haultime) & is.na(shoottime) & !is.na(shoottime2),
+                              TRUE, FALSE),
+            shoottime = ifelse(test, 
+                               shoottime2-lubridate::hm("0:40"), 
+                               shoottime),
+            shoottime = lubridate::as_datetime(shoottime),
+            
+            haultime = ifelse(test, 
+                              shoottime2+lubridate::hm("0:40"), 
+                              haultime),
+            haultime = lubridate::as_datetime(haultime)
+          ) %>% 
+          
+          # add next haul time  
+          group_by(vessel, trip) %>% 
+          mutate(nexthaultime = lead(haultime)) %>% 
+          mutate(nexthaultime = ifelse(is.na(nexthaultime), lubridate::dmy_hm("31/12/2023 23:59"), nexthaultime)) %>% 
+          mutate(nexthaultime = as_datetime(nexthaultime)) 
+          
+          
+
+      } else {
+        
+        # start from hh list and add haul information
+        h <-
+          hh %>% 
+          left_join(dplyr::select(t,
+                                  -haul, -tijdbeginuitzetten, -tijdeindeuitzetten, -tijdeindehalen), 
+                    by=c("vessel","trip","date"))
+      }
+      
+      # now finalize the haul data manipulations
+      h  <-
+        h %>% 
         dplyr::rename(
-          shoottime    = berekentijdbeginuitzetten,
-          shoottime2   = berekentijdeindeuitzetten,
-          haultime     = berekentijdeindehalen,
           windforce     = windforcebft,
           catchheight   = catchhoogtevangstincm, 
           boxtype       = boxvolledigofkleinvk, 
@@ -176,76 +340,19 @@ if(!is_empty(filelist)){
         {if(!all(is.na(.$winddirection))) { mutate(., across (c("winddirection"), ~zoo::na.locf(.)))} else {.}} %>%
         {if(!all(is.na(.$windforce)))     { mutate(., across (c("windforce"),     ~zoo::na.locf(.)))} else {.}} %>%
         
-        mutate(timezone = case_when(
-          timezone == "CET"   ~ "Europe/Amsterdam", 
-          timezone == "UTC+1" ~ "Europe/Amsterdam", 
-          timezone == "UTC-5" ~ "America/Santiago",
-          is.na(timezone)     ~ "UTC",    
-          TRUE                ~ timezone) ) %>% 
-        
-        mutate(across (c("vessel", "shootew", "shootns"), 
+        mutate(across (c("shootew", "shootns"), 
                        toupper)) %>% 
-        mutate(across (c("haul", "meshsize","date", "windforce", "waterdepth",
+        mutate(vessel = toupper(vessel)) %>% 
+        mutate(across (c("haul", "meshsize", "windforce", "waterdepth",
                          "catchheight", "dateembarked","datedisembarked"), 
                        as.integer)) %>% 
-        mutate(across (c("waterdepth","vertopening", "landingweight", "totalcatch",
-                         "shoottime", "shoottime2", "haultime"), 
+        mutate(across (c("waterdepth","vertopening", "landingweight", "totalcatch"), 
                        as.numeric)) %>%
         
-        mutate(date   = as.Date(date, origin="1899-12-30" , tz=unique(timezone))) %>% 
+        # mutate(date   = as.Date(date, origin="1899-12-30" , tz=unique(timezone))) %>% 
         mutate(dateembarked   = as.Date(dateembarked, origin="1899-12-30" , tz=unique(timezone))) %>% 
         mutate(datedisembarked   = as.Date(datedisembarked, origin="1899-12-30" , tz=unique(timezone))) %>% 
         
-        # mutate(across (c("shoottime","haultime"), 
-        #                ~calculate_time_from_string(.))) %>% 
-        # mutate(across (c("haultime", "shoottime2"), 
-        #                ~calculate_time(.))) %>% 
-        mutate(across (c("shoottime","shoottime2", "haultime"),
-                       ~calculate_time(.))) %>%
-        
-        mutate( 
-          shoottime  = ifelse(!is.na(shoottime), date + shoottime, NA),
-          shoottime  = as_datetime(shoottime),
-          shoottime2 = ifelse(!is.na(shoottime2), date + shoottime2, NA),
-          shoottime2 = as_datetime(shoottime2),
-          haultime   = ifelse(!is.na(haultime), date + haultime, NA),
-          haultime   = as_datetime(haultime)
-        ) %>%
-        
-        # add haultime if missing
-        mutate(
-          haultime = ifelse(is.na(haultime) & !is.na(shoottime), 
-                            shoottime+lubridate::hm("1:20"), 
-                            haultime),
-          haultime = lubridate::as_datetime(haultime),
-          
-          # special case for SCH135 2023320 trip
-          haultime = ifelse(trip == "2023320", 
-                            haultime-lubridate::hm("1:00"), 
-                            haultime),
-          haultime = lubridate::as_datetime(haultime)
-        ) %>% 
-
-        # add haultime and shoottime if missing and shoottime2 is available
-        mutate(
-          test     = ifelse(is.na(haultime) & is.na(shoottime) & !is.na(shoottime2),
-                            TRUE, FALSE),
-          shoottime = ifelse(test, 
-                            shoottime2-lubridate::hm("0:40"), 
-                            shoottime),
-          shoottime = lubridate::as_datetime(shoottime),
-          
-          haultime = ifelse(test, 
-                            shoottime2+lubridate::hm("0:40"), 
-                            haultime),
-          haultime = lubridate::as_datetime(haultime)
-        ) %>% 
-        
-        # add next haul time  
-        group_by(vessel, trip) %>% 
-        mutate(nexthaultime = lead(haultime)) %>% 
-        mutate(nexthaultime = ifelse(is.na(nexthaultime), lubridate::dmy_hm("31/12/2023 23:59"), nexthaultime)) %>% 
-        mutate(nexthaultime = as_datetime(nexthaultime)) %>% 
 
         mutate(
           year       = lubridate::year(date),
@@ -271,18 +378,17 @@ if(!is_empty(filelist)){
           winddirection = gsub("O","E",winddirection)
         ) %>% 
         
-      ungroup() %>% 
-      dplyr::select(
-        vessel, trip, haul, date, shoottime, shoottime2, haultime, nexthaultime,
-        lat, lon, 
-        winddirection, windforce, waterdepth,
-        catchheight, boxtype, landingweight, totalcatch,
-        bycatchperc, skipper, dateembarked, portembarked,
-        datedisembarked, portdisembarked, gear, meshsize, vertopening,
-        cablelength, cablethickness, lengthgroundrope, escapepanel,
-        duration, year, quarter, month, yday
-      ) 
-      
+        ungroup() %>% 
+        dplyr::select(
+          vessel, trip, haul, date, shoottime, shoottime2, haultime, nexthaultime,
+          lat, lon, 
+          winddirection, windforce, waterdepth,
+          catchheight, boxtype, landingweight, totalcatch,
+          bycatchperc, skipper, dateembarked, portembarked,
+          datedisembarked, portdisembarked, gear, meshsize, vertopening,
+          cablelength, cablethickness, lengthgroundrope, escapepanel,
+          duration, year, quarter, month, yday
+        ) 
       
       # calculate FAO areas  
       h_fao <- 
@@ -334,7 +440,7 @@ if(!is_empty(filelist)){
         mutate(port   = ifelse(port=="Boulogne", "Boulogne sur Mer", port)) %>% 
         
         geocode(port, method = 'osm', lat = lat , lon = lon) %>% 
-        mutate(haul = ifelse(row_number() == 1, 0, r+1)) %>% 
+        mutate(haul = ifelse(row_number() == 1, 0, nrow(h)+1)) %>% 
         bind_rows(dplyr::select(h,
                                 haul, date, lat, lon)) %>% 
         arrange(haul) %>% 
@@ -394,7 +500,7 @@ filelist <- list.files(
 
 if(!is_empty(filelist)){
 
-  # i <- 4
+  # i <- 1
   for (i in 1:length(filelist)) {
     
     myvessel <- stringr::word(basename(filelist[i]), 1, sep=" ") %>%
@@ -448,6 +554,14 @@ if(!is_empty(filelist)){
       dplyr::select(-datum, -tijd) 
     
     # add calculated hauls from haul list
+    # t <-
+    #   sqldf::sqldf("select m.vessel, m.trip, m.lotnummer, m.soorten, m.maat, m.gewicht,
+    #                        m.datetime, m.haul2, h.haul from m
+    #         join h on m.vessel   == h.vessel and
+    #                   m.trip     == h.trip and
+    #                   m.datetime >= h.haultime") %>%
+    #   as_tibble()
+    
     t <-
       sqldf::sqldf("select m.vessel, m.trip, m.lotnummer, m.soorten, m.maat, m.gewicht,
                            m.datetime, m.haul2, h.haul from m

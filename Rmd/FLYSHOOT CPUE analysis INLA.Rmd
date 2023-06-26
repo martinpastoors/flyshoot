@@ -1,0 +1,659 @@
+---
+output:
+  word_document:
+    reference_docx: ../report_template.dotx
+---
+
+
+```{r setup, include=FALSE}
+
+# =====================================================================================================
+# FLYSHOOT CPUE analysis - North Sea and Channel
+# 
+# 11/01/2023 first coding
+# 16/03/2023 full GLM modelling of top 15 species in the catch
+# 21/04/2023 TO DO: convert totals to total per vessel
+# 11/05/2023 Finalized the code to include the reworked Ecatch and Mcatch data 
+#            and the combination of North Sea and Channel
+# =====================================================================================================
+
+knitr::opts_chunk$set(echo = FALSE,	message = FALSE,	warning = FALSE,	comment = "",	crop = TRUE )
+knitr::opts_chunk$set(fig.width=10) 
+
+options(dplyr.summarise.inform = FALSE)
+
+# Reset lists
+rm(list=ls())
+
+recalculatemaps   <- FALSE           # recalculate catch maps (takes relatively long)
+toprectanglesonly <- TRUE            # CPUE analysis for top rectangles (by species) only?
+
+# Libraries
+library(rmarkdown)                   # note: requires knitr 1.21
+
+require(tidyverse, quietly=TRUE)     # combined package of dplyr, tidyr, ggplot, readr, purrr and tibble
+require(lubridate, quietly=TRUE)     # data handling
+require(reshape2, quietly=TRUE)      # reshaping data; e.g. cast
+require(RColorBrewer)                # colour schemes
+library(viridis)
+library(pander)
+library(patchwork)
+library(gridExtra)
+
+library(mgcv)
+library(mgcViz)
+
+# install.packages("INLA", repos=c(getOption("repos"), INLA="https://inla.r-inla-download.org/R/stable"), dep=TRUE)
+library(INLA)
+library(inlabru)
+
+library(captioner)                   # for captions
+tab_nums <- captioner::captioner(prefix = "Table " , levels=1, type=c("n"), infix=".")
+fig_nums <- captioner::captioner(prefix = "Figure ", levels=1, type=c("n"), infix=".")
+
+# Source all the utils
+source("../../prf/R/my utils.r")
+source("../../mptools/R/get_onedrive.r")
+source("../R/FLYSHOOT utils.r")
+
+
+spatialdir <- "C:/DATA/RDATA"
+
+# spatial data files
+
+load(file.path(spatialdir, "world_lr_sf.RData"))
+load(file.path(spatialdir, "world_mr_sf.RData"))
+load(file.path(spatialdir, "world_hr_sf.RData"))
+
+load(file.path(spatialdir, "world_mr_df.RData"))
+load(file.path(spatialdir, "fao_sf.RData"))
+load(file.path(spatialdir, "rect_lr_sf.RData"))
+icesrect <-
+  rect_lr_sf %>% 
+  sf::st_drop_geometry() %>% 
+  rename(rect=ICESNAME) %>% 
+  mutate(lat = (SOUTH + NORTH)/2) %>% 
+  mutate(lon = (EAST + WEST)/2) %>% 
+  dplyr::select(rect, lat, lon)
+
+
+asfis <- 
+  loadRData(file.path(spatialdir, "asfis.RData")) %>% 
+  rename_all(tolower) %>% 
+  mutate(species = tolower(species))
+
+# ===============================================================================
+#  Load and filter the trip data
+# ===============================================================================
+
+# set onedrive directory
+onedrive <- get_onedrive(team="Martin Pastoors", site="FLYSHOOT - General")
+
+# load datasets
+haul   <- loadRData(file.path(onedrive, "rdata/haul.RData"))
+kisten <- loadRData(file.path(onedrive, "rdata/kisten.RData")) 
+elog   <- 
+  loadRData(file.path(onedrive, "rdata/elog.RData")) %>% 
+  mutate(species = toupper(species)) %>% 
+  mutate(species = ifelse(species == "JAX","HOM",species)) %>% 
+  mutate(species = ifelse(species == "SQU", "SQR", species)) %>% 
+  filter(geartype %in% c("SSC","SDN")) %>% 
+  filter(rect %notin% c("35F7")) %>% 
+  mutate(species = tolower(species)) %>% 
+  left_join(dplyr::select(asfis,
+                          species, scientificname, englishname, dutchname),
+            by = "species") %>% 
+  mutate(species = toupper(species))  %>% 
+  
+  # remove 348 records without rectangle information
+  drop_na(rect, lat, lon) %>% 
+  
+  sf::st_as_sf(coords = c("lon", "lat"), crs = 4326, remove = FALSE)  %>%  
+  
+  # get division from rectangle / lat-lon if available
+  sf::st_join(filter(fao_sf, F_LEVEL=="DIVISION")) %>%
+  sf::st_drop_geometry() %>% 
+  rename(division = F_CODE) %>% 
+  dplyr::select(-F_LEVEL, -FID, -OCEAN, -SUBOCEAN, -F_AREA, -F_SUBAREA, -F_DIVISION,
+                -F_SUBDIVIS, -F_SUBUNIT, -F_STATUS) %>%
+  ungroup() %>% 
+  
+  # handle missing divisions (coastline issues)
+  mutate(division = ifelse(is.na(division) & !is.na(faozone), faozone, division))
+
+# elog %>% filter(!is.na(lat.x)) %>% View()
+# xlim <- range(elog$lon, na.rm=TRUE)
+# ylim <- range(elog$lat, na.rm=TRUE)  
+# elog %>% 
+#   filter(is.na(division)) %>% 
+#   group_by(vessel, year, source, rect, lat, lon) %>% 
+#   summarise(weight = sum(weight, na.rm=TRUE)) %>% 
+#   ggplot(aes(x=lon, y=lat)) +
+#   theme_publication() +
+#   coord_quickmap(xlim=xlim , ylim=ylim) +
+#   geom_polygon(data=world_mr_df, aes(x=long, y=lat, group=group), fill = "grey75") +
+#   geom_point(aes(colour=vessel, size=weight), alpha=0.5) +
+#   facet_wrap(~year)
+
+  
+price  <- 
+  readr::read_rds(file.path(onedrive, "rdata/prices.rds")) %>% 
+  dplyr::select(year, species, avgprice) %>% 
+  mutate(price_cat = cut(avgprice, breaks=c(0,0.5, 1,2,3,4,5,10,15,20), dig.lab=10 ))
+
+regulated  <- 
+  readr::read_rds(file.path(onedrive, "rdata/prices.rds")) %>% 
+  ungroup() %>% 
+  dplyr::distinct(species, regulated) 
+
+# skimr::skim(price)
+
+# sort(unique(elog$species))
+
+yrs       <- 2012:2022
+mnths     <- NA
+vessels   <- NA
+
+# divisions <- NA
+# divisions <- c("27.7.d", "27.7.e")
+# divisions <- c("27.4.b", "27.4.c")
+divisions <- c("27.4.b", "27.4.c", "27.7.d", "27.7.e")
+
+# Folder for storing figures  
+if(!any(is.na(divisions))) {
+  folder <- paste("CPUE", paste(divisions, collapse="-")) 
+} else {
+  folder <- "CPUE northsea-channel"
+}
+
+dir.create   (file.path(onedrive, "report",folder), showWarnings = FALSE)
+
+dir.create   (file.path(onedrive, "report",folder, "figures"), showWarnings = FALSE)
+figuresdir <- file.path(onedrive, "report",folder, "figures")
+
+dir.create  (file.path(onedrive, "report",folder, "tables"), showWarnings = FALSE)
+tablesdir <- file.path(onedrive, "report",folder, "tables")
+
+dir.create   (file.path(onedrive, "report",folder, "data"), showWarnings = FALSE)
+datadir    <- file.path(onedrive, "report",folder, "data")
+
+# making the data selections
+e <- 
+  elog %>%
+  ungroup() %>% 
+  mutate(division =tolower(division)) %>% 
+  {if(!is.na(all(vessels))) filter(., vessel %in% vessels) else . } %>% 
+  {if(!is.na(all(yrs)))     filter(., year %in% yrs) else . } %>% 
+  {if(!is.na(all(mnths)))   filter(., month %in% mnths) else .} %>% 
+  {if(!any(is.na(divisions))) filter(., division %in% divisions) else .} %>% 
+  
+  left_join(regulated, by="species") %>% 
+  mutate(regulated = case_when(
+    is.na(regulated) & species %in% c("BSE","DGX","ANF","DGH","HER","PLE")             ~ "R",
+    is.na(regulated) & species %in% c("BRB","SBX","SQS","WEX","WEG","SQU","SDV",
+                                      "OCT","MUL","SCR","GAG","ANE","SQE","SQC","OCZ") ~ "NR",
+    TRUE ~ regulated
+  )) %>% 
+  ungroup()
+
+# e %>% distinct(species, regulated) %>% filter(is.na(regulated)) %>% View()
+# e %>% 
+#   filter(vessel=="SCH135", week==1:3, year==2019) %>%  
+#   group_by(vessel, year, week, source) %>% 
+#   summarise(n=n_distinct(source)) %>% 
+#   filter(n > 1) %>%
+#   View()
+#   # left_join(e, by=c("vessel","year","week")) %>% 
+#   group_by(vessel, year, week, source) %>% 
+#   summarise(weight = sum(weight, na.rm=TRUE)) %>% 
+#   pivot_wider(names_from = source, values_from = weight) %>% 
+#   View()
+
+
+# calculate the scaling of plots
+
+xmin <- floor(2 * (min(e$lon, na.rm=TRUE)-0.5))/2;
+xmax <- ceiling(2 * (max(e$lon, na.rm=TRUE)+0.5))/2;
+ymin <- floor(2 * (min(e$lat, na.rm=TRUE)-0.5))/2;
+ymax <- ceiling(2* (max(e$lat, na.rm=TRUE)+0.5))/2
+
+n <- 15
+
+effort <-
+  e %>% 
+  dplyr::group_by(vessel, year, week, source) %>% 
+  dplyr::summarize(ndays = n_distinct(date)) %>% 
+  
+  dplyr::group_by(vessel, year) %>% 
+  dplyr::summarize(ndays  = sum(ndays, na.rm=TRUE))  %>% 
+
+  ungroup()
+
+catch <-
+  e %>% 
+  dplyr::group_by(vessel, year, species, 
+                  scientificname, englishname, dutchname, regulated) %>% 
+  dplyr::summarize(weight = sum(weight, na.rm=TRUE)) %>% 
+  dplyr::group_by(vessel, year) %>% 
+  dplyr::mutate(perc = weight/sum(weight, na.rm=TRUE)) %>% 
+  left_join(effort, by=c("vessel", "year")) %>% 
+  mutate(catch_day = weight / ndays) %>% 
+  ungroup()
+
+effort_byweek <-
+  e %>% 
+  dplyr::group_by(vessel, year, quarter, month, week, division, rect, source) %>% 
+  dplyr::summarize(effort  = n_distinct(date))  %>% 
+  
+  # temp fix!!
+  mutate(effort = ifelse(source=="m-catch" & year < 2023, 4, effort)) %>% 
+  dplyr::group_by(vessel, year, quarter, month, week, division, rect) %>% 
+  dplyr::summarize(effort  = sum(effort, na.rm=TRUE))  %>% 
+  ungroup()
+
+effort_byweek2 <-
+  e %>% 
+  dplyr::group_by(vessel, year, week, source) %>% 
+  dplyr::summarize(effort  = n_distinct(date))  %>% 
+  
+  # temp fix!!
+  mutate(effort = ifelse(source=="m-catch" & year < 2023, NA, effort)) %>% 
+  dplyr::group_by(vessel, year, week) %>% 
+  dplyr::summarize(effort  = sum(effort, na.rm=TRUE))  %>% 
+
+  ungroup()
+
+revenue_byweek <-
+  e %>% 
+  left_join(price, by=c("year","species")) %>% 
+  mutate(revenue = weight * avgprice) %>% 
+  drop_na(revenue) %>% 
+  group_by(vessel, year, week, species) %>% 
+  summarise(revenue = sum(revenue, na.rm=TRUE)) %>% 
+  ungroup()
+    
+target_byweek <-
+  revenue_byweek %>% 
+  group_by(vessel, year, week) %>% 
+  arrange(desc(revenue)) %>% 
+  slice_head(n=1) %>% 
+  dplyr::select(-revenue) %>% 
+  rename(target=species)
+
+catch_byweek <-
+  e %>% 
+  dplyr::group_by(vessel, year, quarter, month, week, division, rect,  
+                  species, scientificname, englishname, dutchname, regulated) %>% 
+  dplyr::summarize(
+    catch = sum(weight, na.rm=TRUE),
+    # effort  = n_distinct(date)
+  ) %>% 
+  
+  
+  left_join(effort_byweek, by=c("vessel","year","quarter","month","week","division","rect")) %>% 
+  left_join(icesrect, by="rect") %>% 
+  left_join(price, by=c("year","species")) %>% 
+  left_join(target_byweek, by=c("vessel", "year","week")) %>% 
+  
+  ungroup() 
+  
+
+# catch_byweek %>% distinct(species, regulated) %>% filter(is.na(regulated)) %>% View()
+
+top_rectangles <-
+  catch_byweek %>%
+  group_by(species, rect) %>% 
+  summarise(n=n()) %>% 
+  group_by(species) %>% 
+  arrange(species, desc(n)) %>% 
+  filter(n >= 20,  row_number() <= 10)
+
+# top <-
+#   catch %>% 
+#   dplyr::group_by(species, scientificname, englishname, dutchname) %>% 
+#   dplyr::summarize(weight = sum(weight, na.rm=TRUE)) %>% 
+#   dplyr::ungroup() %>% 
+#   dplyr::mutate(englishspecies = paste(englishname, species)) %>% 
+#   arrange(desc(weight)) %>% 
+#   slice_head(n=n)
+
+top      <- 
+  readr::read_rds(file=file.path(onedrive,"rdata", "top.rds")) %>%  
+  lowcase() %>% 
+  dplyr::select(-value, -weight)
+
+rest <-
+  catch %>% 
+  dplyr::group_by(species, scientificname, englishname, dutchname) %>% 
+  dplyr::summarize(weight     = sum(weight, na.rm=TRUE)) %>% 
+  dplyr::ungroup() %>% 
+  dplyr::mutate(englishspecies = paste(englishname, species)) %>% 
+  arrange(desc(weight)) %>% 
+  filter(species %notin% top$species)
+
+all <- 
+  bind_rows(top, rest, data.frame(englishspecies="Other")) %>% 
+  mutate(englishspecies = factor(englishspecies, levels=.$englishspecies))
+
+# top colours
+colourCount             <- nrow(top)+1
+getPalette              <- colorRampPalette(brewer.pal(12, "Paired"))
+myTopColors             <- getPalette(colourCount)
+names(myTopColors)      <- c(top$englishspecies, "Other")
+
+# scales::show_col(myTopColors)
+
+# target colours
+t1 <- 
+  target_byweek %>% 
+  ungroup() %>% 
+  distinct(target) %>% 
+  left_join(bind_rows(top, rest), by=c("target"="species")) %>% 
+  arrange(desc(weight)) %>% 
+  left_join(as.data.frame(myTopColors) %>% rownames_to_column(var="englishspecies"), 
+            by="englishspecies")
+
+t2a <- t1 %>% filter(!is.na(myTopColors))
+t2b <- t1 %>% filter(is.na(myTopColors))
+
+colourCount             <- nrow(t2b)
+getPalette              <- colorRampPalette(myTopColors[c(length(myTopColors)-1,length(myTopColors))])
+myAddedColors           <- getPalette(colourCount)
+names(myAddedColors)    <- c(t2b$englishspecies)
+
+myTargetColors          <- c(myTopColors, myAddedColors)
+# scales::show_col(myTargetColors)
+
+# readr::write_rds(top, file=file.path(datadir, paste0("top_",folder,".rds")))
+# writexl::write_xlsx(catch_byweek, path=file.path(onedrive, paste0("export",folder,".xlsx")))
+
+# catch_byweek %>% filter(lon == max(lon, na.rm=TRUE)) %>% View()
+
+```
+
+
+**INLA Modelling with distribution of actual catch areas**
+
+```{r first_effect, echo=FALSE, fig.asp=1.2, fig.align="center", message=FALSE, warning=FALSE}
+
+# create dataset to be used
+t <-
+  catch_byweek %>% 
+  filter(species %in% c("CTC", "MUR","SQR","MAC")) %>% 
+  mutate(species = factor(species, levels=c("CTC", "MUR","SQR","MAC"))) %>% 
+  mutate(vessel  = factor(vessel, levels=sort(unique(vessel)))) %>% 
+  mutate(target  = factor(target, levels=sort(unique(target)))) %>% 
+  drop_na() 
+
+xlim <- c(floor(min(t$lon, na.rm=TRUE)), ceiling(max(t$lon, na.rm=TRUE)))
+ylim <- c(floor(2*min(t$lat, na.rm=TRUE))/2, ceiling(2*max(t$lat, na.rm=TRUE))/2)  
+
+# plot the data
+t %>% 
+  group_by(species, lat, lon) %>% 
+  summarise(catch=sum(catch, na.rm=TRUE)) %>% 
+  
+  ggplot(aes(x=lon, y=lat)) +
+  theme_publication() +
+  coord_quickmap(xlim=xlim , ylim=ylim) +
+  geom_polygon(data=world_mr_df, aes(x=long, y=lat, group=group), fill = "grey75") +
+  geom_point(aes(size=catch, colour=species)) +  
+  facet_wrap(~species)
+
+coords   <- cbind(t$lon, t$lat) 
+
+convhull <- inla.nonconvex.hull(points=coords, convex=-0.05, resolution=90)
+  
+mesh1a <- inla.mesh.2d(boundary=convhull, max.edge=c(80))
+
+# plot(mesh1a)
+
+# wld <- maps::map('world', xlim=xlim, ylim=ylim,plot=FALSE)
+# UTMmap <- rgdal::project(cbind(wld$x, wld$y), "+proj=utm +zone=31U ellps=WGS84")
+# UTMmapFinal <- data.frame("xm"=UTMmap[,1]/1e3, "ym"=UTMmap[,2]/1e3)
+ 
+# par(mfrow=c(1,2))
+plot(mesh1a)
+# lines(UTMmapFinal, lwd=2)
+points(coords, col = 2, pch = 16, cex = 0.3)
+box()
+
+t %>% 
+  group_by(species, lat, lon) %>% 
+  summarise(catch=sum(catch, na.rm=TRUE)) %>% 
+  
+  ggplot(aes(x=lon, y=lat)) +
+  theme_publication() +
+  coord_quickmap(xlim=xlim , ylim=ylim) +
+  geom_polygon(data=world_mr_df, aes(x=long, y=lat, group=group), fill = "grey75") +
+  inlabru::gg(data=mesh1a, ext.color="blue",  edge.color="lightblue") +
+  geom_point(aes(size=catch, colour=species)) +
+  facet_wrap(~species)
+
+# create projector matrix
+A1 <- inla.spde.make.A(mesh = mesh1a, loc=coords)
+dim(A1)
+
+# Making the SPDE
+spde <- inla.spde2.matern(mesh1a)
+w.st <- inla.spde.make.index('w', n.spde = spde$n.spde)  
+
+t <-
+  t %>% 
+  mutate(
+    fyear = factor(year, levels=sort(unique(year))),
+    leffort = log(effort), 
+    catch = as.integer(catch)
+  )
+
+
+Xmatrix <- model.matrix(~ fyear + species + leffort, data=t)
+head(Xmatrix)
+
+X <- as.data.frame(Xmatrix[,-1])
+names(X) <- c(gsub("[:]",".",names(X)))
+head(X)
+
+N <- nrow(t)
+Stack1 <- inla.stack(
+  tag  = "Fit",
+  data = list(y = t$catch),    
+  A    = list(1,1, A1),         
+  effects = list( 
+       Intercept=rep(1,N),
+       X=X, #Covariates
+       w=w.st))                  #Spatial field
+
+fsp <- parse(text=c("y ~ -1 + Intercept + ",paste(c(names(X)," f(w, model = spde)"),collapse =" + ")))
+
+# INLA:::inla.dynload.workaround() 
+
+I1p <- inla(eval(fsp), 
+            family = "poisson", 
+            data=inla.stack.data(Stack1),
+            control.compute = list(dic = TRUE, waic = TRUE),
+            control.predictor = list(A = inla.stack.A(Stack1)),
+            verbose=FALSE)
+
+I1nb <- inla(eval(fsp), 
+            family = "nbinomial", 
+            data=inla.stack.data(Stack1),
+            control.compute = list(dic = TRUE, waic = TRUE),
+            control.predictor = list(A = inla.stack.A(Stack1)),
+            verbose=FALSE)
+
+I1zip <- inla(eval(fsp), family = "zeroinflatedpoisson1", data=inla.stack.data(Stack1),
+           control.compute = list(dic = TRUE, waic = TRUE),
+           control.predictor = list(A = inla.stack.A(Stack1)))
+
+I1zinb <- inla(eval(fsp), family = "zeroinflatednbinomial1", data=inla.stack.data(Stack1),
+           control.compute = list(dic = TRUE, waic = TRUE, config=TRUE),
+           control.predictor = list(A = inla.stack.A(Stack1)))
+
+dic  <- c(I1p$dic$dic, I1nb$dic$dic, I1zip$dic$dic, I1zinb$dic$dic)
+waic <- c(I1p$waic$waic, I1nb$waic$waic, I1zip$waic$waic, I1zinb$waic$waic)
+Z     <- cbind(dic, waic)
+rownames(Z) <- c("Poisson model", "Negative binomial model", "Zero Inflated Poisson model", "Zero Inflated Negative binomial model" )
+Z
+
+summary(I1nb)
+
+par(mfrow=c(1,1),oma=c(6,4,2,2))
+plot(y=I1nb$summary.fixed[,4],x=1:nrow(I1nb$summary.fixed),pch=19,xlab="",ylab="Parameter value",col=1,ylim=range(I1nb$summary.fixed[,3:5]),xaxt="n")
+axis(1,at=1:nrow(I1nb$summary.fixed),labels=rownames(I1nb$summary.fixed),las=2)
+     
+segments(x0=1:nrow(I1nb$summary.fixed),x1=1:nrow(I1nb$summary.fixed),y0=I1nb$summary.fixed[,3],y1=I1nb$summary.fixed[,5])
+
+points(y=I1zinb$summary.fixed[,4],x=(1:nrow(I1zinb$summary.fixed))+0.1,pch=19,col=2)
+segments(x0=(1:nrow(I1zinb$summary.fixed))+0.1,x1=(1:nrow(I1zinb$summary.fixed))+0.1,y0=I1zinb$summary.fixed[,3],y1=I1zinb$summary.fixed[,5],col=2)
+
+legend("bottomright",legend=c("I1nb","I1zinb"),pch=19,col=1:2)
+
+
+```
+
+
+**INLA Modelling with distribution of ices areas**
+
+```{r second_effect, echo=FALSE, fig.asp=1.2, fig.align="center", message=FALSE, warning=FALSE}
+
+# create dataset to be used
+t <-
+  catch_byweek %>% 
+  filter(species %in% c("CTC", "MUR","SQR","MAC")) %>% 
+  mutate(species = factor(species, levels=c("CTC", "MUR","SQR","MAC"))) %>% 
+  mutate(vessel  = factor(vessel, levels=sort(unique(vessel)))) %>% 
+  mutate(target  = factor(target, levels=sort(unique(target)))) %>% 
+  drop_na() 
+
+xlim <- c(floor(min(t$lon, na.rm=TRUE)), ceiling(max(t$lon, na.rm=TRUE)))
+ylim <- c(floor(2*min(t$lat, na.rm=TRUE))/2, ceiling(2*max(t$lat, na.rm=TRUE))/2)  
+
+# plot the data
+t %>% 
+  group_by(species, lat, lon) %>% 
+  summarise(catch=sum(catch, na.rm=TRUE)) %>% 
+  
+  ggplot(aes(x=lon, y=lat)) +
+  theme_publication() +
+  coord_quickmap(xlim=xlim , ylim=ylim) +
+  geom_polygon(data=world_mr_df, aes(x=long, y=lat, group=group), fill = "grey75") +
+  geom_point(aes(size=catch, colour=species)) +  
+  facet_wrap(~species)
+
+coords   <- cbind(t$lon, t$lat) 
+
+NorthSea  <- 
+  fao_sf %>% 
+  filter(F_LEVEL=="DIVISION", tolower(F_DIVISION) %in% c("27.4.b","27.4.c","27.7.d", "27.7.e")) %>% 
+  sf::st_union() 
+
+NorthSeaUTM <-
+  NorthSea %>% 
+  # sf::st_transform("+proj=utm +zone=31") %>% 
+  sf::as_Spatial()  # back to spatial
+
+NS.border <- inla.sp2segment(NorthSeaUTM)
+# NS.border$loc <- NS.border$loc/1000
+
+mesh1b <- inla.mesh.2d(boundary=NS.border, max.edge=c(1))
+
+xlim <- c(floor(min(mesh1b$loc[,1], na.rm=TRUE)), ceiling(max(mesh1b$loc[,1], na.rm=TRUE)))
+ylim <- c(floor(2*min(mesh1b$loc[,2], na.rm=TRUE))/2, ceiling(2*max(mesh1b$loc[,2], na.rm=TRUE))/2)  
+
+# par(mfrow=c(1,2))
+# plot(mesh1b)
+# points(coords, col = 2, pch = 16, cex = 0.3)
+# box()
+
+t %>% 
+  group_by(species, lat, lon) %>% 
+  summarise(catch=sum(catch, na.rm=TRUE)) %>% 
+  
+  ggplot(aes(x=lon, y=lat)) +
+  theme_publication() +
+  coord_quickmap(xlim=xlim , ylim=ylim) +
+  geom_polygon(data=world_mr_df, aes(x=long, y=lat, group=group), fill = "grey75") +
+  inlabru::gg(data=mesh1b, ext.color="blue",  edge.color="lightblue") +
+  geom_point(aes(size=catch, colour=species)) +
+  facet_wrap(~species)
+
+# create projector matrix
+A2 <- inla.spde.make.A(mesh = mesh1b, loc=coords)
+# dim(A2)
+
+# Making the SPDE
+spde <- inla.spde2.matern(mesh1b)
+w.st <- inla.spde.make.index('w', n.spde = spde$n.spde)  
+
+t <-
+  t %>% 
+  mutate(
+    fyear = factor(year, levels=sort(unique(year))),
+    leffort = log(effort), 
+    catch = as.integer(catch)
+  )
+
+
+Xmatrix <- model.matrix(~ fyear + species + leffort, data=t)
+# head(Xmatrix)
+
+X <- as.data.frame(Xmatrix[,-1])
+names(X) <- c(gsub("[:]",".",names(X)))
+# head(X)
+
+N <- nrow(t)
+Stack2 <- inla.stack(
+  tag  = "Fit",
+  data = list(y = t$catch),    
+  A    = list(1,1, A2),         
+  effects = list( 
+       Intercept=rep(1,N),
+       X=X, #Covariates
+       w=w.st))                  #Spatial field
+
+fsp <- parse(text=c("y ~ -1 + Intercept + ",paste(c(names(X)," f(w, model = spde)"),collapse =" + ")))
+
+# INLA:::inla.dynload.workaround() 
+
+I2p <- inla(eval(fsp), 
+            family = "poisson", 
+            data=inla.stack.data(Stack2),
+            control.compute = list(dic = TRUE, waic = TRUE),
+            control.predictor = list(A = inla.stack.A(Stack2)),
+            verbose=FALSE)
+
+I2nb <- inla(eval(fsp), 
+            family = "nbinomial", 
+            data=inla.stack.data(Stack2),
+            control.compute = list(dic = TRUE, waic = TRUE),
+            control.predictor = list(A = inla.stack.A(Stack2)),
+            verbose=FALSE)
+
+I2zip <- inla(eval(fsp), family = "zeroinflatedpoisson1", data=inla.stack.data(Stack2),
+           control.compute = list(dic = TRUE, waic = TRUE),
+           control.predictor = list(A = inla.stack.A(Stack2)))
+
+I2zinb <- inla(eval(fsp), family = "zeroinflatednbinomial1", data=inla.stack.data(Stack2),
+           control.compute = list(dic = TRUE, waic = TRUE, config=TRUE),
+           control.predictor = list(A = inla.stack.A(Stack2)))
+
+dic  <- c(I2p$dic$dic, I2nb$dic$dic, I2zip$dic$dic, I2zinb$dic$dic)
+waic <- c(I2p$waic$waic, I2nb$waic$waic, I2zip$waic$waic, I2zinb$waic$waic)
+Z     <- cbind(dic, waic)
+rownames(Z) <- c("Poisson model", "Negative binomial model", "Zero Inflated Poisson model", "Zero Inflated Negative binomial model" )
+Z
+
+summary(I2nb)
+
+par(mfrow=c(1,1),oma=c(6,4,2,2))
+plot(y=I2nb$summary.fixed[,4],x=1:nrow(I2nb$summary.fixed),pch=19,xlab="",ylab="Parameter value",col=1,ylim=range(I2nb$summary.fixed[,3:5]),xaxt="n")
+axis(1,at=1:nrow(I2nb$summary.fixed),labels=rownames(I2nb$summary.fixed),las=2)
+segments(x0=1:nrow(I2nb$summary.fixed),x1=1:nrow(I2nb$summary.fixed),y0=I2nb$summary.fixed[,3],y1=I2nb$summary.fixed[,5])
+points(y=I2zinb$summary.fixed[,4],x=(1:nrow(I2zinb$summary.fixed))+0.1,pch=19,col=2)
+segments(x0=(1:nrow(I2zinb$summary.fixed))+0.1,x1=(1:nrow(I2zinb$summary.fixed))+0.1,y0=I2zinb$summary.fixed[,3],y1=I2zinb$summary.fixed[,5],col=2)
+legend("bottomright",legend=c("I2nb","I2zinb"),pch=19,col=1:2)
+
+
+```
+
