@@ -1,0 +1,256 @@
+---
+output:
+  word_document:
+    reference_docx: ../MPFF report template v1.1.dotx
+---
+
+
+```{r setup, include=FALSE}
+
+library(tidyverse)
+library(lubridate)
+
+# print settings
+options(max.print=999999)
+options(dplyr.summarise.inform = FALSE)
+
+# Reset lists
+rm(list=ls())
+
+source("../../prf/r/my utils.R")
+source("../../mptools/R/get_onedrive.r")
+
+onedrive  <- get_onedrive(team="Martin Pastoors", site="FLYSHOOT - General/data")
+onedrive2 <- get_onedrive(team="Martin Pastoors", site="FLYSHOOT - General/rdata")
+tripdir   <- get_onedrive(team="Martin Pastoors", site="FLYSHOOT - General/tripdata")
+
+fn1 <- "C:/Users/MartinPastoors/Martin Pastoors/FLYSHOOT - General/tripdata/_te verwerken/later/SL9 2023_trip2 elog pefa.xlsx"
+fn2 <- "C:/Users/MartinPastoors/Martin Pastoors/FLYSHOOT - General/tripdata/_te verwerken/later/SL9 2023_trip2 elog_pefa_per_trek.xlsx"
+
+# ------------------------------------------------------------------------------
+# pefa historic data
+# ------------------------------------------------------------------------------
+
+filelist <- c(fn1, fn2)
+
+pefa  <- data.frame(stringsAsFactors = FALSE)
+i <- 1
+for (i in 1:length(filelist)) {
+  
+  myvessel <- stringr::word(basename(filelist[i]), 1, sep=" ") %>%
+    unlist()     
+  mytrip <- stringr::word(basename(filelist[i]), 2, sep=" ") %>%
+    gsub("_","",.) %>%
+    unlist()     
+  
+  print(paste("elog pefa", myvessel, mytrip))
+  
+  # TO DO: SET HAULID TO START AT 1 (haulid-min(haulid))
+  
+  e  <-
+    readxl::read_excel(filelist[i], col_names=TRUE, col_types="text",
+                       .name_repair =  ~make.names(., unique = TRUE))  %>% 
+    data.frame() %>% 
+    lowcase() %>% 
+    rename(rect = icesrectangle) %>% 
+    # rename(vessel = vesselnumber) %>% 
+    # mutate(vessel = gsub(" ","", vessel)) %>% 
+    # mutate(vessel = ifelse(vessel=="SL09", "SL9","")) %>% 
+    
+    rename(lat = latitude) %>% 
+    rename(lon = longitude) %>% 
+    
+    {if(any(grepl("haulid",names(.)))) {rename(., haul = haulid)} else{.}} %>% 
+    
+    mutate(across (any_of(c("boxes", "meshsize", "haul")),
+                   as.integer)) %>%
+    mutate(across (c("catchdate", "departuredate","arrivaldate", "auctiondate", "catchdate", "weight", "lat", "lon", "conversionfactor"),
+                   as.numeric)) %>%
+    # mutate(across(c("catchdate"),
+    #               ~as.POSIXct(. * (60*60*24), origin="1899-12-30", tz="UTC"))) %>% 
+    mutate(across (c("catchdate", "departuredate","arrivaldate", "auctiondate"), 
+                   ~excel_timezone_to_utc(., timezone="Europe/Amsterdam"))) %>% 
+    
+    mutate(date   = as.Date(catchdate)) %>% 
+    
+    {if(any(grepl("haul",names(.)))) {mutate(., haul = haul - min(haul, na.rm=TRUE)+1)} else{.}} %>% 
+    # dplyr::select(-catchdate) %>% 
+    
+    mutate(
+      year       = lubridate::year(date),
+      quarter    = lubridate::quarter(date),
+      month      = lubridate::month(date),
+      week       = lubridate::week(date),
+      yday       = lubridate::yday(date)) %>% 
+    
+    # left_join(rect_df, by="rect") %>% 
+    # mutate(
+    #   lat = lat + 0.25,
+    #   lon = lon + 0.5
+    # ) %>% 
+    mutate(vessel = myvessel) %>% 
+    mutate(trip = mytrip) %>% 
+    mutate(source=ifelse(grepl("per_trek", filelist[i]), "per_trek","elog")) 
+  
+  if (grepl("per_trek", filelist[i])) {
+    e <-
+      e %>%
+      group_by(vessel, trip, haul) %>% 
+      mutate(
+        lat2 = first(na.omit(lat)),
+        lon2 = first(na.omit(lon))
+      ) %>%
+      mutate(across (c("lat2","lon2"),    ~zoo::na.locf(.))) %>% 
+      ungroup()
+    
+  }  
+  
+  pefa <- bind_rows(pefa, e)
+  
+} # end of pefa elog for loop
+
+# skimr::skim(pefa)
+
+```
+
+
+**FLYSHOOT vergelijking PEFA exports**
+
+By: Martin Pastoors
+
+Vergelijking vangsten per soort en presentatie. 
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE, comment=NA, fig.asp=0.6}
+
+# ------------------------------------------------------------------------------
+# Overzicht van vangst per soort
+# ------------------------------------------------------------------------------
+
+pefa %>% 
+  group_by(vessel, trip, source, species, presentation) %>% 
+  summarise(weight = sum(weight, na.rm=TRUE)) %>% 
+  # tidyr::pivot_wider(names_from = "source", values_from = "weight") %>% 
+  reshape2::dcast(vessel+trip+species+presentation ~ source, value.var = "weight", sum, margins="vessel") %>% 
+  mutate(diff = per_trek/elog - 1) %>% 
+  mutate(diff = scales::percent(diff, accuracy=1)) %>% 
+  pander::pandoc.table(., 
+                       style        = "simple",
+                       split.tables = 200, 
+                       split.cells  = c(rep(7,10)),
+                       justify      = "left",
+                       missing      =" ",
+                       big.mark     = ',', 
+                       round        = c(0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0) )
+
+
+```
+
+\newpage
+
+Aantal records met afwezigheid van ruimtelijke informatie
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE, comment=NA, fig.asp=0.6}
+
+pefa %>% 
+  group_by(vessel, trip, source, haul) %>% 
+  summarise(
+    na_economiczone = sum(is.na(economiczone), na.rm=TRUE),
+    na_rect         = sum(is.na(rect), na.rm=TRUE),
+    na_faozone      = sum(is.na(faozone), na.rm=TRUE),
+    na_lat          = sum(is.na(lat), na.rm=TRUE),
+    na_lon          = sum(is.na(lon), na.rm=TRUE),
+  ) %>% 
+  filter(!(na_economiczone+na_rect+na_faozone+na_lat+na_lon == 0)) %>% 
+  pander::pandoc.table(., 
+                       style        = "simple",
+                       split.tables = 200, 
+                       split.cells  = c(rep(7,10)),
+                       justify      = "left",
+                       missing      =" ",
+                       big.mark     = ',', 
+                       round        = c(0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0) )
+
+```
+
+\newpage
+
+Per ICES vak
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE, comment=NA, fig.asp=0.6}
+
+pefa %>% 
+  group_by(vessel, trip, source, rect) %>% 
+  summarise(
+    weight = sum(weight, na.rm=TRUE)
+  ) %>% 
+  reshape2::dcast(vessel+trip+rect ~ source, value.var = "weight", sum, margins="vessel") %>% 
+  mutate(diff = per_trek/elog - 1) %>% 
+  mutate(diff = scales::percent(diff, accuracy=1)) %>% 
+  pander::pandoc.table(., 
+                       style        = "simple",
+                       split.tables = 200, 
+                       split.cells  = c(rep(7,10)),
+                       justify      = "left",
+                       missing      =" ",
+                       big.mark     = ',', 
+                       round        = c(0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0) )
+
+
+```
+
+\newpage
+
+Op de kaart
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE, comment=NA, fig.asp=1.2}
+
+spatialdir <- "C:/DATA/RDATA"
+
+load(file.path(spatialdir, "world_mr_sf.RData"))
+load(file.path(spatialdir, "world_mr_df.RData"))
+rect_df <-
+  loadRData(file.path(spatialdir, "rect_df.RData")) %>% 
+  rename(rect=ICESNAME) %>% 
+  group_by(rect) %>% 
+  filter(row_number() ==1) %>% 
+  dplyr::select(rect, lon=long, lat)
+
+xmin <- floor(min(pefa$lon, na.rm=TRUE))
+xmax <- ceiling(max(pefa$lon, na.rm=TRUE))
+ymin <- floor(2*min(pefa$lat, na.rm=TRUE))/2
+ymax <- ceiling(2*max(pefa$lat, na.rm=TRUE))/2
+
+pefa %>%
+  filter(source=="per_trek") %>% 
+  group_by(vessel, trip, haul, lat, lon) %>%
+  summarise(
+    weight = sum(weight, na.rm=TRUE)) %>%
+  ggplot() +
+  
+  theme_publication() +
+  theme(
+    panel.grid.minor = element_blank(),
+    text             = element_text(size=12),
+    plot.margin      = unit(c(0,0,0,0), "cm"),
+    panel.background = element_rect(fill = "lightskyblue1")
+  ) +
+  
+  
+  coord_quickmap(xlim=c(xmin,xmax) , ylim=c(ymin, ymax)) +
+  # coord_quickmap(xlim=c(xmin,xmax) , ylim=c(ymin, 51)) +
+  
+  geom_text(data=rect_df, aes(x=lon, y=lat, label=rect),
+            hjust=0, vjust=0, nudge_x=0.05, nudge_y=0.025, colour="white") +
+  
+  geom_polygon(data=world_mr_df, aes(x=long, y=lat, group=group), fill = "grey75") +
+  
+  geom_point(aes(x=lon, y=lat, size = weight, colour = str_pad(haul, width=2, pad="0")),
+              alpha = 0.5) +
+  scale_size(range = c(1,10)) +
+  
+  scale_x_continuous(breaks = seq(floor(xmin), ceiling(xmax), 1)) +
+  scale_y_continuous(breaks = seq(floor(2*ymin)/2, ceiling(2*ymax)/2, 0.5)) +
+  labs(x = NULL, y = NULL, size = "kg aanvoer/trek", colour="") +
+  guides(size = guide_legend(nrow = 1), colour = "none") 
+
+```

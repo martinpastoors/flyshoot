@@ -67,6 +67,7 @@ load(file.path(onedrive, "kisten.RData"))
 # load(file.path(onedrive, "marelec_trip.RData"))
 # load(file.path(onedrive, "marelec_trek.RData"))
 load(file.path(onedrive, "elog.RData"))
+load(file.path(onedrive, "elog_trek.RData"))
 load(file.path(onedrive, "trip.RData"))
 
 # trip <-
@@ -306,6 +307,7 @@ if(!is_empty(filelist)){
         # start from hh list and add haul information
         h <-
           hh %>% 
+          filter(vessel == myvessel, trip == mytrip) %>% 
           left_join(dplyr::select(t,
                                   -haul, -tijdbeginuitzetten, -tijdeindeuitzetten, -tijdeindehalen), 
                     by=c("vessel","trip","date"))
@@ -702,6 +704,100 @@ if(!is_empty(filelist)){
     
   } # end of pefa elog for loop
 
+} # end of not empty filelist
+
+# ----------------------------------------------------------------------------
+# read the pefa elog data per trek
+# ----------------------------------------------------------------------------
+
+filelist <- list.files(
+  path=file.path(tripdir, "/_te verwerken"),
+  pattern="elog_pefa_per_trek",
+  full.names = TRUE)
+
+if(!is_empty(filelist)){
+  
+  i <- 1
+  for (i in 1:length(filelist)) {
+    
+    myvessel <- stringr::word(basename(filelist[i]), 1, sep=" ") %>%
+      unlist()     
+    mytrip <- stringr::word(basename(filelist[i]), 2, sep=" ") %>%
+      gsub("_","",.) %>%
+      unlist()     
+    
+    print(paste("elog pefa per trek", myvessel, mytrip))
+    
+    # TO DO: SET HAULID TO START AT 1 (haulid-min(haulid))
+    
+    e  <-
+      readxl::read_excel(filelist[i], col_names=TRUE, col_types="text",
+                         .name_repair =  ~make.names(., unique = TRUE))  %>% 
+      data.frame() %>% 
+      lowcase() %>% 
+      rename(rect = icesrectangle) %>% 
+      # rename(vessel = vesselnumber) %>% 
+      # mutate(vessel = gsub(" ","", vessel)) %>% 
+      # mutate(vessel = ifelse(vessel=="SL09", "SL9","")) %>% 
+      
+      rename(lat = latitude) %>% 
+      rename(lon = longitude) %>% 
+      
+      {if(any(grepl("haulid",names(.)))) {rename(., haul = haulid)} else{.}} %>% 
+      
+      mutate(across (any_of(c("boxes", "meshsize", "haul")),
+                     as.integer)) %>%
+      mutate(across (c("catchdate", "departuredate","arrivaldate", "auctiondate", "weight", "lat", "lon", "conversionfactor"),
+                     as.numeric)) %>%
+      # mutate(across(c("catchdate"),
+      #               ~as.POSIXct(. * (60*60*24), origin="1899-12-30", tz="UTC"))) %>% 
+      mutate(across (c("catchdate", "departuredate","arrivaldate", "auctiondate"), 
+                     ~excel_timezone_to_utc(., timezone="UTC"))) %>% 
+      
+      mutate(date   = as.Date(catchdate)) %>% 
+      
+      {if(any(grepl("haul",names(.)))) {mutate(., haul = haul - min(haul, na.rm=TRUE)+1)} else{.}} %>% 
+      # dplyr::select(-catchdate) %>% 
+      
+      mutate(
+        year       = lubridate::year(date),
+        quarter    = lubridate::quarter(date),
+        month      = lubridate::month(date),
+        week       = lubridate::week(date),
+        yday       = lubridate::yday(date)) %>% 
+      
+      mutate(vessel = myvessel) %>% 
+      mutate(trip = mytrip) %>% 
+      
+      # Keep only the first lat long observation of each haul
+      group_by(vessel, trip, haul) %>% 
+      mutate(
+        lat = first(na.omit(lat)),
+        lon = first(na.omit(lon))
+      ) %>%
+      mutate(across (c("lat","lon"),    ~zoo::na.locf(.))) %>% 
+      ungroup()
+      
+
+    # add to database
+    if(add_data) {
+      
+      elog_trek <- 
+        elog_trek %>%
+        filter(paste0(vessel, trip) %notin% paste0(myvessel, mytrip)) %>%
+        bind_rows(e)
+      
+      save(elog_trek,         file = file.path(onedrive, "elog_trek.RData"))  
+      
+    }
+    
+    if (move_data) {
+      file.copy(filelist[i], file.path(tripdir,myvessel), overwrite = TRUE)        
+      file.remove(filelist[i])        
+    } 
+    
+  } # end of pefa elog for loop
+  
 } # end of not empty filelist
 
 # ----------------------------------------------------------------------------
