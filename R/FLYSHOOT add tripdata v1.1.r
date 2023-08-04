@@ -87,30 +87,121 @@ load(file.path(onedrive, "trip.RData"))
 #   # add distance within haul if zero
 #   mutate(distance = ifelse(distance == 0, 4.0, distance)) %>% 
 #   dplyr::select(-lat2, -lon2)
-  
+
 # ----------------------------------------------------------------------------
-# Just in case: calculate hauls from marelec lot data
+# inventory of files to be processed
 # ----------------------------------------------------------------------------
 
-filelist <- list.files(
+treklijst_list <- list.files(
+  path=file.path(tripdir, "/_te verwerken"),
+  pattern="treklijst",
+  full.names = TRUE)
+
+kisten_list <- list.files(
   path=file.path(tripdir, "/_te verwerken"),
   pattern="kisten",
   full.names = TRUE)
 
-if(!is_empty(filelist)){
+pefa_list <- list.files(
+  path=file.path(tripdir, "/_te verwerken"),
+  pattern="elog pefa",
+  full.names = TRUE)
+
+pefa_trek_list <- list.files(
+  path=file.path(tripdir, "/_te verwerken"),
+  pattern="elog_pefa_per_trek",
+  full.names = TRUE)
+
+mcatch_list <- list.files(
+  path=file.path(tripdir, "_te verwerken"),
+  pattern="elog mcatch",
+  full.names = TRUE)
+
+my_files <-
+  data.frame(stringsAsFactors = FALSE) %>% 
+  
+  {if(!is_empty(treklijst_list)) {
+    bind_rows(
+      .,
+      data.frame(
+        vessel = stringr::word(basename(treklijst_list), 1),
+        trip   = stringr::word(basename(treklijst_list), 2),
+        source = "treklijst",
+        file   = kisten_list
+      )      
+    )}  else {.}
+  } %>% 
+  
+  {if(!is_empty(kisten_list)) {
+    bind_rows(
+      .,
+      data.frame(
+        vessel = stringr::word(basename(kisten_list), 1),
+        trip   = stringr::word(basename(kisten_list), 2),
+        source = "kisten",
+        file   = kisten_list
+      )      
+    )}  else {.}
+  } %>% 
+  
+  {if(!is_empty(pefa_list)) {
+    bind_rows(
+      ., 
+      data.frame(
+        vessel = stringr::word(basename(pefa_list), 1),
+        trip   = stringr::word(basename(pefa_list), 2),
+        source = "pefa",
+        file   = kisten_list
+      )
+    )} else {.}
+  } %>% 
+  
+  {if(!is_empty(pefa_trek_list)) {
+    bind_rows(
+      ., 
+      data.frame(
+        vessel = stringr::word(basename(pefa_trek_list), 1),
+        trip   = stringr::word(basename(pefa_trek_list), 2),
+        source = "pefa_trek",
+        file   = kisten_list
+      )
+    )} else {.}
+  } %>% 
+  
+  {if(!is_empty(mcatch_list)) {
+    bind_rows(
+      ., 
+      data.frame(
+        vessel = stringr::word(basename(mcatch_list), 1),
+        trip   = stringr::word(basename(mcatch_list), 2),
+        source = "mcatch",
+        file   = kisten_list
+      )
+    )} else {.}
+  } 
+
+my_trips <-
+  my_files %>% 
+  distinct(vessel, trip)
+
+# ----------------------------------------------------------------------------
+# Just in case: calculate hauls from marelec lot data
+# ----------------------------------------------------------------------------
+
+if(!is_empty(kisten_list)){
   
   hh <- data.frame(stringsAsFactors = FALSE)
   
   i <- 1
-  for (i in 1:length(filelist)) {
+  for (i in 1:length(kisten_list)) {
     
-    myvessel <- stringr::word(basename(filelist[i]), 1, sep=" ") %>%
+    myvessel <- stringr::word(basename(kisten_list[i]), 1, sep=" ") %>%
       unlist()     
-    mytrip <- stringr::word(basename(filelist[i]), 2, sep=" ") %>%
+    mytrip <- stringr::word(basename(kisten_list[i]), 2, sep=" ") %>%
       gsub("_","",.) %>%
       unlist()     
     mystartrow <-
-      readxl::read_excel(filelist[i],
+      readxl::read_excel(kisten_list[i],
                          range="A1:A20",
                          col_names=FALSE, 
                          col_types="text",
@@ -127,7 +218,7 @@ if(!is_empty(filelist)){
         
         hh,
         
-        readxl::read_excel(filelist[i],
+        readxl::read_excel(kisten_list[i],
                            skip=mystartrow-1,
                            col_names=TRUE, 
                            col_types="text",
@@ -167,38 +258,33 @@ if(!is_empty(filelist)){
     
   } # end of marelec for loop
   
-} # end of not empty filelist
+} # end of not empty kisten_list
 
 
 # ----------------------------------------------------------------------------
 # read the treklijst data
 # ----------------------------------------------------------------------------
 
-filelist <- list.files(
-  path=file.path(tripdir, "/_te verwerken"),
-  pattern="treklijst",
-  full.names = TRUE)
-
 i <- 1
-if(!is_empty(filelist)){
+if(!is_empty(treklijst_list)){
   
-  for (i in 1:length(filelist)) {
+  for (i in 1:length(treklijst_list)) {
   
   # vessel and trip
-    myvessel <- stringr::word(basename(filelist[i]), 1, sep=" ")
+    myvessel <- stringr::word(basename(treklijst_list[i]), 1, sep=" ")
 
-    mytrip <- stringr::word(basename(filelist[i]), 2, sep=" ") %>%
+    mytrip <- stringr::word(basename(treklijst_list[i]), 2, sep=" ") %>%
       gsub("_","",.) %>%
       unlist()     
     # mytrip <-
-    #   stringr::word(basename(filelist[i]), 2, sep=" ") %>%
+    #   stringr::word(basename(treklijst_list[i]), 2, sep=" ") %>%
     #   str_extract_all(.,"\\(?[0-9,\\-]+\\)?") %>%
     #   unlist() %>% 
     #   paste(., collapse="")
     
     # number of used rows    
     r <-
-      readxl::read_excel(filelist[i],
+      readxl::read_excel(treklijst_list[i],
                  sheet = "Haul",  col_names=TRUE, col_types="text",
                  .name_repair =  ~make.names(., unique = TRUE))  %>% 
       data.frame() %>% 
@@ -218,17 +304,17 @@ if(!is_empty(filelist)){
     if(r > 0) {
       
       # check in trip number
-      if (c(readxl::read_excel(filelist[i], 
+      if (c(readxl::read_excel(treklijst_list[i], 
                                sheet = "Haul",  
                                col_names=TRUE, 
                                .name_repair =  ~make.names(., unique = TRUE)) %>% 
             filter(row_number()==1) %>% 
             dplyr::pull(trip)) != mytrip) 
-        stop(paste(basename(filelist[i]), ": tripnumber problem in list not equal to tripnumber in filename"))
+        stop(paste(basename(treklijst_list[i]), ": tripnumber problem in list not equal to tripnumber in filename"))
 
       # first read the haul data
       t <-
-        readxl::read_excel(filelist[i],
+        readxl::read_excel(treklijst_list[i],
                            sheet = "Haul",  col_names=TRUE, col_types="text",
                            .name_repair =  ~make.names(., unique = TRUE))  %>% 
         data.frame() %>% 
@@ -478,8 +564,8 @@ if(!is_empty(filelist)){
       }
       
       if (move_data) {
-        file.copy(filelist[i], file.path(tripdir, myvessel), overwrite = TRUE)        
-        file.remove(filelist[i])        
+        file.copy(treklijst_list[i], file.path(tripdir, myvessel), overwrite = TRUE)        
+        file.remove(treklijst_list[i])        
       } 
       
       
@@ -487,7 +573,7 @@ if(!is_empty(filelist)){
   
   } # end of treklijst for loop
   
-} # end of not empty filelist
+} # end of not empty treklijst_list
 
 # haul <- haul %>% filter(vessel != "SCH135")  
 
@@ -495,23 +581,18 @@ if(!is_empty(filelist)){
 # read marelec lot data = kisten
 # ----------------------------------------------------------------------------
 
-filelist <- list.files(
-  path=file.path(tripdir, "/_te verwerken"),
-  pattern="kisten",
-  full.names = TRUE)
-
-if(!is_empty(filelist)){
+if(!is_empty(kisten_list)){
 
   # i <- 1
-  for (i in 1:length(filelist)) {
+  for (i in 1:length(kisten_list)) {
     
-    myvessel <- stringr::word(basename(filelist[i]), 1, sep=" ") %>%
+    myvessel <- stringr::word(basename(kisten_list[i]), 1, sep=" ") %>%
       unlist()     
-    mytrip <- stringr::word(basename(filelist[i]), 2, sep=" ") %>%
+    mytrip <- stringr::word(basename(kisten_list[i]), 2, sep=" ") %>%
       gsub("_","",.) %>%
       unlist()     
     mystartrow <-
-      readxl::read_excel(filelist[i],
+      readxl::read_excel(kisten_list[i],
                          range="A1:A20",
                          col_names=FALSE, 
                          col_types="text",
@@ -524,11 +605,11 @@ if(!is_empty(filelist)){
     print(paste("kisten", myvessel, mytrip))
     
     h <- haul %>% filter(vessel ==myvessel, trip==mytrip)
-    if(!exists("h")) stop(paste("Probleem: treklijst niet beschikbaar voor",myvessel, mytrip))
-    if(nrow(h)==0)   stop(paste("Probleem: treklijst leeg",myvessel, mytrip))
+    if(!exists("h") & !exists("hh")) stop(paste("Probleem: treklijst niet beschikbaar voor",myvessel, mytrip))
+    if(nrow(h)==0 & nrow(hh)==0)     stop(paste("Probleem: treklijst leeg",myvessel, mytrip))
 
     m  <-
-      readxl::read_excel(filelist[i],
+      readxl::read_excel(kisten_list[i],
                          skip=mystartrow-1,
                          col_names=TRUE, 
                          col_types="text",
@@ -564,14 +645,29 @@ if(!is_empty(filelist)){
     #                   m.datetime >= h.haultime") %>%
     #   as_tibble()
     
-    t <-
-      sqldf::sqldf("select m.vessel, m.trip, m.lotnummer, m.soorten, m.maat, m.gewicht,
+    if(nrow(h) >0) {
+      
+      t <-
+        sqldf::sqldf("select m.vessel, m.trip, m.lotnummer, m.soorten, m.maat, m.gewicht,
                            m.datetime, m.haul2, h.haul from m
             join h on m.vessel   == h.vessel and
                       m.trip     == h.trip and
                       m.datetime >= h.haultime and
                       m.datetime <  h.nexthaultime") %>%
-      as_tibble()
+        as_tibble()
+      
+    } else {
+      
+      t <-
+        sqldf::sqldf("select m.vessel, m.trip, m.lotnummer, m.soorten, m.maat, m.gewicht,
+                           m.datetime, m.haul2, hh.haul from m
+            join hh on m.vessel   == hh.vessel and
+                       m.trip     == hh.trip and
+                       m.datetime >= hh.haultime and
+                       m.datetime <  hh.nexthaultime") %>%
+        as_tibble()
+      
+    }
     
     # htest <- h %>% filter(haul %in% c(22,27)) %>% dplyr::select(vessel, trip, haul, haultime, nexthaultime)
     # mtest <- m %>% filter(lotnummer==299)
@@ -605,13 +701,13 @@ if(!is_empty(filelist)){
     }
     
     if (move_data) {
-      file.copy(filelist[i], file.path(tripdir,myvessel), overwrite = TRUE)        
-      file.remove(filelist[i])        
+      file.copy(kisten_list[i], file.path(tripdir,myvessel), overwrite = TRUE)        
+      file.remove(kisten_list[i])        
     } 
     
   } # end of marelec for loop
   
-} # end of not empty filelist
+} # end of not empty kisten_list
 
 
 
@@ -620,19 +716,14 @@ if(!is_empty(filelist)){
 # read the pefa elog data
 # ----------------------------------------------------------------------------
 
-filelist <- list.files(
-  path=file.path(tripdir, "/_te verwerken"),
-  pattern="elog pefa",
-  full.names = TRUE)
-
-if(!is_empty(filelist)){
+if(!is_empty(pefa_list)){
   
   i <- 1
-  for (i in 1:length(filelist)) {
+  for (i in 1:length(pefa_list)) {
 
-    myvessel <- stringr::word(basename(filelist[i]), 1, sep=" ") %>%
+    myvessel <- stringr::word(basename(pefa_list[i]), 1, sep=" ") %>%
       unlist()     
-    mytrip <- stringr::word(basename(filelist[i]), 2, sep=" ") %>%
+    mytrip <- stringr::word(basename(pefa_list[i]), 2, sep=" ") %>%
       gsub("_","",.) %>%
       unlist()     
     
@@ -641,7 +732,7 @@ if(!is_empty(filelist)){
     # TO DO: SET HAULID TO START AT 1 (haulid-min(haulid))
     
     e  <-
-      readxl::read_excel(filelist[i], col_names=TRUE, col_types="text",
+      readxl::read_excel(pefa_list[i], col_names=TRUE, col_types="text",
                          .name_repair =  ~make.names(., unique = TRUE))  %>% 
       data.frame() %>% 
       lowcase() %>% 
@@ -662,7 +753,7 @@ if(!is_empty(filelist)){
       # mutate(across(c("catchdate"),
       #               ~as.POSIXct(. * (60*60*24), origin="1899-12-30", tz="UTC"))) %>% 
       mutate(across (c("catchdate", "departuredate","arrivaldate", "auctiondate"), 
-                     ~excel_timezone_to_utc(., timezone="Europe/Amsterdam"))) %>% 
+                     ~excel_timezone_to_utc(., timezone="UTC"))) %>% 
       
       mutate(date   = as.Date(catchdate)) %>% 
       
@@ -698,31 +789,26 @@ if(!is_empty(filelist)){
     }
     
     if (move_data) {
-      file.copy(filelist[i], file.path(tripdir,myvessel), overwrite = TRUE)        
-      file.remove(filelist[i])        
+      file.copy(pefa_list[i], file.path(tripdir,myvessel), overwrite = TRUE)        
+      file.remove(pefa_list[i])        
     } 
     
   } # end of pefa elog for loop
 
-} # end of not empty filelist
+} # end of not empty pefa_list
 
 # ----------------------------------------------------------------------------
 # read the pefa elog data per trek
 # ----------------------------------------------------------------------------
 
-filelist <- list.files(
-  path=file.path(tripdir, "/_te verwerken"),
-  pattern="elog_pefa_per_trek",
-  full.names = TRUE)
-
-if(!is_empty(filelist)){
+if(!is_empty(pefa_trek_list)){
   
   i <- 1
-  for (i in 1:length(filelist)) {
+  for (i in 1:length(pefa_trek_list)) {
     
-    myvessel <- stringr::word(basename(filelist[i]), 1, sep=" ") %>%
+    myvessel <- stringr::word(basename(pefa_trek_list[i]), 1, sep=" ") %>%
       unlist()     
-    mytrip <- stringr::word(basename(filelist[i]), 2, sep=" ") %>%
+    mytrip <- stringr::word(basename(pefa_trek_list[i]), 2, sep=" ") %>%
       gsub("_","",.) %>%
       unlist()     
     
@@ -731,7 +817,7 @@ if(!is_empty(filelist)){
     # TO DO: SET HAULID TO START AT 1 (haulid-min(haulid))
     
     e  <-
-      readxl::read_excel(filelist[i], col_names=TRUE, col_types="text",
+      readxl::read_excel(pefa_trek_list[i], col_names=TRUE, col_types="text",
                          .name_repair =  ~make.names(., unique = TRUE))  %>% 
       data.frame() %>% 
       lowcase() %>% 
@@ -792,38 +878,33 @@ if(!is_empty(filelist)){
     }
     
     if (move_data) {
-      file.copy(filelist[i], file.path(tripdir,myvessel), overwrite = TRUE)        
-      file.remove(filelist[i])        
+      file.copy(pefa_trek_list[i], file.path(tripdir,myvessel), overwrite = TRUE)        
+      file.remove(pefa_trek_list[i])        
     } 
     
   } # end of pefa elog for loop
   
-} # end of not empty filelist
+} # end of not empty pefa_trek_list
 
 # ----------------------------------------------------------------------------
 # read the m-catch elog data
 # ----------------------------------------------------------------------------
 
-filelist <- list.files(
-  path=file.path(tripdir, "_te verwerken"),
-  pattern="elog mcatch",
-  full.names = TRUE)
-
-if(!is_empty(filelist)){
+if(!is_empty(mcatch_list)){
   
   # i <- 1
-  for (i in 1:length(filelist)) {
+  for (i in 1:length(mcatch_list)) {
 
-    myvessel <- stringr::word(basename(filelist[i]), 1, sep=" ") %>%
+    myvessel <- stringr::word(basename(mcatch_list[i]), 1, sep=" ") %>%
       unlist()     
-    mytrip <- stringr::word(basename(filelist[i]), 2, sep=" ") %>%
+    mytrip <- stringr::word(basename(mcatch_list[i]), 2, sep=" ") %>%
       gsub("_","",.) %>%
       unlist()     
     
     print(paste("elog mcatch", myvessel, mytrip))
     
     e  <-
-      readxl::read_excel(filelist[i], 
+      readxl::read_excel(mcatch_list[i], 
                          # sheet = "landed catch details table",
                          sheet = "catch details table",
                          col_names=TRUE, col_types="text",
@@ -895,12 +976,12 @@ if(!is_empty(filelist)){
     }
     
     if (move_data) {
-      file.copy(filelist[i], file.path(tripdir,myvessel), overwrite = TRUE)        
-      file.remove(filelist[i])        
+      file.copy(mcatch_list[i], file.path(tripdir,myvessel), overwrite = TRUE)        
+      file.remove(mcatch_list[i])        
     } 
 
     
   } # end of mcatch elog for loop
 
-} # end of not empty filelist
+} # end of not empty mcatch_list
 

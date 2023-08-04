@@ -22,10 +22,10 @@ rm(list=ls())
 # Select vessel and trip
 # ------------------------------------------------------------
 
-# setvessel<-"SCH135"   ;settrip<-c("2023343") ;
-# setvessel<-"SCH65"   ;settrip<-c("2023259") ;
-setvessel<-"SL9"   ;settrip<-c("2023434","2023435","2023436") ;
-# setvessel<-c("Z99", "SCH99")   ;settrip<-"2023003" ;
+setvessel<-"SCH135"   ;settrip<-c("2023348","2023349") ; comparisons <- TRUE
+# setvessel<-"SCH65"   ;settrip<-c("2023264","2023265") ; comparisons <- FALSE
+# setvessel<-"SL9"   ;settrip<-c("2023437","2023438","2023439", "2023441") ; comparisons <- TRUE
+# setvessel<-c("Z99", "SCH99")   ;settrip<- c("2023085") ; comparisons <- FALSE
 
 # ------------------------------------------------------------
 
@@ -33,7 +33,6 @@ knitr::opts_chunk$set(echo = FALSE,	message = FALSE,	warning = FALSE,	comment = 
 knitr::opts_chunk$set(fig.width=10) 
 
 options(dplyr.summarise.inform = FALSE)
-
 
 # Libraries
 library(rmarkdown)                   # note: requires knitr 1.21
@@ -170,15 +169,15 @@ trip2 <-
 # calculate the scaling of plots
 # h %>% filter(lat==max(lat, na.rm=TRUE)) %>% View()
 
-# xmin <- min(h$lon, na.rm=TRUE)
-# xmax <- max(h$lon, na.rm=TRUE)
-# ymin <- min(h$lat, na.rm=TRUE)
-# ymax <- max(h$lat, na.rm=TRUE)
+xmin <- floor(min(h$lon, tt$lon, na.rm=TRUE))
+xmax <- ceiling(max(h$lon, tt$lon, na.rm=TRUE))
+ymin <- floor(2*min(h$lat, tt$lat, na.rm=TRUE))/2
+ymax <- ceiling(2*max(h$lat, tt$lat, na.rm=TRUE))/2
 
-xmin <- floor(min(tt$lon, e$lon, na.rm=TRUE))
-xmax <- ceiling(max(tt$lon, e$lon, na.rm=TRUE))
-ymin <- floor(2*min(tt$lat, e$lat, na.rm=TRUE))/2
-ymax <- ceiling(2*max(tt$lat, e$lat, na.rm=TRUE))/2
+# xmin <- floor(min(tt$lon, e$lon, na.rm=TRUE))
+# xmax <- ceiling(max(tt$lon, e$lon, na.rm=TRUE))
+# ymin <- floor(2*min(tt$lat, e$lat, na.rm=TRUE))/2
+# ymax <- ceiling(2*max(tt$lat, e$lat, na.rm=TRUE))/2
 
 # xmin <- floor(2 * (min(h$lon, na.rm=TRUE)-0.5))/2;
 # xmax <- ceiling(2 * (max(h$lon, na.rm=TRUE)+0.5))/2;
@@ -429,59 +428,8 @@ _`r tab_nums("vangstpersoortendag")`_
 
 ```{r catchperhaul, echo=FALSE, fig.asp=1.0, fig.align="center", message=FALSE, warning=FALSE}
 
-fig_nums(
-  name    = "catchperhaul", level   = 1, display = FALSE,
-  caption = "Vangst (aanvoer) per trek (kg)")
-
 xlim <- c(xmin,xmax); ylim <- c(ymin,ymax)
 
-# if (sum(!is.na(h$totalcatch)) >0 ) {
-# 
-# 
-#   tt %>%
-#     arrange(haul) %>%
-# 
-#     # ggplot(aes(x=shootlon, y=shootlat)) +
-#     ggplot() +
-# 
-#     theme_publication() +
-#     theme(
-#       # panel.grid.major = element_blank(),
-#       panel.grid.minor = element_blank(),
-#       text             = element_text(size=12),
-#       plot.margin      = unit(c(0,0,0,0), "cm"),
-#       panel.background = element_rect(fill = "lightskyblue1")
-#     ) +
-# 
-# 
-#     coord_quickmap(xlim=xlim , ylim=ylim) +
-# 
-#     geom_text(data=rect_df, aes(x=lon, y=lat, label=rect),
-#               hjust=0, vjust=0, nudge_x=0.05, nudge_y=0.025, colour="white") +
-# 
-#     geom_polygon(data=world_mr_df, aes(x=long, y=lat, group=group), fill = "grey75") +
-# 
-#     geom_path (aes(x=lon, y=lat, colour=trip)) +
-#     geom_point(aes(x=lon, y=lat, size = totalcatch, colour=trip), 
-#                 alpha = 0.5) +
-#     geom_point(data=filter(tt, 
-#                            action=="embarked"), 
-#                aes(x=lon, y=lat), colour="green", size=5, alpha=0.5) +
-#     geom_point(data=filter(tt, 
-#                            action=="disembarked"), 
-#                aes(x=lon, y=lat), colour="red", size=5, alpha=0.5) +
-#     
-#     # geom_text(aes(x=lon, y=lat, label=haul), 
-#     #             hjust=0, vjust=0.5) +
-#   
-#     scale_size(range = c(1,10)) +
-# 
-#     scale_x_continuous(breaks = seq(floor(xmin), ceiling(xmax), 1)) +
-#     scale_y_continuous(breaks = seq(floor(2*ymin)/2, ceiling(2*ymax)/2, 0.5)) +
-#     labs(x = NULL, y = NULL, size = "totale vangst/trek", colour="") +
-#     guides(size = guide_legend(nrow = 1))
-#     # + facet_wrap(~source)
-# } 
 
 if (sum(!is.na(m$gewicht)) >0 ) {
 
@@ -538,57 +486,7 @@ if (sum(!is.na(m$gewicht)) >0 ) {
 
 ```
 
-```{r catchperhaul2, eval=FALSE, fig.align="center", fig.asp=1.0, message=FALSE, warning=FALSE, include=FALSE}
-
-# NOT SHOWN; problem with elog
-
-fig_nums(
-  name    = "catchperhaul", level   = 1, display = FALSE,
-  caption = "Vangst per trek (kg)")
-
-xlim <- c(xmin,xmax); ylim <- c(ymin,ymax)
-
-t1 <-
-  bind_rows(
-    tt %>% mutate(source="treklijst", catchtype="totalcatch") %>% rename(data=totalcatch),
-    e %>% group_by(vessel, trip, haul, lat, lon) %>% summarise(data=sum(weight, na.rm=TRUE)) %>% mutate(source="elog", catchtype="aanvoer")
-  )
-
-t1 %>% 
-  ggplot() + 
-  theme_publication() +
-  theme(
-    panel.grid.minor = element_blank(),
-    text             = element_text(size=12),
-    plot.margin      = unit(c(0,0,0,0), "cm"),
-    panel.background = element_rect(fill = "lightskyblue1")
-  ) +  
-
-  coord_quickmap(xlim=xlim , ylim=ylim) +
-
-  geom_text(data=rect_df, aes(x=lon, y=lat, label=rect), 
-            hjust=0, vjust=0, nudge_x=0.05, nudge_y=0.025, colour="white") +
-
-  geom_polygon(data=world_mr_df, aes(x=long, y=lat, group=group), fill = "grey75") +
-
-  geom_path (aes(x=lon, y=lat, colour=source)) +
-  geom_point(aes(x=lon, y=lat, size = data, shape=catchtype, colour = source), 
-              alpha = 0.5) +
-  geom_point(data=filter(t1, action=="embarked"), aes(x=lon, y=lat), colour="green", size=5, alpha=0.5) +
-  geom_point(data=filter(t1, action=="disembarked"), aes(x=lon, y=lat), colour="red", size=5, alpha=0.5) +
-
-  scale_size(range = c(1,10)) +
-  
-  scale_x_continuous(breaks = seq(floor(xmin), ceiling(xmax), 1)) +
-  scale_y_continuous(breaks = seq(floor(2*ymin)/2, ceiling(2*ymax)/2, 0.5)) +
-  labs(x = NULL, y = NULL, size = "totale vangst/trek", colour="") +
-  guides(size = guide_legend(nrow = 1)) 
-  # + facet_wrap(~source)
-
-```
-
-_`r fig_nums("catchperhaul")`_
-
+_`r fig_nums("totalcatchperhaul")`_
 
 <!-- ########################################################################################## -->
 <!-- Figure: vangst per soort en klasse --------------------------- -->
@@ -724,65 +622,11 @@ if (nrow(m) > 0 & sum(!is.na(h$totalcatch))>0) {
 }
 
 my_caption   <- ifelse(print_option, paste0("_", fig_nums("aanvoerentotalevangst"),"_"), "")
-
-
-
-
-
-
-# print_option <- FALSE
-# 
-# # create list of catch by species by haul. From hm, or sph or else species = "oth"
-# if (nrow(m) > 0 & sum(!is.na(h$totalcatch))>0) {
-# 
-#   print_option <- TRUE
-#   
-#   fig_nums(
-#     name    = "aanvoerentotalevangst", level   = 1, display = FALSE,
-#     caption = "Vergelijking van aanvoer (Marelec) en totale vangst (schatting)")
-#   
-#   t1 <-
-#     h %>% 
-#     filter(totalcatch > 0) %>% 
-#     group_by(vessel, trip, date) %>% 
-#     summarise(data = sum(totalcatch, na.rm=TRUE)) %>% 
-#     mutate(variable = "totale vangst")
-# 
-#   t2 <-
-#     m %>% 
-#     mutate(date = as.Date(datetime)) %>% 
-#     filter(date %in% t1$date) %>% 
-#     group_by(vessel, trip, date) %>% 
-#     summarise(data = sum(gewicht, na.rm=TRUE)) %>% 
-#     mutate(variable = "aanvoer")
-#     
-# 
-#   p <-
-#     t1 %>% 
-#     ggplot(aes(x=date, y=data)) +
-#     theme_publication() +
-#     # theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
-#     geom_bar(aes(fill="totale vangst"),
-#              stat="identity", alpha=0.5, width=0.5, just=0.8) +
-#     geom_bar(data=t2,
-#              aes(fill="aanvoer"),
-#              stat="identity", alpha=0.5, width=0.5, just=0.2) +
-#     scale_fill_manual(name='',
-#                      breaks=c('aanvoer', 'totale vangst'),
-#                      values=c('aanvoer'='blue', 'totale vangst'='red')) +
-#     # scale_x_continuous(breaks=seq(1,max(t1$haul, m$haul, na.rm=TRUE), 1)) +
-#     labs(x="trek", y="kg", title="totale vangst en aanvoer per trek") +
-#     facet_wrap(~trip, ncol=1, scales = "free")
-#     
-#   p
-#   
-#   
-# }
-# 
-# my_caption   <- ifelse(print_option, paste0("_", fig_nums("aanvoerentotalevangst"),"_"), "")
-
+print_option <- FALSE
 
 ```
+
+_`r my_caption`_
 
 
 <!-- ########################################################################################## -->
@@ -795,9 +639,13 @@ my_caption   <- ifelse(print_option, paste0("_", fig_nums("aanvoerentotalevangst
 # create list of catch by species by week
 if (nrow(m) > 0) {
   
+  fig_nums(
+    name    = "aanvoerperweek", level   = 1, display = FALSE,
+    caption = "Vergelijking van aanvoer per soort en week")
+  
   s <-
     elog %>% 
-    filter(vessel %in% setvessel, year == 2023) %>% 
+    filter(vessel %in% setvessel, year == 2023, date <= max(e$date)) %>% 
     
     group_by(species) %>% 
     summarise(weight = sum(weight, na.rm=TRUE)) %>% 
@@ -813,7 +661,7 @@ if (nrow(m) > 0) {
 
   t <-
     elog %>% 
-    filter(vessel %in% setvessel, year == 2023) %>% 
+    filter(vessel %in% setvessel, year == 2023, date <= max(e$date)) %>% 
     
     mutate(species = ifelse(species %in% s$species, species, "ZZZ")) %>%
 
@@ -845,51 +693,155 @@ if (nrow(m) > 0) {
 
 ```
 
+_`r fig_nums("aanvoerperweek")`_
+
 
 <!-- ########################################################################################## -->
 <!-- Figure: Compare haul list with PEFA by haul                                                         -->
 <!-- ########################################################################################## -->
 
-```{r catchperhaul3, echo=FALSE, fig.asp=1.0, fig.align="center", message=FALSE, warning=FALSE}
+```{r catchperhaul3, echo=FALSE, fig.align="center", fig.asp=1.0, message=FALSE, warning=FALSE}
 
-fig_nums(
-  name    = "catchperhaul3", level   = 1, display = FALSE,
-  caption = "Vangst (aanvoer) per trek (kg): vergelijking treklijst met PEFA per trek")
-
-xlim <- c(xmin,xmax); ylim <- c(ymin,ymax)
-
-
-if (sum(!is.na(m$gewicht)) >0 ) {
-
-  t1 <-
-    m %>%
-    group_by(vessel, trip, haul=haul2) %>%
-    summarise(gewicht = sum(gewicht, na.rm=TRUE)) %>%
-
-    left_join(dplyr::select(h,
-                            vessel, trip, haul, lat, lon, date),
-              by = c("vessel","trip","haul")) %>% 
-    mutate(source="treklijst")
+if(comparisons) {
   
-  t2 <-
-    et %>% 
-    group_by(vessel, trip, haul, lat, lon, date) %>% 
-    summarise(gewicht = sum(weight, na.rm=TRUE)) %>% 
-    mutate(source="elog")
+  xlim <- c(xmin,xmax); ylim <- c(ymin,ymax)
+  
+  
+  if (sum(!is.na(m$gewicht)) >0 ) {
+
+      fig_nums(
+    name    = "catchperhaul3", level   = 1, display = FALSE,
+    caption = "Vangst (aanvoer) per trek (kg): vergelijking treklijst met PEFA per trek")
+  
+    t1 <-
+      m %>%
+      group_by(vessel, trip, haul=haul2) %>%
+      summarise(gewicht = sum(gewicht, na.rm=TRUE)) %>%
+  
+      left_join(dplyr::select(h,
+                              vessel, trip, haul, lat, lon, date),
+                by = c("vessel","trip","haul")) %>% 
+      mutate(source="treklijst")
     
+    t2 <-
+      et %>% 
+      group_by(vessel, trip, haul, lat, lon, date) %>% 
+      summarise(gewicht = sum(weight, na.rm=TRUE)) %>% 
+      mutate(source="elog")
+      
+  bind_rows(t1, t2) %>% 
+    
+      # ggplot(aes(x=shootlon, y=shootlat)) +
+      ggplot() +
+  
+      theme_publication() +
+      theme(
+        # panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        text             = element_text(size=12),
+        plot.margin      = unit(c(0,0,0,0), "cm"),
+        panel.background = element_rect(fill = "lightskyblue1")
+      ) +
+  
+  
+      coord_quickmap(xlim=xlim , ylim=ylim) +
+  
+      geom_text(data=rect_df, aes(x=lon, y=lat, label=rect),
+                hjust=0, vjust=0, nudge_x=0.05, nudge_y=0.025, colour="white") +
+  
+      geom_polygon(data=world_mr_df, aes(x=long, y=lat, group=group), fill = "grey75") +
+  
+      # geom_path(data=tt, aes(x=lon, y=lat)) +
+      # geom_point(data=slice(tt, c(1,nrow(tt))),
+      #           aes(x=lon, y=lat),
+      #           colour="red", size=5) +
+  
+      geom_point(aes(x=lon, y=lat, size = gewicht, colour = source),
+                  alpha = 0.5) +
+      scale_size(range = c(1,10)) +
+  
+      scale_x_continuous(breaks = seq(floor(xmin), ceiling(xmax), 1)) +
+      scale_y_continuous(breaks = seq(floor(2*ymin)/2, ceiling(2*ymax)/2, 0.5)) +
+      labs(x = NULL, y = NULL, size = "kg aanvoer/trek", colour="") +
+      guides(size = guide_legend(nrow = 1)) +
+      facet_wrap(~date)
+  
+  }
+  
+}
+
+my_caption   <- ifelse(comparisons, paste0("_", fig_nums("catchperhaul3"),"_"), "")
+print_option <- FALSE
+
+
+  
+```
+
+_`r my_caption`_
+
+
+<!-- ########################################################################################## -->
+<!-- Figure: Compare catch by haul from selfsampling and pefa export                            -->
+<!-- ########################################################################################## -->
+
+```{r catchperhaul4, echo=FALSE, fig.align="center", fig.asp=1.0, message=FALSE, warning=FALSE}
+
+if(comparisons) {
+  
+  if (sum(!is.na(m$gewicht)) >0 ) {
+  
+    fig_nums(
+      name    = "catchperhaul4", level   = 1, display = FALSE,
+      caption = "Vangst (aanvoer) per trek (kg): vergelijking treklijst met PEFA per trek")
+
+    t1 <-
+      m %>%
+      group_by(vessel, trip, haul=haul2) %>%
+      summarise(gewicht = sum(gewicht, na.rm=TRUE)) %>%
+  
+      left_join(dplyr::select(h,
+                              vessel, trip, haul, lat, lon, date),
+                by = c("vessel","trip","haul")) %>% 
+      mutate(source="treklijst")
+    
+    t2 <-
+      et %>% 
+      group_by(vessel, trip, haul, lat, lon) %>% 
+      summarise(gewicht = sum(weight, na.rm=TRUE)) %>% 
+      mutate(source="elog")
+      
+  bind_rows(t1, t2) %>% 
+      # ggplot(aes(x=shootlon, y=shootlat)) +
+      ggplot() +
+  
+      theme_publication() +
+  
+      geom_bar(aes(x=haul, y=gewicht, fill = source),
+                  alpha = 0.5, stat="identity", position = position_dodge2(preserve = "single")) +
+  
+      facet_wrap(~trip, ncol=1)
+  
+  }
+
+}
+
+my_caption   <- ifelse(comparisons, paste0("_", fig_nums("catchperhaul4"),"_"), "")
+print_option <- FALSE
+
+
+```
+
+_`r my_caption`_
+
+\newpage
+
+```{r eval=FALSE, include=FALSE}
+
 bind_rows(t1, t2) %>% 
     # ggplot(aes(x=shootlon, y=shootlat)) +
     ggplot() +
 
     theme_publication() +
-    theme(
-      # panel.grid.major = element_blank(),
-      panel.grid.minor = element_blank(),
-      text             = element_text(size=12),
-      plot.margin      = unit(c(0,0,0,0), "cm"),
-      panel.background = element_rect(fill = "lightskyblue1")
-    ) +
-
 
     coord_quickmap(xlim=xlim , ylim=ylim) +
 
@@ -898,73 +850,11 @@ bind_rows(t1, t2) %>%
 
     geom_polygon(data=world_mr_df, aes(x=long, y=lat, group=group), fill = "grey75") +
 
-    # geom_path(data=tt, aes(x=lon, y=lat)) +
-    # geom_point(data=slice(tt, c(1,nrow(tt))),
-    #           aes(x=lon, y=lat),
-    #           colour="red", size=5) +
-
-    geom_point(aes(x=lon, y=lat, size = gewicht, colour = source),
-                alpha = 0.5) +
-    scale_size(range = c(1,10)) +
+    geom_point(aes(x=lon, y=lat, colour = source),
+                size=2) +
 
     scale_x_continuous(breaks = seq(floor(xmin), ceiling(xmax), 1)) +
-    scale_y_continuous(breaks = seq(floor(2*ymin)/2, ceiling(2*ymax)/2, 0.5)) +
-    labs(x = NULL, y = NULL, size = "kg aanvoer/trek", colour="") +
-    guides(size = guide_legend(nrow = 1)) +
-    facet_wrap(~date)
-
-}
-
-  
-```
-
-_`r fig_nums("catchperhaul3")`_
-
-
-<!-- ########################################################################################## -->
-<!-- Figure: Compare catch by haul from selfsampling and pefa export                            -->
-<!-- ########################################################################################## -->
-
-```{r catchperhaul4, echo=FALSE, fig.asp=1.0, fig.align="center", message=FALSE, warning=FALSE}
-
-fig_nums(
-  name    = "catchperhaul4", level   = 1, display = FALSE,
-  caption = "Vangst (aanvoer) per trek (kg): vergelijking treklijst met PEFA per trek")
-
-
-if (sum(!is.na(m$gewicht)) >0 ) {
-
-  t1 <-
-    m %>%
-    group_by(vessel, trip, haul=haul2) %>%
-    summarise(gewicht = sum(gewicht, na.rm=TRUE)) %>%
-
-    left_join(dplyr::select(h,
-                            vessel, trip, haul, lat, lon, date),
-              by = c("vessel","trip","haul")) %>% 
-    mutate(source="treklijst")
-  
-  t2 <-
-    et %>% 
-    group_by(vessel, trip, haul, lat, lon) %>% 
-    summarise(gewicht = sum(weight, na.rm=TRUE)) %>% 
-    mutate(source="elog")
-    
-bind_rows(t1, t2) %>% 
-    # ggplot(aes(x=shootlon, y=shootlat)) +
-    ggplot() +
-
-    theme_publication() +
-
-    geom_bar(aes(x=haul, y=gewicht, fill = source),
-                alpha = 0.5, stat="identity", position = position_dodge2(preserve = "single")) +
-
-    facet_wrap(~trip, ncol=1)
-
-}
-
-  
+    scale_y_continuous(breaks = seq(floor(2*ymin)/2, ceiling(2*ymax)/2, 0.5)) 
 
 ```
 
-_`r fig_nums("catchperhaul4")`_

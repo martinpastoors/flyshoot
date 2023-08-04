@@ -111,6 +111,11 @@ load(file.path(onedrive, "trip.RData"))
 #   geom_point() +
 #   facet_wrap(~year, ncol=1)
 
+elog <- elog %>% filter(!grepl("_",trip)) 
+save(elog,  file = file.path(onedrive,  "elog.RData"))
+
+elog_trek <- elog_trek %>% filter(!grepl("_",trip)) 
+save(elog_trek,  file = file.path(onedrive,  "elog_trek.RData"))
 
 # --------------------------------------------------------------------------------
 # Replacing M-Catch elog data

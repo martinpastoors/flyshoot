@@ -1,0 +1,249 @@
+---
+output:
+  word_document:
+    reference_docx: ../MPFF report template v1.1.dotx
+---
+
+
+```{r setup, include=FALSE}
+
+# ==========================================================================================================
+# Generate FLYSHOOT trips overview
+# 
+# 8/3/2023 first coding
+# ==========================================================================================================
+
+knitr::opts_chunk$set(echo = FALSE,	message = FALSE,	warning = FALSE,	comment = "",	crop = TRUE )
+knitr::opts_chunk$set(fig.width=10) 
+
+options(dplyr.summarise.inform = FALSE)
+
+# Reset lists
+rm(list=ls())
+
+# Libraries
+library(rmarkdown)                   # note: requires knitr 1.21
+
+require(tidyverse, quietly=TRUE)     # combined package of dplyr, tidyr, ggplot, readr, purrr and tibble
+require(lubridate, quietly=TRUE)     # data handling
+require(reshape2, quietly=TRUE)      # reshaping data; e.g. cast
+require(RColorBrewer)                # colour schemes
+library(viridis)
+library(pander)
+
+library(captioner)                   # for captions
+tab_nums <- captioner::captioner(prefix = "Table " , levels=1, type=c("n"), infix=".")
+fig_nums <- captioner::captioner(prefix = "Figure ", levels=1, type=c("n"), infix=".")
+
+# Source all the utils
+source("../../prf/R/my utils.r")
+
+get_onedrive <- function (team="Martin Pastoors", site="FLYSHOOT - General") {
+  
+  if (Sys.info()['sysname'] == 'Windows') {
+    
+    # set onedrive directory
+    if(dir.exists(file.path(Sys.getenv('USERPROFILE'), team, site))) {
+      onedrive <- file.path(Sys.getenv('USERPROFILE'), team, site)   
+    } else if(dir.exists(file.path('C:/DATA/PFA', team, site))) {
+      onedrive <- file.path('C:/DATA/PFA', team, site)
+    } else if(dir.exists(file.path('D:/DATA/PFA', team, site))) {
+      onedrive <- file.path('D:/DATA/PFA', team, site)
+    } else {
+      stop("Onedrive directory not found")
+    }
+  }
+  
+  return(onedrive)
+}
+
+spatialdir <- "C:/DATA/RDATA"
+
+# spatial data files
+
+load(file.path(spatialdir, "world_mr_sf.RData"))
+load(file.path(spatialdir, "rect_lr_sf.RData"))
+
+load(file.path(spatialdir, "world_lr_df.RData"))
+
+load(file.path(spatialdir, "asfis.RData"))
+
+# ===============================================================================
+#  Load and filter the trip data
+# ===============================================================================
+
+# set onedrive directory
+onedrive <- get_onedrive(team="Martin Pastoors", site="FLYSHOOT - General")
+
+# load datasets
+haul   <- loadRData(file.path(onedrive, "rdata/haul.RData"))
+kisten <- loadRData(file.path(onedrive, "rdata/kisten.RData")) 
+elog   <- loadRData(file.path(onedrive, "rdata/elog.RData")) %>% 
+  mutate(species = toupper(species)) %>% 
+  mutate(species = ifelse(species=="JAX","HOM",species))
+
+yrs     <- 2023
+mnths   <- NA
+vessels <- NA
+
+myyear <- max(yrs)
+
+# making the data selections
+h <- 
+  haul %>%
+  ungroup() %>% 
+  {if(!is.na(all(vessels))) filter(., vessel %in% vessels) else . } %>% 
+  {if(!is.na(all(yrs)))     filter(., year %in% yrs) else . } %>% 
+  {if(!is.na(all(mnths)))   filter(., month %in% mnths) else .} %>% 
+  ungroup()
+
+k <- 
+  kisten %>%
+  mutate(
+    year  = lubridate::year(datetime),
+    month = lubridate::month(datetime)
+  ) %>% 
+  ungroup() %>% 
+  {if(!is.na(all(vessels))) filter(., vessel %in% vessels) else . } %>% 
+  {if(!is.na(all(yrs)))     filter(., year %in% yrs) else . } %>% 
+  {if(!is.na(all(mnths)))   filter(., month %in% mnths) else .} %>% 
+  mutate(haul = ifelse(is.na(haul), haul2, haul))
+
+e <- 
+  elog %>%
+  ungroup() %>% 
+  {if(!is.na(all(vessels))) filter(., vessel %in% vessels) else . } %>% 
+  {if(!is.na(all(yrs)))     filter(., year %in% yrs) else . } %>% 
+  {if(!is.na(all(mnths)))   filter(., month %in% mnths) else .} %>% 
+  ungroup() %>% 
+  mutate(species = tolower(species)) %>% 
+  mutate(species = ifelse(species == "SQR", "SQC", species)) %>% 
+  left_join(dplyr::select(asfis,
+                          species, scientificname, englishname, dutchname),
+            by = "species") %>% 
+  mutate(species = toupper(species))  
+
+# calculate the scaling of plots
+xmin <- floor(2 * (min(e$lon, na.rm=TRUE)-0.5))/2;
+xmax <- ceiling(2 * (max(e$lon, na.rm=TRUE)+0.5))/2;
+ymin <- floor(2 * (min(e$lat, na.rm=TRUE)-0.5))/2;
+ymax <- ceiling(2* (max(e$lat, na.rm=TRUE)+0.5))/2
+
+n <- 15
+
+effort <-
+  e %>% 
+  dplyr::group_by(vessel, year) %>% 
+  dplyr::summarize(ndays = n_distinct(paste(vessel, date))) 
+
+catch <-
+  e %>% 
+  dplyr::group_by(vessel, year, species, 
+                  scientificname, englishname, dutchname) %>% 
+  dplyr::summarize(weight = sum(weight, na.rm=TRUE)) %>% 
+  dplyr::group_by(vessel, year) %>% 
+  dplyr::mutate(perc = weight/sum(weight, na.rm=TRUE)) %>% 
+  left_join(effort, by=c("vessel", "year")) %>% 
+  mutate(catch_day = weight / ndays)
+
+top <-
+  catch %>% 
+  filter(year == max(yrs)) %>% 
+  dplyr::group_by(species) %>% 
+  dplyr::summarize(weight     = sum(weight, na.rm=TRUE)) %>% 
+  arrange(desc(weight)) %>% 
+  slice_head(n=n)
+
+
+```
+
+
+**FLYSHOOT trips overview**
+
+For: Jaczon BV
+
+By: Martin Pastoors
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, comment=NA, fig.asp=0.6}
+
+fig_nums(
+  name    = "c", 
+  level = 1, display = FALSE,
+  caption = "Combined look at different data sources by vessel and trip")
+
+hh <- 
+  h %>%
+  group_by(vessel,trip) %>%
+  summarise(
+    nhauls            = n(),
+    startdate         = min(date, na.rm=TRUE),
+    enddate           = max(date, na.rm=TRUE),
+    weeks             = paste(unique(week), collapse=","),
+    months            = paste(unique(month), collapse=","),
+    divisions         = paste(unique(division), collapse=";"),
+    rects             = paste(unique(rect), collapse=";"),
+  ) %>% 
+  mutate (
+    ndays             = as.numeric(difftime(enddate, startdate, units="days")) + 1,
+    haulsperday       = nhauls/ndays
+  ) 
+
+kk <- 
+  k %>%
+  group_by(vessel,trip) %>%
+  summarise(
+    nkisten           = n(),
+    nsoorten          = n_distinct(soorten),
+    startdate         = as.Date(min(datetime, na.rm=TRUE)),
+    enddate           = as.Date(max(datetime, na.rm=TRUE)),
+    weeks             = paste(unique(week(datetime)), collapse=","),
+    months            = paste(unique(month(datetime)), collapse=","),
+    gewicht           = sum(gewicht, na.rm=TRUE)
+  ) %>% 
+  mutate (
+    ndays             = as.numeric(difftime(enddate, startdate, units="days")) + 1
+  ) 
+
+ee <- 
+  e %>%
+  filter(year %in% myyear) %>% 
+  group_by(vessel,trip) %>%
+  summarise(
+    startdate         = min(date, na.rm=TRUE),
+    enddate           = max(date, na.rm=TRUE),
+    weeks             = paste(unique(week), collapse=","),
+    months            = paste(unique(month), collapse=","),
+    divisions         = paste(unique(faozone), collapse=";"),
+    rects             = paste(unique(rect), collapse=";"),
+    nsoorten          = n_distinct(species),
+    gewicht           = sum(weight, na.rm=TRUE)
+  ) %>% 
+  mutate (
+    ndays             = as.numeric(difftime(enddate, startdate, units="days")) + 1
+  ) 
+
+# summarize the trip informatie
+comb <-
+  bind_rows(
+    hh %>% mutate(source="haul"),
+    kk %>% mutate(source="marelec"),
+    ee %>% mutate(source="elog")
+  )
+
+comb %>% 
+  dplyr::select(vessel, trip, startdate, enddate, source) %>% 
+  mutate(source = factor(source, levels=c("haul", "marelec", "elog"))) %>% 
+  mutate(trip = gsub("^2023","", trip)) %>% 
+  
+    # selfsampling bars
+  ggplot() +
+  theme_publication() +
+  ggalt::geom_dumbbell(aes(x = startdate, xend = enddate, y=source, group=1, colour=source),
+                       size=3, size_x = 0, size_xend = 0, alpha=0.4) +
+  geom_text(aes(x = startdate, y=source, label=trip), vjust=0, hjust=0, size=3) +
+  facet_grid(vessel~.)
+
+```
+
+_`r fig_nums("c")`_
+
