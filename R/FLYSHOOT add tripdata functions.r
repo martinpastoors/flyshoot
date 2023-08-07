@@ -774,3 +774,171 @@ get_haul_from_pefa_trek <- function(my_vessel, my_trip, my_file) {
 } # end of function
 
 
+# ------------------------------------------------------------------------------
+# get_raw_from_pefa_trek
+# ------------------------------------------------------------------------------
+
+get_raw_from_pefa_trek <- function(my_file) {
+  
+  print(paste(".. getting RAW from pefa trek", basename(my_file)))
+  
+  raw  <-
+    readxl::read_excel(my_file, 
+                       col_names=TRUE, 
+                       col_types="text",
+                       .name_repair =  ~make.names(., unique = TRUE))  %>% 
+    data.frame() %>% 
+    lowcase() %>% 
+    rename(rect = icesrectangle) %>% 
+    
+    mutate(vessel = my_vessel) %>% 
+    mutate(trip   = my_trip) %>% 
+    
+    rename(lat = latitude) %>% 
+    rename(lon = longitude) %>% 
+    
+    {if(any(grepl("haulid",names(.)))) {rename(., haul = haulid)} else{.}} %>% 
+    
+    mutate(across (any_of(c("boxes", "meshsize", "haul")),
+                   as.integer)) %>%
+    mutate(across (c("catchdate", "departuredate","arrivaldate", "auctiondate", "weight", "lat", "lon", "conversionfactor"),
+                   as.numeric)) %>%
+    mutate(across (c("catchdate", "departuredate","arrivaldate", "auctiondate"), 
+                   ~excel_timezone_to_utc(., timezone="UTC"))) %>% 
+    
+    
+    # Keep only the first lat long observation of each haul
+    group_by(vessel, trip, haul) %>% 
+    mutate(
+      lat = first(na.omit(lat)),
+      lon = first(na.omit(lon))
+    ) %>%
+    mutate(across (c("lat","lon"),    ~zoo::na.locf(.))) %>% 
+
+    # Keep only the first date of each haul
+    mutate(date   = as.Date(catchdate)) %>% 
+    mutate(date   = first(na.omit(date))) %>%
+    mutate(across (c("date"),    ~zoo::na.locf(.))) %>% 
+    
+    # start hauls at 1
+    group_by(vessel, trip) %>% 
+    {if(any(grepl("haul",names(.)))) {mutate(., haul = haul - min(haul, na.rm=TRUE)+1)} else{.}} %>% 
+    
+    mutate(
+      year       = lubridate::year(date),
+      quarter    = lubridate::quarter(date),
+      month      = lubridate::month(date),
+      week       = lubridate::week(date),
+      yday       = lubridate::yday(date)) %>% 
+    
+    ungroup()
+  
+  raw %>% group_by(catchdate) %>% summarise(n=n()) %>% View()
+  raw %>% filter(catchdate == lag(catchdate) & weight == lag(weight)) %>% View()
+  raw %>% filter(species=="MAC") %>% View()
+  
+
+  return(raw)
+  
+} # end of function
+
+
+# ------------------------------------------------------------------------------
+# get_haul_from_raw
+# ------------------------------------------------------------------------------
+
+get_haul_from_raw <- function(raw) {
+  
+  print(paste(".. getting haul from raw"))
+  
+  h  <-
+
+    raw %>% 
+    
+    group_by(vessel, trip, haul) %>% 
+    mutate(haultime      = min(catchdate) - minutes(5)) %>% 
+    
+    mutate(shoottime = haultime - lubridate::hm("1:20")) %>% 
+    mutate(shoottime2 = shoottime + (haultime - shoottime)/2) %>% 
+    
+    # calculate haul duration: haul_time-shoot_time*24 
+    mutate(duration   = as.numeric(as.duration(shoottime %--% haultime))/3600 ) %>% 
+    
+    rename(
+      portembarked = departureport,
+      dateembarked = departuredate,
+      portdisembarked = arrivalport,
+      datedisembarked = arrivaldate,
+      gear            = geartype,
+      division        = faozone,
+      skipper         = captain
+    ) %>% 
+    mutate(
+      dateembarked = as.Date(dateembarked),
+      datedisembarked = as.Date(datedisembarked)
+    ) %>% 
+    
+    ungroup() %>% 
+    
+    # convert to sf  and join fao and rect data
+    sf::st_as_sf(coords = c("lon", "lat"), crs = 4326, stringsAsFactors = FALSE, remove = FALSE) %>% 
+    sf::st_join(., fao_sf_area, join = st_within) %>% 
+    sf::st_join(., fao_sf_subarea, join = st_within) %>% 
+    sf::st_join(., fao_sf_division, join = st_within) %>% 
+    sf::st_join(., rect_sf2, join = st_within) %>% 
+    sf::st_drop_geometry() %>%
+    
+    mutate(rect = ifelse(is.na(rect.x), rect.y, rect.x)) %>% 
+    mutate(rect_check = ifelse(!is.na(rect.x) & !is.na(rect.y) & rect.x != rect.y, "check",""))
+  
+    
+    group_by(vessel, trip, skipper, dateembarked, portembarked, datedisembarked, portdisembarked, haul,
+             shoottime, shoottime2, haultime,
+             date, year, quarter, month, week, yday, rect, lat, lon, economiczone, division, gear, meshsize) %>%
+    summarise(landingweight = sum(weight, na.rm=TRUE)) %>%
+    
+    # add next haul time  
+    group_by(vessel, trip) %>% 
+    mutate(nexthaultime = lead(haultime)) %>% 
+    mutate(nexthaultime = ifelse(is.na(nexthaultime), lubridate::dmy_hm("31/12/2023 23:59"), nexthaultime)) %>% 
+    mutate(nexthaultime = as_datetime(nexthaultime)) %>% 
+    
+    ungroup()
+  
+  h %>% filter(is.na(division), !is.na(lat)) %>% View()
+  h %>% filter(!is.na(division), is.na(lat)) %>% View()
+  h %>% filter(is.na(lat)) %>% View()
+  
+  h_fao <- 
+    h %>%
+    # drop_na(lat, lon) %>% 
+    sf::st_as_sf(coords = c("lon", "lat"), crs = 4326, stringsAsFactors = FALSE, remove = FALSE) %>% 
+    sf::st_join(., fao_sf, join = st_within) %>% 
+    sf::st_drop_geometry() %>% 
+    dplyr::select(vessel, trip, haul, F_LEVEL, F_CODE) %>%
+    mutate(F_LEVEL = tolower(F_LEVEL)) %>% 
+    filter(F_LEVEL != "division") %>% 
+    mutate(F_LEVEL = ifelse(F_LEVEL=="major", "area", F_LEVEL)) %>% 
+    tidyr::pivot_wider(names_from = F_LEVEL, values_from = F_CODE)
+  
+  h <- 
+    left_join(h, h_fao,  by=c("vessel","trip","haul")) %>% 
+    
+    left_join(harbours, by=c("portembarked"="harbourcode")) %>% 
+    dplyr::select(-portembarked, -valid_until) %>% 
+    rename(portembarked = harbourname) %>% 
+    
+    left_join(harbours, by=c("portdisembarked"="harbourcode")) %>% 
+    dplyr::select(-portdisembarked, -valid_until) %>% 
+    rename(portdisembarked = harbourname)  %>% 
+    mutate(source="pefa per trek") %>% 
+    ungroup() 
+  
+  # janitor::compare_df_cols(h, haul)
+  # haul <- haul %>% janitor::remove_empty(which = "cols")
+  # skimr::skim(h)
+  
+  return(h)
+  
+} # end of function
+

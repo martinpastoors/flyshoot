@@ -22,9 +22,9 @@ rm(list=ls())
 # Select vessel and trip
 # ------------------------------------------------------------
 
-setvessel<-"SCH135"   ;settrip<-c("2023348","2023349") ; comparisons <- TRUE
+# setvessel<-"SCH135"   ;settrip<-c("2023348","2023349") ; comparisons <- TRUE
 # setvessel<-"SCH65"   ;settrip<-c("2023264","2023265") ; comparisons <- FALSE
-# setvessel<-"SL9"   ;settrip<-c("2023437","2023438","2023439", "2023441") ; comparisons <- TRUE
+setvessel<-"SL9"   ;settrip<-c("2023437","2023438","2023439", "2023441") ; comparisons <- TRUE
 # setvessel<-c("Z99", "SCH99")   ;settrip<- c("2023085") ; comparisons <- FALSE
 
 # ------------------------------------------------------------
@@ -228,6 +228,8 @@ aspect    <- ydistance/xdistance
 #   summarise(aanvoer=sum(gewicht, na.rm=TRUE))
 
 
+
+
 ```
 
 
@@ -287,8 +289,15 @@ c2 <-
     e %>%
       group_by(vessel,trip) %>%
       summarise(aanvoer = sum(weight, na.rm=TRUE)) %>% 
-      mutate(source="elog")
-  )
+      mutate(source="elog"),
+    et %>%
+      group_by(vessel,trip) %>%
+      summarise(aanvoer = sum(weight, na.rm=TRUE)) %>% 
+      mutate(source="elog per trek")
+  ) %>% 
+  # mutate(source = forcats::fct_reorder(source, source, .desc=FALSE)) %>% 
+  reshape2::dcast(vessel+trip ~ source, value.var = "aanvoer", sum, margins=c("trip"))
+
   
 # belangrijkste soorten
 c3 <-
@@ -327,7 +336,7 @@ c2 %>%
   ungroup() %>% 
   dplyr::select(-vessel) %>% 
   # mutate(vangst = "aanvoer") %>% 
-  pivot_wider(names_from = source, values_from = aanvoer) %>% 
+  # pivot_wider(names_from = source, values_from = aanvoer) %>% 
   pandoc.table(.,
              style = "simple",
              split.tables=400, 
@@ -419,6 +428,79 @@ t1 <-
 ```
 
 _`r tab_nums("vangstpersoortendag")`_
+
+\newpage
+
+**Aanvoer per soort, reis en bron (Marelec, elog, elog per trek)**
+
+```{r vangstpersoortreisenbron, echo=FALSE, message=FALSE, warning=FALSE, comment=NA}
+
+tab_nums(
+  name    = "vangstpersoortreisenbron", 
+  level = 1, display = FALSE,
+  caption = "Vangst per soort (kg) reis en bron (alleen vangsten groter dan 20 kg)")
+
+tmp <-
+  m %>% 
+  mutate(soorten = gsub(" \\(","(", soorten)) %>% 
+  mutate(soorten = gsub("\\)","", soorten)) %>% 
+  tidyr::separate(soorten, into=c("soort","species"), sep="\\(") %>% 
+  mutate(species = toupper(species)) %>% 
+  mutate(date = as.Date(datetime)) %>% 
+  group_by(vessel, trip, species) %>% 
+  summarise(
+    startdate = min(date, na.rm=TRUE),
+    enddate   = max(date, na.rm=TRUE),
+    weight    = sum(gewicht)
+  ) %>% 
+  mutate(source="marelec") %>% 
+  
+  bind_rows(
+    e %>% 
+      group_by(vessel, trip, species) %>% 
+      summarize(
+        startdate = min(catchdate), 
+        enddate   = max(catchdate),
+        weight=sum(weight, na.rm=TRUE)
+      ) %>% 
+      mutate(source="elog")
+  ) %>% 
+
+  bind_rows(
+    et %>% 
+      mutate(catchdate = as.Date(catchdate)) %>% 
+      group_by(vessel, trip, species) %>% 
+      summarize(
+        startdate = min(catchdate), 
+        enddate   = max(catchdate),
+        weight=sum(weight, na.rm=TRUE)
+      ) %>% 
+      mutate(source="elogpertrek")
+  ) 
+  
+tmp %>% 
+  mutate(species = forcats::fct_reorder(species, desc(weight))) %>% 
+  mutate(source = factor(source, levels=c("marelec","elog", "elogpertrek"))) %>% 
+  reshape2::dcast(vessel+trip+species ~ source, value.var="weight", sum, margins = c("trip","species")) %>% 
+  filter(marelec + elog + elogpertrek >= 60) %>% 
+  mutate(e_m  = scales::percent(elog / marelec -1, accuracy=1)) %>% 
+  mutate(et_m = scales::percent(elogpertrek / marelec-1, accuracy=1)) %>% 
+  mutate(et_e = scales::percent(elogpertrek / elog -1, accuracy=1 )) %>% 
+  
+  group_by(vessel, trip) %>% 
+  do(add_row(., .after=0)) %>%
+ 
+  pandoc.table(.,
+           style = "simple",
+           split.tables=400, 
+           justify = "left",
+           missing=".",
+           round=c(0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0))
+  
+
+```
+
+_`r tab_nums("vangstpersoortreisenbron")`_
 
 \newpage
 
