@@ -127,7 +127,7 @@ my_files <-
         vessel = stringr::word(basename(treklijst_list), 1),
         trip   = stringr::word(basename(treklijst_list), 2),
         source = "treklijst",
-        file   = kisten_list
+        file   = treklijst_list
       )      
     )}  else {.}
   } %>% 
@@ -151,7 +151,7 @@ my_files <-
         vessel = stringr::word(basename(pefa_list), 1),
         trip   = stringr::word(basename(pefa_list), 2),
         source = "pefa",
-        file   = kisten_list
+        file   = pefa_list
       )
     )} else {.}
   } %>% 
@@ -163,7 +163,7 @@ my_files <-
         vessel = stringr::word(basename(pefa_trek_list), 1),
         trip   = stringr::word(basename(pefa_trek_list), 2),
         source = "pefa_trek",
-        file   = kisten_list
+        file   = pefa_trek_list
       )
     )} else {.}
   } %>% 
@@ -175,7 +175,7 @@ my_files <-
         vessel = stringr::word(basename(mcatch_list), 1),
         trip   = stringr::word(basename(mcatch_list), 2),
         source = "mcatch",
-        file   = kisten_list
+        file   = mcatch_list
       )
     )} else {.}
   } 
@@ -472,8 +472,10 @@ if(!is_empty(treklijst_list)){
           lat, lon, 
           winddirection, windforce, waterdepth,
           catchheight, boxtype, landingweight, totalcatch,
-          bycatchperc, skipper, dateembarked, portembarked,
-          datedisembarked, portdisembarked, gear, meshsize, vertopening,
+          bycatchperc, captain=skipper, 
+          departuredate=dateembarked, departureport=portembarked,
+          arrivaldate=datedisembarked, arrivalport=portdisembarked, 
+          gear, meshsize, vertopening,
           cablelength, cablethickness, lengthgroundrope, escapepanel,
           duration, year, quarter, month, yday
         ) 
@@ -501,7 +503,11 @@ if(!is_empty(treklijst_list)){
       
       h <- 
         left_join(h, h_fao,  by=c("vessel","trip","haul")) %>% 
-        left_join(., h_rect, by=c("vessel","trip","haul"))
+        left_join(., h_rect, by=c("vessel","trip","haul")) %>% 
+        mutate(
+          file = basename(treklijst_list[i]),
+          source = "treklijst"
+        )
       
       if (any(h$year != 2023)) stop ("Error: year not in 2023")
       

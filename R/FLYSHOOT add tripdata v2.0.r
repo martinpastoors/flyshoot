@@ -55,7 +55,8 @@ fao_sf_division <- fao_sf %>% filter(F_LEVEL=="DIVISION") %>% dplyr::select(F_DI
 
 rect_sf         <- loadRData(file.path(spatialdir, "rect_sf.RData")) 
 rect_sf2        <- rect_sf %>% dplyr::select(rect=ICESNAME) 
-raw %>% group_by(catchdate) %>% summarise(n=n()) %>% View()
+
+eez_sf          <- loadRData(file.path(spatialdir, "eez.sf.RData")) %>% dplyr::select(economiczone = ISO_Ter1) 
 
 rect_df <-
   loadRData(file.path(spatialdir, "rect_df.RData")) %>% 
@@ -80,6 +81,9 @@ load(file.path(onedrive, "harbours.RData"))
 
 # elog <- elog %>% filter(paste0(vessel, trip) %notin% c("SCH1352023344", "SCH1352023345","SCH1352023346", "SCH1352023347")) 
 # save(elog,         file = file.path(onedrive, "elog.RData"))  
+
+# janitor::compare_df_cols(haul, trip, kisten, elog, elog_trek) %>% writexl::write_xlsx(path="compare.xlsx")
+
 
 # ----------------------------------------------------------------------------
 # inventory of files to be processed
@@ -133,10 +137,10 @@ for (i in 1:nrow(my_trips)) {
     raw <- get_raw_from_pefa_trek(my_file)
       
     h  <- get_haul_from_raw(raw)
-    t  <- get_trip_from_haul(h, my_vessel, my_trip2) 
-    m  <- get_kisten_from_pefa_trek(my_vessel, my_trip2, my_file)
-    e  <- get_elog_from_pefa_trek(my_vessel, my_trip2, my_file)
-    et <- get_pefa_trek(my_vessel, my_trip2, my_file) 
+    t  <- get_trip_from_h(h) 
+    m  <- get_kisten_from_raw(raw)
+    e  <- get_elog_from_raw(raw)
+    et <- get_pefa_trek(raw) 
     
   } else {
     
@@ -179,90 +183,7 @@ for (i in 1:nrow(my_trips)) {
     
   }
   
-  # KISTEN from elog per trek --------------------------------------------------  
-  
-  if (any(grepl(paste(my_vessel, my_trip), kisten_list))) {
-    
-    my_file <- filter(my_files, vessel == my_vessel, trip== my_trip, source=="kisten")$file
-    
-    m <- get_kisten(my_vessel, my_trip2, my_file, h) 
-    
-    # add to database
-    if(add_data) {
 
-      kisten <-
-        kisten %>%
-        filter(paste0(vessel, trip) %notin% paste0(m$vessel, m$trip)) %>%
-        bind_rows(m)
-
-      save(kisten,  file = file.path(onedrive, "kisten.RData"))
-
-    }
-
-    if (move_data) {
-      file.copy(my_file, file.path(tripdir,my_vessel), overwrite = TRUE)
-      file.remove(my_file)
-    }
-  
-  } # end of Kisten 
-
-  # PEFA ELOG  ----------------------------------------------------  
-  
-  if (any(grepl(paste(my_vessel, my_trip), pefa_list))) {
-    
-    my_file <- filter(my_files, vessel == my_vessel, trip== my_trip, source=="pefa")$file
-    
-    e <- get_pefa(my_vessel, my_trip2, my_file) 
-    
-    # add to database
-    if(add_data) {
-      
-      elog <-
-        elog %>%
-        filter(paste0(vessel, trip) %notin% paste0(e$vessel, e$trip)) %>%
-        bind_rows(e)
-      
-      # marelec_lot <- marelec_lot %>% dplyr::select(-haul2)
-      save(elog,  file = file.path(onedrive, "elog.RData"))
-      
-    }
-    
-    if (move_data) {
-      file.copy(my_file, file.path(tripdir,my_vessel), overwrite = TRUE)        
-      file.remove(my_file)        
-    } 
-    
-  } # end of PEFA elog
-
-  
-  # PEFA ELOG PER TREK ----------------------------------------------------  
-  
-  if (any(grepl(paste(my_vessel, my_trip), pefa_trek_list))) {
-    
-    my_file <- filter(my_files, vessel == my_vessel, trip== my_trip, source=="pefa_trek")$file
-    
-    et <- get_pefa_trek(my_vessel, my_trip2, my_file) 
-    
-    # add to database
-    if(add_data) {
-      
-      elog_trek <-
-        elog_trek %>%
-        filter(paste0(vessel, trip) %notin% paste0(et$vessel, et$trip)) %>%
-        bind_rows(et)
-      
-      # marelec_lot <- marelec_lot %>% dplyr::select(-haul2)
-      save(elog_trek,         file = file.path(onedrive, "elog_trek.RData"))  
-      
-    }
-    
-    if (move_data) {
-      file.copy(my_file, file.path(tripdir,my_vessel), overwrite = TRUE)        
-      file.remove(my_file)        
-    } 
-    
-  } # end of PEFA elog per trek
-  
 } # end of loop
 
 

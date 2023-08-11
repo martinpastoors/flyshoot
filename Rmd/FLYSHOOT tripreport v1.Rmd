@@ -22,9 +22,9 @@ rm(list=ls())
 # Select vessel and trip
 # ------------------------------------------------------------
 
-# setvessel<-"SCH135"   ;settrip<-c("2023348","2023349") ; comparisons <- TRUE
-# setvessel<-"SCH65"   ;settrip<-c("2023264","2023265") ; comparisons <- FALSE
-setvessel<-"SL9"   ;settrip<-c("2023437","2023438","2023439", "2023441") ; comparisons <- TRUE
+# csetvessel<-"SCH135"   ;settrip<-c("2023350","2023351") ; comparisons <- FALSE
+# setvessel<-"SCH65"   ;settrip<-c("2023266","2023267") ; comparisons <- FALSE
+setvessel<-"SL9"   ;settrip<-c("2023442","2023443", "2023444") ; comparisons <- TRUE
 # setvessel<-c("Z99", "SCH99")   ;settrip<- c("2023085") ; comparisons <- FALSE
 
 # ------------------------------------------------------------
@@ -438,9 +438,11 @@ _`r tab_nums("vangstpersoortendag")`_
 tab_nums(
   name    = "vangstpersoortreisenbron", 
   level = 1, display = FALSE,
-  caption = "Vangst per soort (kg) reis en bron (alleen vangsten groter dan 20 kg)")
+  caption = "Vangst per soort (kg) reis en bron")
 
 tmp <-
+  
+  # kisten
   m %>% 
   mutate(soorten = gsub(" \\(","(", soorten)) %>% 
   mutate(soorten = gsub("\\)","", soorten)) %>% 
@@ -454,7 +456,8 @@ tmp <-
     weight    = sum(gewicht)
   ) %>% 
   mutate(source="marelec") %>% 
-  
+
+  # elog  
   bind_rows(
     e %>% 
       group_by(vessel, trip, species) %>% 
@@ -466,6 +469,7 @@ tmp <-
       mutate(source="elog")
   ) %>% 
 
+  # elog per trek
   bind_rows(
     et %>% 
       mutate(catchdate = as.Date(catchdate)) %>% 
@@ -478,14 +482,16 @@ tmp <-
       mutate(source="elogpertrek")
   ) 
   
+test <-
 tmp %>% 
   mutate(species = forcats::fct_reorder(species, desc(weight))) %>% 
   mutate(source = factor(source, levels=c("marelec","elog", "elogpertrek"))) %>% 
   reshape2::dcast(vessel+trip+species ~ source, value.var="weight", sum, margins = c("trip","species")) %>% 
-  filter(marelec + elog + elogpertrek >= 60) %>% 
-  mutate(e_m  = scales::percent(elog / marelec -1, accuracy=1)) %>% 
-  mutate(et_m = scales::percent(elogpertrek / marelec-1, accuracy=1)) %>% 
-  mutate(et_e = scales::percent(elogpertrek / elog -1, accuracy=1 )) %>% 
+  
+  # filter(marelec + elog + elogpertrek >= 60) %>% 
+  # mutate(e_m  = scales::percent(elog / marelec -1, accuracy=1)) %>% 
+  # mutate(et_m = scales::percent(elogpertrek / marelec-1, accuracy=1)) %>% 
+  # mutate(et_e = scales::percent(elogpertrek / elog -1, accuracy=1 )) %>% 
   
   group_by(vessel, trip) %>% 
   do(add_row(., .after=0)) %>%
@@ -520,7 +526,7 @@ if (sum(!is.na(m$gewicht)) >0 ) {
     caption = "Totale aanvoer per trek (vanuit Marelec).")
 
   m %>%
-    group_by(vessel, trip, haul=haul2) %>%
+    group_by(vessel, trip, haul) %>%
     summarise(gewicht = sum(gewicht, na.rm=TRUE)) %>%
 
     left_join(dplyr::select(h,
@@ -595,7 +601,7 @@ if (nrow(m) > 0) {
   t <-
     m %>% 
     filter(soorten %in% myspecies$soorten) %>% 
-    group_by(vessel, trip, haul=haul2, soorten, maat) %>% 
+    group_by(vessel, trip, haul, soorten, maat) %>% 
     summarise(gewicht=sum(gewicht))
   
   s <-
@@ -797,7 +803,7 @@ if(comparisons) {
   
     t1 <-
       m %>%
-      group_by(vessel, trip, haul=haul2) %>%
+      group_by(vessel, trip, haul) %>%
       summarise(gewicht = sum(gewicht, na.rm=TRUE)) %>%
   
       left_join(dplyr::select(h,
@@ -878,7 +884,7 @@ if(comparisons) {
 
     t1 <-
       m %>%
-      group_by(vessel, trip, haul=haul2) %>%
+      group_by(vessel, trip, haul) %>%
       summarise(gewicht = sum(gewicht, na.rm=TRUE)) %>%
   
       left_join(dplyr::select(h,

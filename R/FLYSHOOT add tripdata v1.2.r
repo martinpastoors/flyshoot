@@ -23,7 +23,7 @@ options(dplyr.summarise.inform = FALSE)
 rm(list=ls())
 
 add_data   = TRUE
-move_data  = TRUE
+move_data  = FALSE
 
 onedrive   = "C:/Users/MartinPastoors/Martin Pastoors/FLYSHOOT - General/rdata"
 tripdir    = "C:/Users/MartinPastoors/Martin Pastoors/FLYSHOOT - General/tripdata"

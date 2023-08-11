@@ -65,7 +65,92 @@ onedrive <- get_onedrive(team="Martin Pastoors", site="FLYSHOOT - General/rdata"
 load(file.path(onedrive, "haul.RData"))
 load(file.path(onedrive, "kisten.RData"))
 load(file.path(onedrive, "elog.RData"))
+load(file.path(onedrive, "elog_trek.RData"))
 load(file.path(onedrive, "trip.RData"))
+
+# skimr::skim(haul)
+
+# --------------------------------------------------------------------------------
+# remove empty columns and change names of certain columns
+# --------------------------------------------------------------------------------
+tripdata <- get_onedrive(team="Martin Pastoors", site="FLYSHOOT - General/tripdata")
+
+treklijst <-
+  list.files(
+    path=file.path(tripdata),
+    pattern="treklijst",
+    full.names = TRUE, 
+    recursive = TRUE) %>% 
+  as.data.frame() %>% 
+  setNames("filename") %>% 
+  mutate(file=basename(filename)) %>% 
+  mutate(file= gsub("\\.xlsx","",file)) %>% 
+  filter(!grepl("xxx|LEEG",file)) %>% 
+  separate(file, into=c("vessel", "trip", "source"), sep=" ", remove = FALSE) %>% 
+  mutate(trip = gsub("_","",trip)) %>% 
+  dplyr::select(vessel, trip, file, source)
+
+elog_per_trek <-
+  list.files(
+    path=file.path(tripdata),
+    pattern="elog_pefa_per_trek",
+    full.names = TRUE, 
+    recursive = TRUE) %>% 
+  as.data.frame() %>% 
+  setNames("filename") %>% 
+  mutate(file=basename(filename)) %>% 
+  mutate(file= gsub("\\.xlsx","",file)) %>% 
+  mutate(source="pefa per trek") %>% 
+  filter(!grepl("xxx|LEEG",file)) %>% 
+  separate(file, into=c("vessel", "trip", "other"), sep=" ", remove = FALSE) %>% 
+  mutate(trip = gsub("_","",trip)) %>% 
+  dplyr::select(vessel, trip, file, source)
+
+haul <- 
+  haul %>% 
+  janitor::remove_empty(which = "cols") %>% 
+  # rename(
+  #   captain = skipper,
+  #   catchweight = totalcatch,
+  #   departureport = portembarked,
+  #   departuredate = dateembarked,
+  #   arrivalport = portdisembarked,
+  #   arrivaldate = datedisembarked
+  # ) %>% 
+  # dplyr::select(-shootlat, -shootns, -shootlong, -shootew) %>% 
+  mutate(source = ifelse(is.na(source),"treklijst", source)) %>% 
+  left_join(treklijst, by=c("vessel","trip","source")) %>% 
+  left_join(elog_per_trek, by=c("vessel","trip","source")) %>% 
+  filter(!is.na(haultime)) %>% 
+  mutate(
+    haultime  = as_datetime(ifelse(lubridate::year(haultime)==2146, haultime - lubridate::years(123), haultime)),
+    shoottime = as_datetime(ifelse(lubridate::year(shoottime)==2146, shoottime - lubridate::years(123), shoottime)),
+    shoottime = as_datetime(ifelse(is.na(shoottime) & !is.na(haultime), haultime - lubridate::hm("1:20"), shoottime)),
+    shoottime2= as_datetime(ifelse(is.na(shoottime2) & !is.na(haultime), haultime - lubridate::hm("0:40"), shoottime2)),
+    week      = ifelse(is.na(week), lubridate::week(date), week),
+    duration  = as.numeric(ifelse(is.na(duration), as.duration(shoottime %--% haultime)/3600, duration))
+  ) %>% 
+  group_by(vessel, trip) %>% 
+  arrange(vessel, trip, haul) %>% 
+  mutate(nexthaultime= as_datetime(ifelse(is.na(nexthaultime), lead(haultime), nexthaultime))) %>% 
+  mutate(file = ifelse(is.na(file.x), file.y, file.x)) %>% 
+  dplyr::select(-file.x, -file.y) %>% 
+  ungroup()
+
+save(haul,   file = file.path(onedrive, "haul.RData"))
+
+trip <-
+  trip %>% 
+  mutate(action = case_when(
+    action == "embarked"    ~ "departure",
+    action == "disembarked" ~ "arrival",
+    TRUE                    ~ NA
+  ))
+
+save(trip,   file = file.path(onedrive, "trip.RData"))
+
+# skimr::skim(haul_test)
+# setdiff(names(haul), names(haul_test))
 
 # --------------------------------------------------------------------------------
 # removing erroneous trips

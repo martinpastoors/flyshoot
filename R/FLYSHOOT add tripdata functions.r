@@ -4,7 +4,7 @@
 # get_haul_treklijst
 # ------------------------------------------------------------------------------
 
-get_haul_treklijst <- function(my_vessel, my_trip, my_file) {
+get_haul_treklijst <- function(my_vessel, my_trip2, my_file) {
 
   # check in trip number
   if (c(readxl::read_excel(my_file, 
@@ -12,7 +12,7 @@ get_haul_treklijst <- function(my_vessel, my_trip, my_file) {
                            col_names=TRUE, 
                            .name_repair =  ~make.names(., unique = TRUE)) %>% 
         filter(row_number()==1) %>% 
-        dplyr::pull(trip)) != my_trip) 
+        dplyr::pull(trip)) != my_trip2) 
     stop(paste(basename(my_file), ": tripnumber problem in list not equal to tripnumber in filename"))
   
   # number of used rows    
@@ -127,7 +127,7 @@ get_haul_treklijst <- function(my_vessel, my_trip, my_file) {
       catchheight   = catchhoogtevangstincm, 
       boxtype       = boxvolledigofkleinvk, 
       landingweight = marktwaardigeviskg,
-      totalcatch    = totalevangstkgberekend, 
+      catchweight    = totalevangstkgberekend, 
       bycatchperc   = percentagebijvangst, 
       dateembarked = dateembarkedutcdate,
       portembarked = portofembarkation,
@@ -154,7 +154,7 @@ get_haul_treklijst <- function(my_vessel, my_trip, my_file) {
     mutate(across (c("haul", "meshsize", "windforce", "waterdepth",
                      "catchheight", "dateembarked","datedisembarked"), 
                    as.integer)) %>% 
-    mutate(across (c("waterdepth","vertopening", "landingweight", "totalcatch"), 
+    mutate(across (c("waterdepth","vertopening", "landingweight", "catchweight"), 
                    as.numeric)) %>%
     
     # mutate(date   = as.Date(date, origin="1899-12-30" , tz=unique(timezone))) %>% 
@@ -190,11 +190,13 @@ get_haul_treklijst <- function(my_vessel, my_trip, my_file) {
       vessel, trip, haul, date, shoottime, shoottime2, haultime, nexthaultime,
       lat, lon, 
       winddirection, windforce, waterdepth,
-      catchheight, boxtype, landingweight, totalcatch,
-      bycatchperc, skipper, dateembarked, portembarked,
-      datedisembarked, portdisembarked, gear, meshsize, vertopening,
+      catchheight, boxtype, landingweight, catchweight,
+      bycatchperc, captain=skipper, 
+      departuredate=dateembarked, departureport=portembarked,
+      arrivaldate=datedisembarked, arrivalport=portdisembarked, 
+      gear, meshsize, vertopening,
       cablelength, cablethickness, lengthgroundrope, escapepanel,
-      duration, year, quarter, month, yday
+      duration, year, quarter, month, week, yday
     ) 
   
   # calculate FAO areas  
@@ -222,9 +224,13 @@ get_haul_treklijst <- function(my_vessel, my_trip, my_file) {
     left_join(h, h_fao,  by=c("vessel","trip","haul")) %>% 
     left_join(., h_rect, by=c("vessel","trip","haul")) %>% 
     mutate(source="treklijst") %>% 
+    mutate(file=basename(my_file)) %>% 
     ungroup()
     
 } # end of function
+
+# janitor::compare_df_cols(h, haul) %>% filter(h != haul)
+# skimr::skim(bind_rows(haul, h))
 
 # ------------------------------------------------------------------------------
 # get_haul_kisten_pefa
@@ -412,14 +418,14 @@ get_trip_from_haul <- function(h, my_vessel, my_trip) {
   tmp <-
     h %>% 
     filter(row_number() == 1) %>% 
-    dplyr::select(dateembarked, datedisembarked, portembarked, portdisembarked) %>% 
+    dplyr::select(departuredate, arrivaldate, departureport, arrivalport) %>% 
     t() %>% 
     data.frame() %>%
     setNames("value") %>% 
     rownames_to_column(var="variable") %>% 
     mutate(
-      action   = ifelse(grepl("disembarked", variable), "disembarked", "embarked"),
-      variable = gsub("disembarked|embarked","", variable) 
+      action   = ifelse(grepl("arrival", variable), "arrival", "departure"),
+      variable = gsub("arrival|departure","", variable) 
     )
   
   t <- 
@@ -457,7 +463,7 @@ get_trip_from_haul <- function(h, my_vessel, my_trip) {
 # get_kisten
 # ------------------------------------------------------------------------------
 
-get_kisten <- function(my_vessel, my_trip, my_file, h) {
+get_kisten <- function(my_vessel, my_trip2, my_file, h) {
   
   # my_trip <- my_trip2
   
@@ -472,9 +478,9 @@ get_kisten <- function(my_vessel, my_trip, my_file, h) {
     dplyr::select(rownumber) %>% 
     as.integer()
   
-  print(paste(".. getting marelec kisten", my_vessel, my_trip))
+  print(paste(".. getting marelec kisten", my_vessel, my_trip2))
 
-  if(nrow(h)==0)     stop(paste("Probleem: treklijst leeg",my_vessel, my_trip))
+  if(nrow(h)==0)     stop(paste("Probleem: treklijst leeg",my_vessel, my_trip2))
   
   m  <-
     readxl::read_excel(my_file,
@@ -491,7 +497,7 @@ get_kisten <- function(my_vessel, my_trip, my_file, h) {
     mutate(maat = gsub("KLASSE ","", maat)) %>% 
     
     mutate(vessel = my_vessel) %>% 
-    mutate(trip   = my_trip) %>% 
+    mutate(trip   = my_trip2) %>% 
     
     mutate(datetime = lubridate::dmy_hms(paste(datum, tijd))) %>% 
     arrange(datetime) %>% 
@@ -502,24 +508,25 @@ get_kisten <- function(my_vessel, my_trip, my_file, h) {
     # currently problematic
     arrange(datetime) %>% 
     mutate(time_diff = as.numeric(datetime - lag(datetime))/60) %>% 
-    mutate(haul2 = ifelse(time_diff > 20 | is.na(time_diff), 1, 0)) %>% 
-    mutate(haul2 = cumsum(haul2)) %>% 
+    
+    # assign haul numbers
+    mutate(haul = ifelse(time_diff > 20 | is.na(time_diff), 1, 0)) %>% 
+    mutate(haul = cumsum(haul)) %>% 
     dplyr::select(-datum, -tijd) 
   
-  tmp <-
-    sqldf::sqldf("select m.vessel, m.trip, m.lotnummer, m.soorten, m.maat, m.gewicht,
-                         m.datetime, m.haul2, h.haul from m
-          join h on m.vessel   == h.vessel and
-                    m.trip     == h.trip and
-                    m.datetime >= h.haultime and
-                    m.datetime <  h.nexthaultime") %>%
-    as_tibble()
+  # tmp <-
+  #   sqldf::sqldf("select m.vessel, m.trip, m.lotnummer, m.soorten, m.maat, m.gewicht,
+  #                        m.datetime, m.haul2, h.haul from m
+  #         join h on m.vessel   == h.vessel and
+  #                   m.trip     == h.trip and
+  #                   m.datetime >= h.haultime and
+  #                   m.datetime <  h.nexthaultime") %>%
+  #   as_tibble()
     
-
-  m <- left_join(m, 
-                 dplyr::select(tmp,
-                               lotnummer, haul),
-                 by="lotnummer")      
+  # m <- left_join(m, 
+  #                dplyr::select(tmp,
+  #                              lotnummer, haul),
+  #                by="lotnummer")      
   
   
   return(m)
@@ -792,7 +799,8 @@ get_raw_from_pefa_trek <- function(my_file) {
     rename(rect = icesrectangle) %>% 
     
     mutate(vessel = my_vessel) %>% 
-    mutate(trip   = my_trip) %>% 
+    # mutate(trip   = my_trip) %>% 
+    rename(trip   = tripidentifier) %>% 
     
     rename(lat = latitude) %>% 
     rename(lon = longitude) %>% 
@@ -833,9 +841,9 @@ get_raw_from_pefa_trek <- function(my_file) {
     
     ungroup()
   
-  raw %>% group_by(catchdate) %>% summarise(n=n()) %>% View()
-  raw %>% filter(catchdate == lag(catchdate) & weight == lag(weight)) %>% View()
-  raw %>% filter(species=="MAC") %>% View()
+  # raw %>% group_by(catchdate) %>% summarise(n=n()) %>% View()
+  # raw %>% filter(catchdate == lag(catchdate) & weight == lag(weight)) %>% View()
+  # raw %>% filter(species=="MAC") %>% View()
   
 
   return(raw)
@@ -880,21 +888,33 @@ get_haul_from_raw <- function(raw) {
     
     ungroup() %>% 
     
+    left_join(harbours, by=c("portembarked"="harbourcode")) %>% 
+    dplyr::select(-portembarked, -valid_until) %>% 
+    rename(portembarked = harbourname) %>% 
+    
+    left_join(harbours, by=c("portdisembarked"="harbourcode")) %>% 
+    dplyr::select(-portdisembarked, -valid_until) %>% 
+    rename(portdisembarked = harbourname)  %>% 
+
     # convert to sf  and join fao and rect data
     sf::st_as_sf(coords = c("lon", "lat"), crs = 4326, stringsAsFactors = FALSE, remove = FALSE) %>% 
     sf::st_join(., fao_sf_area, join = st_within) %>% 
     sf::st_join(., fao_sf_subarea, join = st_within) %>% 
     sf::st_join(., fao_sf_division, join = st_within) %>% 
     sf::st_join(., rect_sf2, join = st_within) %>% 
+    sf::st_join(., eez_sf, join = st_within) %>% 
     sf::st_drop_geometry() %>%
     
-    mutate(rect = ifelse(is.na(rect.x), rect.y, rect.x)) %>% 
-    mutate(rect_check = ifelse(!is.na(rect.x) & !is.na(rect.y) & rect.x != rect.y, "check",""))
-  
+    rename(rect=rect.x, rect_calc=rect.y) %>% 
+    rename(division=division.x, division_calc=division.y) %>% 
+    rename(economiczone=economiczone.x, economiczone_calc=economiczone.y) %>% 
     
+    group_by(vessel, trip) %>% 
+    mutate(across (c("rect","division","economiczone"),    ~zoo::na.locf(.))) %>% 
+
     group_by(vessel, trip, skipper, dateembarked, portembarked, datedisembarked, portdisembarked, haul,
              shoottime, shoottime2, haultime,
-             date, year, quarter, month, week, yday, rect, lat, lon, economiczone, division, gear, meshsize) %>%
+             date, year, quarter, month, week, yday, lat, lon, rect, rect_calc, division, division_calc, economiczone, economiczone_calc, gear, meshsize) %>%
     summarise(landingweight = sum(weight, na.rm=TRUE)) %>%
     
     # add next haul time  
@@ -905,35 +925,6 @@ get_haul_from_raw <- function(raw) {
     
     ungroup()
   
-  h %>% filter(is.na(division), !is.na(lat)) %>% View()
-  h %>% filter(!is.na(division), is.na(lat)) %>% View()
-  h %>% filter(is.na(lat)) %>% View()
-  
-  h_fao <- 
-    h %>%
-    # drop_na(lat, lon) %>% 
-    sf::st_as_sf(coords = c("lon", "lat"), crs = 4326, stringsAsFactors = FALSE, remove = FALSE) %>% 
-    sf::st_join(., fao_sf, join = st_within) %>% 
-    sf::st_drop_geometry() %>% 
-    dplyr::select(vessel, trip, haul, F_LEVEL, F_CODE) %>%
-    mutate(F_LEVEL = tolower(F_LEVEL)) %>% 
-    filter(F_LEVEL != "division") %>% 
-    mutate(F_LEVEL = ifelse(F_LEVEL=="major", "area", F_LEVEL)) %>% 
-    tidyr::pivot_wider(names_from = F_LEVEL, values_from = F_CODE)
-  
-  h <- 
-    left_join(h, h_fao,  by=c("vessel","trip","haul")) %>% 
-    
-    left_join(harbours, by=c("portembarked"="harbourcode")) %>% 
-    dplyr::select(-portembarked, -valid_until) %>% 
-    rename(portembarked = harbourname) %>% 
-    
-    left_join(harbours, by=c("portdisembarked"="harbourcode")) %>% 
-    dplyr::select(-portdisembarked, -valid_until) %>% 
-    rename(portdisembarked = harbourname)  %>% 
-    mutate(source="pefa per trek") %>% 
-    ungroup() 
-  
   # janitor::compare_df_cols(h, haul)
   # haul <- haul %>% janitor::remove_empty(which = "cols")
   # skimr::skim(h)
@@ -942,3 +933,119 @@ get_haul_from_raw <- function(raw) {
   
 } # end of function
 
+# ------------------------------------------------------------------------------
+# get_trip_from_h
+# ------------------------------------------------------------------------------
+
+get_trip_from_h <- function(h) {
+  
+  print(paste(".. getting trip from haul (h)"))
+  
+  tmp  <-
+    
+    h %>% 
+    
+    filter(row_number() == 1) %>% 
+    dplyr::select(dateembarked, datedisembarked, portembarked, portdisembarked) %>% 
+    t() %>% 
+    data.frame() %>%
+    setNames("value") %>% 
+    rownames_to_column(var="variable") %>% 
+    mutate(
+      action   = ifelse(grepl("disembarked", variable), "disembarked", "embarked"),
+      variable = gsub("disembarked|embarked","", variable) 
+    )
+  
+  t <- 
+    bind_cols(
+      tmp %>% filter(row_number() <= 2) %>% dplyr::select(action, date=value),
+      tmp %>% filter(row_number() > 2)  %>% dplyr::select(port=value)
+    ) %>% 
+    mutate(date   = as.Date(date, origin="1899-12-30" , tz=unique(timezone))) %>% 
+    mutate(port   = ifelse(port=="Boulogne", "Boulogne sur Mer", port)) %>% 
+    
+    geocode(port, method = 'osm', lat = lat , lon = lon) %>% 
+    mutate(haul = ifelse(row_number() == 1, 0, nrow(h)+1)) %>% 
+    mutate(vessel = unique(h$vessel)) %>% 
+    mutate(trip = unique(h$trip)) %>% 
+    bind_rows(dplyr::select(h,
+                            vessel, trip, haul, date, lat, lon)) %>% 
+    arrange(haul) %>% 
+    
+    # calculate distance between shoot and haul positions
+    mutate(distance = geosphere::distHaversine(cbind(lon, lat), cbind(lag(lon), lag(lat)))/1852 ) %>% 
+    
+    # add distance within haul if zero
+    mutate(distance = ifelse(distance == 0, 4.0, distance)) %>% 
+    
+    ungroup()
+  
+  return(t)
+  
+} # end of function
+
+# ------------------------------------------------------------------------------
+# get_kisten_from_raw
+# ------------------------------------------------------------------------------
+
+get_kisten_from_raw <- function(raw) {
+  
+  print(paste(".. getting kisten from raw"))
+  
+  m  <-
+    
+    raw %>% 
+    
+    # mutate(maat = gsub("KLASSE ","", maat)) %>% 
+    rename(datetime = catchdate) %>% 
+    rename(gewicht  = weight) %>% 
+    rename(soorten  = species) %>% 
+    dplyr::select(vessel, trip, haul, datetime, soorten, gewicht) %>% 
+    ungroup()
+  
+  # janitor::compare_df_cols(kisten, raw)
+  # haul <- haul %>% janitor::remove_empty(which = "cols")
+  # skimr::skim(h)
+  
+  return(m)
+  
+} # end of function
+
+# ------------------------------------------------------------------------------
+# get_elog_from_raw
+# ------------------------------------------------------------------------------
+
+get_elog_from_raw <- function(raw) {
+  
+  print(paste(".. getting elog from raw"))
+  
+  e  <-
+    raw %>% 
+    ungroup() %>% 
+    mutate(weight = weight * conversionfactor) %>% 
+    
+    # group_by(vessel, trip, haul, date, species, economiczone, rect, division=faozone, lon, lat, geartype, meshsize, departuredate, departureport, arrivaldate, arrivalport,
+    #          auctiondate, auctionport, captain, tripstatus, year, quarter, month, week, yday) %>%
+    group_by(vessel, trip, date, species, economiczone, rect, division=faozone, geartype, meshsize, departuredate, departureport, arrivaldate, arrivalport,
+             auctiondate, auctionport, captain, tripstatus, year, quarter, month, week, yday) %>%
+    summarise(
+      weight = sum(weight, na.rm=TRUE),
+      lat    = mean(lat, na.rm=TRUE),
+      lon   = mean(lon, na.rm=TRUE),
+      fishingoperations = n_distinct(haul)
+    ) %>% 
+    
+    group_by(vessel, trip) %>% 
+    mutate(across (c("rect","division","economiczone"),    ~zoo::na.locf(.))) %>% 
+    
+    mutate(source="pefa_per_trek") %>% 
+    ungroup()
+  
+  # janitor::compare_df_cols(raw, elog, kisten)
+  # haul <- haul %>% janitor::remove_empty(which = "cols")
+  # skimr::skim(h)
+
+  
+  return(m)
+  
+} # end of function
