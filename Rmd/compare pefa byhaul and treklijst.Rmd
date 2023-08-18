@@ -30,16 +30,59 @@ library(sqldf)         # look up values within a range
 
 # source("../gisland/r/geo_inside.R")
 source("../r/FLYSHOOT utils.R")
+source("../r/FLYSHOOT add tripdata v2.0 functions.R")
 
 onedrive   = "C:/Users/MartinPastoors/Martin Pastoors/FLYSHOOT - General/rdata"
-tripdir    = "C:/Users/MartinPastoors/Martin Pastoors/FLYSHOOT - General/tripdata/SL9"
+tripdir    = "C:/Users/MartinPastoors/Martin Pastoors/FLYSHOOT - General/tripdata"
+
+load(file.path(onedrive, "kisten.RData"))
+soorten <-
+  kisten %>% 
+  ungroup() %>% 
+  mutate(soorten2 = toupper (soorten)) %>% 
+  mutate(soorten2 = gsub("\\)","",soorten2)) %>% 
+  mutate(soorten2 = gsub(" \\(","/",soorten2)) %>% 
+  mutate(soorten2 = gsub("\\/ ","/",soorten2)) %>% 
+  mutate(soorten2 = case_when(
+    soorten2 == "BOT SS"              ~ "BOT/FLE",
+    soorten2 == "GRT PIETER MAN/WEG"  ~ "GROTE PIETERMAN/WEG",
+    soorten2 == "INKTVIS/SQC"         ~ "INKTVIS/SQR",
+    soorten2 == "PILSTER/PIL"         ~ "PILCHARDS/PIL",
+    soorten2 == "WIJTING/DICHT"       ~ "WIJTING/WHG",
+    soorten2 == "ZEEDUIVEL/ANF"       ~ "ZEEDUIVEL/MON",
+    soorten2 == "ZONNEVIS/ZON"        ~ "ZONNEVIS/JOD",
+    soorten2 == "SCHARRETONG"         ~ "SCHARTONG/MEG",
+    soorten2 == "FRANSE POON"         ~ "FRANSE POON/GUR",
+    soorten2 == "HORSMAKREEL/JAX"     ~ "HORSMAKREEL/HOM",
+    TRUE                             ~ soorten2
+  )) %>% 
+  distinct(soorten, soorten2) %>% 
+  tidyr::separate(soorten2, into=c("naam", "species"), sep="/", remove = FALSE) %>% 
+  arrange(naam, desc(species)) %>% 
+  group_by(naam) %>%
+  mutate(species = ifelse(is.na(species), lag(species), species)) %>% 
+  ungroup() %>% 
+  dplyr::select(soorten, species)
+
+save(soorten, file=file.path(onedrive, "soorten.RData"))
+
 
 # load spatial datasets -------------------------
 spatialdir = "C:/DATA/RDATA"
-load(file.path(spatialdir, "fao_sf.RData"))
-load(file.path(spatialdir, "rect_sf.RData"))
+
+fao_sf          <- loadRData(file.path(spatialdir, "fao_sf.RData"))
+fao_sf_area     <- fao_sf %>% filter(F_LEVEL=="MAJOR") %>% dplyr::select(F_AREA) %>% rename(area = F_AREA)
+fao_sf_subarea  <- fao_sf %>% filter(F_LEVEL=="SUBAREA") %>% dplyr::select(F_SUBAREA) %>% rename(subarea = F_SUBAREA)
+fao_sf_division <- fao_sf %>% filter(F_LEVEL=="DIVISION") %>% dplyr::select(F_DIVISION) %>% rename(division = F_DIVISION)
+
+rect_sf         <- loadRData(file.path(spatialdir, "rect_sf.RData")) 
+rect_sf2        <- rect_sf %>% dplyr::select(rect=ICESNAME) 
+
+eez_sf          <- loadRData(file.path(spatialdir, "eez.sf.RData")) %>% dplyr::select(economiczone = ISO_Ter1) 
+
 load(file.path(spatialdir, "world_mr_sf.RData"))
 load(file.path(spatialdir, "world_mr_df.RData"))
+
 rect_df <-
   loadRData(file.path(spatialdir, "rect_df.RData")) %>% 
   rename(rect=ICESNAME) %>% 
@@ -47,375 +90,331 @@ rect_df <-
   filter(row_number() ==1) %>% 
   dplyr::select(rect, lon=long, lat)
 
+load(file.path(onedrive, "harbours.RData"))
+
+
 # ----------------------------------------------------------------------------
 # read the pefa elog data per trek
 # ----------------------------------------------------------------------------
 
-filelist <- list.files(
-  path=file.path(tripdir),
-  pattern="elog_pefa_per_trek",
-  full.names = TRUE)
+pefa_list      <- list.files(path=file.path(tripdir, "/_te verwerken"), pattern="elog pefa", full.names = TRUE)
+pefa_trek_list <- list.files(path=file.path(tripdir, "/_te verwerken"),pattern="elog_pefa_per_trek",full.names = TRUE)
+treklijst_list <- list.files(path=file.path(tripdir, "/_te verwerken"),pattern="treklijst",full.names = TRUE)
+marelec_list   <- list.files(path=file.path(tripdir, "/_te verwerken"),pattern="kisten",full.names = TRUE)
+  
+my_files <-
+  data.frame(stringsAsFactors = FALSE) %>% 
+  
+    {if(!is_empty(pefa_list)) {
+      
+      bind_rows(
+        ., 
+        data.frame(
+          vessel = stringr::word(basename(pefa_list), 1),
+          trip   = stringr::word(basename(pefa_list), 2),
+          source = "pefa",
+          file   = pefa_list
+        )
+      )} else {.}
+    } %>% 
+  
+    { if(!is_empty(pefa_trek_list)) {
+    
+      bind_rows(
+        ., 
+        data.frame(
+          vessel = stringr::word(basename(pefa_trek_list), 1),
+          trip   = stringr::word(basename(pefa_trek_list), 2),
+          source = "pefa_trek",
+          file   = pefa_trek_list
+        )
+      )} else {.}
+    } %>% 
+  
+  {if(!is_empty(treklijst_list)) {
+      
+      bind_rows(
+        ., 
+        data.frame(
+          vessel = stringr::word(basename(pefa_list), 1),
+          trip   = stringr::word(basename(pefa_list), 2),
+          source = "treklijst",
+          file   = treklijst_list
+        )
+      )} else {.}
+  } %>% 
 
-if(!is_empty(filelist)){
-  
-  elog_trek <- data.frame(stringsAsFactors = FALSE)
-  
-  i <- 1
-  for (i in 1:length(filelist)) {
-    
-    myvessel <- stringr::word(basename(filelist[i]), 1, sep=" ") %>%
-      unlist()     
-    mytrip <- stringr::word(basename(filelist[i]), 2, sep=" ") %>%
-      gsub("_","",.) %>%
-      unlist()     
-    
-    print(paste("elog pefa per trek", myvessel, mytrip))
-    
-    # TO DO: SET HAULID TO START AT 1 (haulid-min(haulid))
-    
-    e  <-
-      readxl::read_excel(filelist[i], col_names=TRUE, col_types="text",
-                         .name_repair =  ~make.names(., unique = TRUE))  %>% 
-      data.frame() %>% 
-      lowcase() %>% 
-      rename(rect = icesrectangle) %>% 
-      # rename(vessel = vesselnumber) %>% 
-      # mutate(vessel = gsub(" ","", vessel)) %>% 
-      # mutate(vessel = ifelse(vessel=="SL09", "SL9","")) %>% 
+  {if(!is_empty(marelec_list)) {
       
-      rename(lat = latitude) %>% 
-      rename(lon = longitude) %>% 
-      
-      {if(any(grepl("haulid",names(.)))) {rename(., haul = haulid)} else{.}} %>% 
-      
-      mutate(across (any_of(c("boxes", "meshsize", "haul")),
-                     as.integer)) %>%
-      mutate(across (c("catchdate", "departuredate","arrivaldate", "auctiondate", "weight", "lat", "lon", "conversionfactor"),
-                     as.numeric)) %>%
-      # mutate(across(c("catchdate"),
-      #               ~as.POSIXct(. * (60*60*24), origin="1899-12-30", tz="UTC"))) %>% 
-      mutate(across (c("catchdate", "departuredate","arrivaldate", "auctiondate"), 
-                     ~excel_timezone_to_utc(., timezone="UTC"))) %>% 
-      
-      mutate(date   = as.Date(catchdate)) %>% 
-      
-      {if(any(grepl("haul",names(.)))) {mutate(., haul = haul - min(haul, na.rm=TRUE)+1)} else{.}} %>% 
-      # dplyr::select(-catchdate) %>% 
-      
-      mutate(
-        year       = lubridate::year(date),
-        quarter    = lubridate::quarter(date),
-        month      = lubridate::month(date),
-        week       = lubridate::week(date),
-        yday       = lubridate::yday(date)) %>% 
-      
-      mutate(vessel = myvessel) %>% 
-      mutate(trip = mytrip) %>% 
-      
-      # Keep only the first lat long observation of each haul
-      group_by(vessel, trip, haul) %>% 
-      mutate(
-        lat2 = first(na.omit(lat)),
-        lon2 = first(na.omit(lon))
-      ) %>%
-      mutate(across (c("lat2","lon2"),    ~zoo::na.locf(.))) %>%
-      ungroup()
-      
-    elog_trek <- bind_rows(elog_trek, e)
+      bind_rows(
+        ., 
+        data.frame(
+          vessel = stringr::word(basename(marelec_list), 1),
+          trip   = stringr::word(basename(marelec_list), 2),
+          source = "marelec",
+          file   = marelec_list
+        )
+      )} else {.}
+  } 
 
-  } # end of pefa elog for loop
-  
-} # end of not empty filelist
+
+my_trips <-
+  my_files %>% 
+  distinct(vessel, trip)
 
 
 # ----------------------------------------------------------------------------
-# read the treklijst data
+# loop over unique pefa files
+# ----------------------------------------------------------------------------
+i <-1
+
+haul1 <- trip1 <- elog1 <- marelec1 <- data.frame(stringsAsFactors = FALSE)
+
+for (i in 1:nrow(my_trips)) {
+  
+  my_vessel = my_trips[i,"vessel"]
+  my_trip   = my_trips[i,"trip"]
+  my_trip2  = gsub("_","",my_trip)
+
+  print(paste(my_vessel, my_trip))
+  
+  # Get info from elog per trek ----------------------------------------------------
+  
+  if (any(grepl(paste(my_vessel, my_trip), pefa_list))) {
+
+    my_file <- filter(my_files,
+                      vessel == my_vessel, trip== my_trip, source=="pefa")$file
+    
+    e  <- get_pefa(my_file)
+
+  } 
+
+  # Get info from elog per trek ----------------------------------------------------
+  
+  if (any(grepl(paste(my_vessel, my_trip), pefa_trek_list))) {
+
+    my_file <- filter(my_files,
+                      vessel == my_vessel, trip== my_trip, source=="pefa_trek")$file
+    
+    raw <- get_raw_from_pefa_trek(my_file)
+      
+    h  <- get_haul_from_raw(raw)
+    t  <- get_trip_from_h(h) 
+    m  <- get_kisten_from_raw(raw)
+    # et <- get_pefa_trek(raw) 
+    
+  } 
+  
+  haul1 <- haul1 %>% bind_rows(h)
+  trip1 <- trip1 %>% bind_rows(t)
+  marelec1 <- marelec1 %>% bind_rows(m)
+  elog1 <- elog1 %>% bind_rows(e)
+} # end of loop
+
+
+# ----------------------------------------------------------------------------
+# loop over treklijst and marelec files
 # ----------------------------------------------------------------------------
 
-filelist <- list.files(
-  path=file.path(tripdir),
-  pattern="treklijst",
-  full.names = TRUE)
+i <-1
 
-i <- 23
-if(!is_empty(filelist)){
-  
-  hh <- data.frame(stringsAsFactors = FALSE)
-  
-  for (i in 1:length(filelist)) {
-  
-  # vessel and trip
-    myvessel <- stringr::word(basename(filelist[i]), 1, sep=" ")
+haul2 <- trip2 <- marelec2 <- data.frame(stringsAsFactors = FALSE)
 
-    mytrip <- stringr::word(basename(filelist[i]), 2, sep=" ") %>%
-      gsub("_","",.) %>%
-      unlist()     
+for (i in 1:nrow(my_trips)) {
+  
+  my_vessel = my_trips[i,"vessel"]
+  my_trip   = my_trips[i,"trip"]
+  my_trip2  = gsub("_","",my_trip)
 
-    if (paste(myvessel, mytrip) %in% paste(elog_trek$vessel, elog_trek$trip)) {
+  print(paste(my_vessel, my_trip))
+  
+  # Get info from treklijst ----------------------------------------------------
+  
+  if (any(grepl(paste(my_vessel, my_trip), treklijst_list))) {
+
+    my_file <- filter(my_files,
+                      vessel == my_vessel, trip== my_trip, source=="treklijst")$file
+    my_elog <- filter(my_files,
+                      vessel == my_vessel, trip== my_trip, source=="pefa")$file
+    my_trip3 <- get_tripnumber(my_elog)     
     
-      print(paste("treklijst", myvessel, mytrip))
-
-      r <-
-        readxl::read_excel(filelist[i],
-                   sheet = "Haul",  col_names=TRUE, col_types="text",
-                   .name_repair =  ~make.names(., unique = TRUE))  %>% 
-        data.frame() %>% 
-        lowcase() %>% 
-        summarise(
-          ndate = max(
-            sum(!is.na(date)),
-            sum(!is.na(tijdeindehalen)),
-            sum(!is.na(tijdbeginuitzetten)),
-            sum(!is.na(tijdeindeuitzetten)),
-            sum(!is.na(shootlat)),
-            sum(!is.na(shootlong)),
-            sum(!is.na(waterdepth)))
-        ) %>% 
-        as.integer()
     
-    # read the haul data
-    h <-
-      readxl::read_excel(filelist[i],
-                         sheet = "Haul",  col_names=TRUE, col_types="text",
-                         .name_repair =  ~make.names(., unique = TRUE))  %>% 
-      data.frame() %>% 
-      lowcase() %>% 
-      filter(!is.na(vessel), row_number() <= r ) %>% 
-      mutate(timezone = case_when(
-        timezone == "CET"   ~ "Europe/Amsterdam", 
-        timezone == "UTC+1" ~ "Europe/Amsterdam", 
-        timezone == "UTC-5" ~ "America/Santiago",
-        is.na(timezone)     ~ "UTC",    
-        TRUE                ~ timezone) ) %>% 
-      mutate(date   = as.Date(as.integer(date), origin="1899-12-30", tz=timezone)) %>% 
-        
-      
-      dplyr::rename(
-        shoottime    = berekentijdbeginuitzetten,
-        shoottime2   = berekentijdeindeuitzetten,
-        haultime     = berekentijdeindehalen
-      )  %>%  
-          
-      mutate(across (c("shoottime", "shoottime2", "haultime"), 
-                     as.numeric)) %>%
-      
-      mutate(across (c("shoottime","shoottime2", "haultime"),
-                     ~calculate_time(.))) %>%
-      
-      mutate( 
-        shoottime  = ifelse(!is.na(shoottime), date + shoottime, NA),
-        shoottime  = as_datetime(shoottime),
-        shoottime2 = ifelse(!is.na(shoottime2), date + shoottime2, NA),
-        shoottime2 = as_datetime(shoottime2),
-        haultime   = ifelse(!is.na(haultime), date + haultime, NA),
-        haultime   = as_datetime(haultime)
-      ) %>%
-          
-      # add haultime if missing
-      mutate(
-        haultime = ifelse(is.na(haultime) & !is.na(shoottime), 
-                          shoottime+lubridate::hm("1:20"), 
-                          haultime),
-        haultime = lubridate::as_datetime(haultime)
-      ) %>% 
-      
-      # add haultime and shoottime if missing and shoottime2 is available
-      mutate(
-        test     = ifelse(is.na(haultime) & is.na(shoottime) & !is.na(shoottime2),
-                          TRUE, FALSE),
-        shoottime = ifelse(test, 
-                           shoottime2-lubridate::hm("0:40"), 
-                           shoottime),
-        shoottime = lubridate::as_datetime(shoottime),
-        
-        haultime = ifelse(test, 
-                          shoottime2+lubridate::hm("0:40"), 
-                          haultime),
-        haultime = lubridate::as_datetime(haultime)
-      ) %>% 
-      
-      # add next haul time  
-      group_by(vessel, trip) %>% 
-      mutate(nexthaultime = lead(haultime)) %>% 
-      mutate(nexthaultime = ifelse(is.na(nexthaultime), lubridate::dmy_hm("31/12/2023 23:59"), nexthaultime)) %>% 
-      mutate(nexthaultime = as_datetime(nexthaultime)) %>% 
-          
-          
-      dplyr::rename(
-        windforce     = windforcebft,
-        catchheight   = catchhoogtevangstincm, 
-        boxtype       = boxvolledigofkleinvk, 
-        landingweight = marktwaardigeviskg,
-        totalcatch    = totalevangstkgberekend, 
-        bycatchperc   = percentagebijvangst, 
-        dateembarked = dateembarkedutcdate,
-        portembarked = portofembarkation,
-        datedisembarked = datedisembarkedutcdate,
-        portdisembarked = portofdisembarkation,
-        cablelength   = cablelengthm, 
-        cablethickness= cablethicknessmm,
-        lengthgroundrope= lengthgroundropem,
-        escapepanel   = escapepanelyn         
-      )  %>%  
-      
-      # remove shootns or shootew if empty position
-      mutate(shootns = ifelse(is.na(shootlat), NA, shootns)) %>% 
-      mutate(shootew = ifelse(is.na(shootlong), NA, shootew)) %>% 
-      
-      # fill up empty cells
-      mutate(across (c("date","shootlat","shootns", "shootlong", "shootew"),    ~zoo::na.locf(.))) %>% 
-      {if(!all(is.na(.$winddirection))) { mutate(., across (c("winddirection"), ~zoo::na.locf(.)))} else {.}} %>%
-      {if(!all(is.na(.$windforce)))     { mutate(., across (c("windforce"),     ~zoo::na.locf(.)))} else {.}} %>%
-      
-      mutate(across (c("shootew", "shootns"), 
-                     toupper)) %>% 
-      mutate(vessel = toupper(vessel)) %>% 
-      mutate(across (c("haul", "meshsize", "windforce", "waterdepth",
-                       "catchheight", "dateembarked","datedisembarked"), 
-                     as.integer)) %>% 
-      mutate(across (c("waterdepth","vertopening", "landingweight", "totalcatch"), 
-                     as.numeric)) %>%
-      
-      # mutate(date   = as.Date(date, origin="1899-12-30" , tz=unique(timezone))) %>% 
-      mutate(dateembarked   = as.Date(dateembarked, origin="1899-12-30" , tz=unique(timezone))) %>% 
-      mutate(datedisembarked   = as.Date(datedisembarked, origin="1899-12-30" , tz=unique(timezone))) %>% 
-      
+    h  <- get_haul_treklijst(my_vessel, my_trip2, my_file) %>% 
+      mutate(trip = my_trip3)
+    t  <- get_trip_from_h(h) 
+    
+  } 
 
-      mutate(
-        year       = lubridate::year(date),
-        quarter    = lubridate::quarter(date),
-        month      = lubridate::month(date),
-        week       = lubridate::week(date),
-        yday       = lubridate::yday(date)) %>%
-      dplyr::select(-timezone) %>%
-      
-      # calculate haul duration: haul_time-shoot_time*24 
-      mutate(duration   = as.numeric(as.duration(shoottime %--% haultime))/3600 ) %>% 
-      
-      # calculate positions
-      mutate(
-        lon = calculate_position_from_strings(shootlat, shootns, shootlong, shootew)$lon,
-        lat = calculate_position_from_strings(shootlat, shootns, shootlong, shootew)$lat
-      )  %>% 
-      
-      # wind directions
-      mutate(
-        winddirection = toupper(winddirection),
-        winddirection = gsub("Z","S",winddirection),
-        winddirection = gsub("O","E",winddirection)
-      ) %>% 
-      
-      ungroup() %>% 
-      dplyr::select(
-        vessel, trip, haul, date, shoottime, shoottime2, haultime, nexthaultime,
-        lat, lon, 
-        winddirection, windforce, waterdepth,
-        catchheight, boxtype, landingweight, totalcatch,
-        bycatchperc, skipper, dateembarked, portembarked,
-        datedisembarked, portdisembarked, gear, meshsize, vertopening,
-        cablelength, cablethickness, lengthgroundrope, escapepanel,
-        duration, year, quarter, month, yday
-      ) 
-      
-      # calculate FAO areas  
-      h_fao <- 
-        h %>%
-        drop_na(lat, lon) %>% 
-        sf::st_as_sf(coords = c("lon", "lat"), crs = 4326, stringsAsFactors = FALSE, remove = TRUE) %>% 
-        sf::st_join(., fao_sf, join = st_within) %>% 
-        sf::st_drop_geometry() %>% 
-        dplyr::select(vessel, trip, haul, F_LEVEL, F_CODE) %>%
-        mutate(F_LEVEL = tolower(F_LEVEL)) %>% 
-        mutate(F_LEVEL = ifelse(F_LEVEL=="major", "area", F_LEVEL)) %>% 
-        tidyr::pivot_wider(names_from = F_LEVEL, values_from = F_CODE)
-      
-      # calculate ICES rectangles
-      h_rect <- 
-        h %>%
-        drop_na(lat, lon) %>% 
-        sf::st_as_sf(coords = c("lon", "lat"), crs = 4326, stringsAsFactors = FALSE, remove = TRUE) %>% 
-        sf::st_join(., rect_sf, join = st_within) %>% 
-        sf::st_drop_geometry() %>% 
-        dplyr::select(vessel, trip, haul, rect=ICESNAME) 
-      
-      h <- 
-        left_join(h, h_fao,  by=c("vessel","trip","haul")) %>% 
-        left_join(., h_rect, by=c("vessel","trip","haul"))
-      
-      hh <- bind_rows(hh, h)
-
-    } # end of if statement
-      
-  } # end of treklijst for loop
+    # Get info from marelec ----------------------------------------------------
   
-} # end of not empty filelist
+  if (any(grepl(paste(my_vessel, my_trip), marelec_list))) {
 
-# haul <- haul %>% filter(vessel != "SCH135")  
+    my_file <- filter(my_files,
+                      vessel == my_vessel, trip== my_trip, source=="marelec")$file
+    my_elog <- filter(my_files,
+                      vessel == my_vessel, trip== my_trip, source=="pefa")$file
+    my_trip3 <- get_tripnumber(my_elog)     
+    
+    
+    m  <- get_kisten(my_vessel, my_trip2, my_file, h) %>% 
+      mutate(trip = my_trip3) %>% 
+      left_join(soorten, by="soorten" ) 
+
+  } 
+  
+  haul2 <- haul2 %>% bind_rows(h)
+  trip2 <- trip2 %>% bind_rows(t)
+  marelec2 <- marelec2 %>% bind_rows(m)
+} # end of loop
 
 
+# janitor::compare_df_cols(h, haul)
+# haul <- haul %>% janitor::remove_empty(which = "cols")
+# skimr::skim(h)
 
-xmin <- floor  (min(hh$lon, na.rm=TRUE))
-xmax <- ceiling(max(hh$lon, na.rm=TRUE))+1
-ymin <- floor  (2*min(hh$lat, na.rm=TRUE))/2
-ymax <- ceiling(2*max(hh$lat, na.rm=TRUE))/2
+# xmin <-   floor(min(haul1$lon, haul2$lon, trip1$lon, trip2$lon, na.rm=TRUE))
+# xmax <- ceiling(max(haul1$lon, haul2$lon, trip1$lon, trip2$lon, na.rm=TRUE))
+# ymin <-   floor(2*min(haul1$lat, haul2$lat, trip1$lat, trip2$lat, na.rm=TRUE))/2
+# ymax <- ceiling(2*max(haul1$lat, haul2$lat, trip1$lat, trip2$lat, na.rm=TRUE))/2
+
+xmin <-   (min(haul1$lon, haul2$lon, trip1$lon, trip2$lon, na.rm=TRUE))
+xmax <- (max(haul1$lon, haul2$lon, trip1$lon, trip2$lon, na.rm=TRUE))
+ymin <-   (2*min(haul1$lat, haul2$lat, trip1$lat, trip2$lat, na.rm=TRUE))/2
+ymax <- (2*max(haul1$lat, haul2$lat, trip1$lat, trip2$lat, na.rm=TRUE))/2
 
 
 ```
 
 
-**FLYSHOOT vergelijking PEFA exports**
+**FLYSHOOT vergelijking tussen PEFA exports bestanden en handmatige invoer/Marelec export**
 
 By: Martin Pastoors
 
-Vergelijking trekposities vanuit treklijst (handmatig ingevuld) en gekoppelde GPS-Marelec-Elog (PEFA) [RAW]. 
+Report generated: `r format(Sys.time(), '%d/%m/%Y')`
 
-```{r, echo=FALSE, message=FALSE, warning=FALSE, comment=NA, fig.asp=0.6}
+```{r samenvatting, echo=FALSE, message=FALSE, warning=FALSE, comment=NA}
 
+my_files %>% 
+  ungroup() %>% 
+  mutate(file=basename(file)) %>% 
+  pander::pandoc.table(.,
+             style = "simple",
+             split.tables=400, 
+             justify = "left",
+             missing=".",
+             round=c(0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0))
 
+haul1 %>% 
+  ungroup() %>% 
+  distinct(vessel, trip, departureport, arrivalport, haul, date) %>% 
+  group_by(vessel, trip, departureport, arrivalport) %>% 
+  summarise(
+    nhauls = n_distinct(haul),
+    mindate = min(date, na.rm=TRUE),
+    maxdate = max(date, na.rm=TRUE)
+  ) %>% 
+  tidyr::unite(period, c(mindate, maxdate), sep="_") %>% 
+  pander::pandoc.table(.,
+             style = "simple",
+             split.tables=400, 
+             justify = "left",
+             missing=".",
+             round=c(0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0))
 
-elog_trek %>%
-  dplyr::filter(paste(vessel, trip) %in% paste(hh$vessel, hh$trip)) %>% 
-  
-  ggplot() +
-  theme_publication() +
-  coord_quickmap(xlim=c(xmin,xmax) , ylim=c(ymin, ymax)) +
-  geom_polygon(data=world_mr_df, aes(x=long, y=lat, group=group), fill = "grey75") +
-  
-  geom_point(aes(x=lon, y=lat, colour=trip), alpha = 0.5) +
-  geom_jitter(data=hh,
-             aes(x=lon, y=lat), 
-             size=1, shape=3, width=0.05, height=0.025) +
-
-  scale_x_continuous(breaks = seq(floor(xmin), ceiling(xmax), 1)) +
-  scale_y_continuous(breaks = seq(floor(2*ymin)/2, ceiling(2*ymax)/2, 0.5)) +
-  facet_wrap(~date, ncol=6)
 
 
 ```
 
 \newpage
 
-Vergelijking trekposities vanuit treklijst (handmatig ingevuld) en gekoppelde GPS-Marelec-Elog (PEFA) [ONLY FIRST OBS BY HAUL]. 
+Vergelijking trekposities vanuit treklijst (handmatig ingevuld) en gekoppelde GPS-Marelec-PEFA export. 
 
-```{r, echo=FALSE, message=FALSE, warning=FALSE, comment=NA, fig.asp=0.6}
+```{r, echo=FALSE, message=FALSE, warning=FALSE, comment=NA, fig.asp=1.2}
 
-
-elog_trek %>%
-  dplyr::filter(paste(vessel, trip) %in% paste(hh$vessel, hh$trip)) %>% 
+bind_rows(trip1, trip2) %>% 
   
   ggplot() +
   theme_publication() +
   coord_quickmap(xlim=c(xmin,xmax) , ylim=c(ymin, ymax)) +
   geom_polygon(data=world_mr_df, aes(x=long, y=lat, group=group), fill = "grey75") +
   
-  geom_point(aes(x=lon2, y=lat2, colour=trip), alpha = 0.5) +
-  geom_jitter(data=hh,
-             aes(x=lon, y=lat), 
-             size=1, shape=3, width=0.05, height=0.025) +
+  geom_point(aes(x=lon, y=lat, colour=source), alpha = 0.5, size=0.2) +
+  geom_path(aes(x=lon, y=lat, colour=source), alpha = 0.5) +
+  geom_text(aes(x=lon, y=lat, label=haul, colour=source)) +
+  # geom_jitter(data=hh,
+  #            aes(x=lon, y=lat), 
+  #            size=1, shape=3, width=0.05, height=0.025) +
 
   scale_x_continuous(breaks = seq(floor(xmin), ceiling(xmax), 1)) +
   scale_y_continuous(breaks = seq(floor(2*ymin)/2, ceiling(2*ymax)/2, 0.5)) +
-  facet_wrap(~date, ncol=6)
+  facet_wrap(~trip, ncol=2)
+
+
+```
+
+\newpage
+
+Vergelijking treknummer en datum/tijd vanuit treklijst (handmatig ingevuld) en gekoppelde GPS-Marelec-PEFA export. 
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE, comment=NA, fig.asp=1.2}
+
+
+bind_rows(haul1, haul2) %>%
+  ungroup() %>% 
+  arrange(source, vessel, trip, haul) %>% 
+  group_by(source, vessel, trip) %>% 
+  mutate(cumlandingweight = cumsum(landingweight)) %>% 
+  # View()
+
+  ggplot() +
+  theme_publication() +
+  # geom_point(aes(x=haultime, y=cumlandingweight, colour=source), alpha = 0.5) +
+  # geom_path (aes(x=haultime, y=cumlandingweight, colour=source), alpha = 0.5) +
+  geom_point(aes(x=haultime, y=haul, colour=source), alpha = 0.5) +
+  geom_path (aes(x=haultime, y=haul, colour=source), alpha = 0.5) +
+
+  facet_wrap(~trip, ncol=2, scales="free_x")
+
+
+```
+
+\newpage
+
+Vergelijking totale aanvoer per soort vanuit marelec export (handmatig), PEFA elog en gekoppelde GPS-Marelec-PEFA export. 
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE, comment=NA, fig.asp=1.2}
+
+d <-
+  bind_rows(
+    marelec1 %>% mutate(date = as.Date(datetime)), 
+    marelec2 %>% mutate(date = as.Date(datetime)),
+    elog1    %>% mutate(source = "elog") %>% rename(gewicht=weight)
+  ) %>%
+  group_by(source, vessel, trip) %>% 
+  mutate(trip2 = paste(vessel, trip, paste(min(date), max(date), sep="_"))) %>% 
+
+  group_by(source, trip2, species) %>% 
+  summarise(gewicht = sum(gewicht, na.rm=TRUE)) 
+
+df <-
+  d %>% 
+  group_by(species) %>% 
+  summarise(totalcatch = sum(gewicht, na.rm=TRUE)) %>% 
+  filter(totalcatch > 100) %>%
+  arrange(desc(totalcatch)) %>% 
+  pull(species)
+
+d %>%   
+  filter(species %in% df) %>% 
+  mutate(species = factor(species, levels=df)) %>% 
+  mutate(source  = factor(source, levels=c("elog","pefa trek","marelec"))) %>% 
+  
+  ggplot() +
+  theme_publication() +
+  geom_bar(aes(x=species, y=gewicht, fill=source), stat="identity", position=position_dodge2(preserve="single"), alpha = 0.5) +
+  coord_flip() +
+  scale_x_discrete(limits=rev) +
+  facet_wrap(~trip2, ncol=2)
 
 
 ```

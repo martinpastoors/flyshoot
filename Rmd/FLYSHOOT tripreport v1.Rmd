@@ -22,9 +22,9 @@ rm(list=ls())
 # Select vessel and trip
 # ------------------------------------------------------------
 
-# csetvessel<-"SCH135"   ;settrip<-c("2023350","2023351") ; comparisons <- FALSE
-# setvessel<-"SCH65"   ;settrip<-c("2023266","2023267") ; comparisons <- FALSE
-setvessel<-"SL9"   ;settrip<-c("2023442","2023443", "2023444") ; comparisons <- TRUE
+# setvessel<-"SCH135"   ;settrip<-c("2023352","2023353") ; comparisons <- FALSE
+setvessel<-"SCH65"   ;settrip<-c("2023268","2023269") ; comparisons <- FALSE
+# setvessel<-"SL9"   ;settrip<-c("2023442","2023443", "2023444") ; comparisons <- TRUE
 # setvessel<-c("Z99", "SCH99")   ;settrip<- c("2023085") ; comparisons <- FALSE
 
 # ------------------------------------------------------------
@@ -145,7 +145,7 @@ tt <-
   filter(vessel  %in% setvessel,
          trip    %in% settrip) %>% 
   left_join(dplyr::select(h,
-                          vessel, trip, haul, totalcatch),
+                          vessel, trip, haul, catchweight),
             by=c("vessel","trip","haul"))
 
 if(nrow(tt) == 0) stop("error in trip data")
@@ -639,7 +639,7 @@ _`r fig_nums("totalcatchperclass")`_
 print_option <- FALSE
 
 # create list of catch by species by haul. From hm, or sph or else species = "oth"
-if (nrow(m) > 0 & sum(!is.na(h$totalcatch))>0) {
+if (nrow(m) > 0 & sum(!is.na(h$catchweight))>0) {
 
   print_option <- TRUE
 
@@ -649,9 +649,9 @@ if (nrow(m) > 0 & sum(!is.na(h$totalcatch))>0) {
 
   t1 <-
     h %>%
-    filter(totalcatch>0) %>% 
+    filter(catchweight>0) %>% 
     group_by(vessel, trip, haul) %>%
-    summarise(data = sum(totalcatch, na.rm=TRUE)) %>%
+    summarise(data = sum(catchweight, na.rm=TRUE)) %>%
     mutate(variable = "totaal")
 
   t2 <-

@@ -1,0 +1,247 @@
+---
+output:
+  word_document:
+    reference_docx: ../report_template.dotx
+---
+
+
+```{r setup, include=FALSE}
+
+# =====================================================================================================
+# FLYSHOOT catch and effort mapping
+#
+# 16/08/2023
+# =====================================================================================================
+
+knitr::opts_chunk$set(echo = FALSE,	message = FALSE,	warning = FALSE,	comment = "",	crop = TRUE )
+knitr::opts_chunk$set(fig.width=10) 
+
+options(dplyr.summarise.inform = FALSE)
+
+# Reset lists
+rm(list=ls())
+
+# Libraries
+library(rmarkdown)                   # note: requires knitr 1.21
+
+require(tidyverse, quietly=TRUE)     # combined package of dplyr, tidyr, ggplot, readr, purrr and tibble
+require(lubridate, quietly=TRUE)     # data handling
+require(reshape2, quietly=TRUE)      # reshaping data; e.g. cast
+require(RColorBrewer)                # colour schemes
+library(viridis)
+library(pander)
+library(patchwork)
+library(gridExtra)
+
+library(captioner)                   # for captions
+tab_nums <- captioner::captioner(prefix = "Table " , levels=1, type=c("n"), infix=".")
+fig_nums <- captioner::captioner(prefix = "Figure ", levels=1, type=c("n"), infix=".")
+
+# Source all the utils
+source("../../prf/R/my utils.r")
+source("../../mptools/R/get_onedrive.r")
+source("../R/FLYSHOOT utils.r")
+
+
+spatialdir <- "C:/DATA/RDATA"
+
+# spatial data files
+
+load(file.path(spatialdir, "world_lr_sf.RData"))
+load(file.path(spatialdir, "world_mr_sf.RData"))
+load(file.path(spatialdir, "world_hr_sf.RData"))
+
+load(file.path(spatialdir, "world_mr_df.RData"))
+load(file.path(spatialdir, "fao_sf.RData"))
+load(file.path(spatialdir, "rect_lr_sf.RData"))
+icesrect <-
+  rect_lr_sf %>% 
+  sf::st_drop_geometry() %>% 
+  rename(rect=ICESNAME) %>% 
+  mutate(lat = (SOUTH + NORTH)/2) %>% 
+  mutate(lon = (EAST + WEST)/2) %>% 
+  dplyr::select(rect, lat, lon)
+
+
+asfis <- 
+  loadRData(file.path(spatialdir, "asfis.RData")) %>% 
+  rename_all(tolower) %>% 
+  mutate(species = tolower(species))
+
+# ===============================================================================
+#  Load and filter the trip data
+# ===============================================================================
+
+# set onedrive directory
+onedrive <- get_onedrive(team="Martin Pastoors", site="FLYSHOOT - General")
+
+# load datasets
+kisten <- loadRData(file.path(onedrive, "rdata/kisten.RData")) %>% 
+  mutate(haul = ifelse(is.na(haul), haul2, haul)) %>% 
+  group_by(vessel, trip, haul) %>% 
+  summarise(landingweight = sum(gewicht, na.rm=TRUE))
+
+haul   <- loadRData(file.path(onedrive, "rdata/haul.RData")) %>% 
+  left_join(kisten, by=c("vessel","trip","haul")) %>% 
+  mutate(landingweight = as.numeric(ifelse(is.na(landingweight.x), landingweight.y, landingweight.x))) %>% 
+  dplyr::select(-landingweight.x, -landingweight.y)
+  
+dx <- 0.1
+dy <- 0.05
+
+catch_effort <-
+  haul %>% 
+  mutate(rect   = encode_zchords(lon, lat, dx = dx, dy = dy)) %>% 
+  group_by(year, month, rect) %>% 
+  summarise(
+    landingweight = sum(landingweight, na.rm=TRUE),
+    nhauls        = n_distinct(vessel, trip, haul)) %>% 
+  separate(rect, c("lon", "lat"), sep = ":", convert = TRUE, remove = FALSE) %>% 
+  ungroup()
+
+# skimr::skim(kisten)
+
+# dir.create   (file.path(onedrive, "report",folder, "figures"), showWarnings = FALSE)
+# figuresdir <- file.path(onedrive, "report",folder, "figures")
+# 
+# dir.create  (file.path(onedrive, "report",folder, "tables"), showWarnings = FALSE)
+# tablesdir <- file.path(onedrive, "report",folder, "tables")
+# 
+# dir.create   (file.path(onedrive, "report",folder, "data"), showWarnings = FALSE)
+# datadir    <- file.path(onedrive, "report",folder, "data")
+
+# calculate the scaling of plots
+
+xmin <- floor(2 * (min(haul$lon, na.rm=TRUE)-0.5))/2;
+xmax <- ceiling(2 * (max(haul$lon, na.rm=TRUE)+0.5))/2;
+ymin <- floor(2 * (min(haul$lat, na.rm=TRUE)-0.5))/2;
+ymax <- ceiling(2* (max(haul$lat, na.rm=TRUE)+0.5))/2
+
+
+```
+
+
+# FLYSHOOT catch and effort 
+
+M.A. Pastoors
+
+Date: `r format(Sys.time(), '%d/%m/%Y')`
+
+
+Landing by rectangle
+
+```{r catch6, echo=FALSE, fig.asp=1.2, message=FALSE, warning=FALSE, comment=NA}
+
+t <-
+  catch_effort %>% 
+  drop_na(landingweight, lat, lon) %>% 
+
+  # mutate(catch_interval = cut(as.integer(catch), breaks=c(1 %o% 10^(0:12)), dig.lab=10 ) ) %>% 
+  mutate(., landing_interval = cut(landingweight, scales::trans_breaks("sqrt", function(x) x ^ 2)(c(0, max(landingweight, na.rm=TRUE))), 
+                               dig.lab=10 ) ) %>% 
+  
+  sf::st_as_sf(coords = c("lon", "lat"), crs = 4326, remove = FALSE)  
+
+
+tmax <- 100*ceiling(max(t$landingweight, na.rm=TRUE)/100)
+
+# t %>% ungroup() %>% distinct(englishspecies, regulated) %>% View()
+# catch_byweek %>% ungroup() %>% distinct(species, regulated) %>% View()
+
+# ttt <-
+#   t %>% 
+#   sf::st_drop_geometry() %>% 
+#   group_by(englishspecies) %>% 
+#   summarise(catch = as.integer(sum(catch, na.rm=TRUE))) %>% 
+#   arrange(desc(catch)) 
+
+bb <- sf::st_bbox(t)
+
+t %>% 
+
+  ggplot() +
+  theme_publication() +
+  theme(plot.margin = margin(1,1,1,1, "mm")) +
+  theme(plot.title = element_text(hjust = 0.0)) +
+  # theme(legend.position = "none") +
+  
+  geom_sf(data=world_mr_sf, 
+          font = "Arial") +
+  # geom_sf(aes(fill=landing_interval), 
+  #         font = "Arial") +
+  
+  geom_rect(aes(xmin=lon, ymin=lat, xmax=lon+dx, ymax=lat+dy, fill=landing_interval), colour="gray", linewidth=0.2) +
+  scale_fill_viridis(option = "plasma", direction = -1, discrete=TRUE) +
+  
+  # geom_text(data=ttt, 
+  #           aes(x=-Inf, y=Inf, label=paste(catch,"t")), 
+  #           hjust=0, vjust=1) +
+  coord_sf(xlim=c(bb$xmin,bb$xmax), ylim=c(bb$ymin, bb$ymax)) + 
+  guides(fill=guide_legend(nrow = 1)) + 
+  labs(x="",y="", title="Landings by rectangle") +
+  facet_wrap(~month, ncol=3)
+  
+
+```
+
+
+\newpage
+
+Effort by rectangle
+
+```{r effort6, echo=FALSE, fig.asp=1.2, message=FALSE, warning=FALSE, comment=NA}
+
+t <-
+  catch_effort %>% 
+  drop_na(nhauls, lat, lon) %>% 
+
+  # mutate(catch_interval = cut(as.integer(catch), breaks=c(1 %o% 10^(0:12)), dig.lab=10 ) ) %>% 
+  mutate(., effort_interval = cut(nhauls, scales::trans_breaks("sqrt", function(x) x ^ 2)(c(0, max(nhauls, na.rm=TRUE))), 
+                               dig.lab=10 ) ) %>% 
+  
+  sf::st_as_sf(coords = c("lon", "lat"), crs = 4326, remove = FALSE)  
+
+
+tmax <- 100*ceiling(max(t$nhauls, na.rm=TRUE)/100)
+
+# t %>% ungroup() %>% distinct(englishspecies, regulated) %>% View()
+# catch_byweek %>% ungroup() %>% distinct(species, regulated) %>% View()
+
+# ttt <-
+#   t %>% 
+#   sf::st_drop_geometry() %>% 
+#   group_by(englishspecies) %>% 
+#   summarise(catch = as.integer(sum(catch, na.rm=TRUE))) %>% 
+#   arrange(desc(catch)) 
+
+bb <- sf::st_bbox(t)
+
+t %>% 
+
+  ggplot() +
+  theme_publication() +
+  theme(plot.margin = margin(1,1,1,1, "mm")) +
+  theme(plot.title = element_text(hjust = 0.0)) +
+  # theme(legend.position = "none") +
+  
+  geom_sf(data=world_mr_sf, 
+          font = "Arial") +
+  # geom_sf(aes(fill=landing_interval), 
+  #         font = "Arial") +
+  
+  geom_rect(aes(xmin=lon, ymin=lat, xmax=lon+dx, ymax=lat+dy, fill=effort_interval), colour="gray", linewidth=0.2) +
+  scale_fill_viridis(option = "plasma", direction = -1, discrete=TRUE) +
+  
+  # geom_rect(aes(xmin=lon, ymin=lat, xmax=lon+dx, ymax=lat+dy, fill=nhauls)) +
+  # scale_fill_viridis(option = "plasma", direction = -1, discrete=FALSE) +
+  
+  # geom_text(data=ttt, 
+  #           aes(x=-Inf, y=Inf, label=paste(catch,"t")), 
+  #           hjust=0, vjust=1) +
+  coord_sf(xlim=c(bb$xmin,bb$xmax), ylim=c(bb$ymin, bb$ymax)) + 
+  guides(fill=guide_legend(nrow = 1)) + 
+  labs(x="",y="", title="Nhauls by rectangle") +
+  facet_wrap(~month, ncol=3)
+  
+
+```
