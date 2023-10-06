@@ -19,16 +19,6 @@ output:
 # Reset lists
 rm(list=ls())
 
-# ------------------------------------------------------------
-# Select vessel and trip
-# ------------------------------------------------------------
-
-# setvessel<-"SCH135"   ;settrip<-c("2023343") ;
-# setvessel<-"SCH65"   ;settrip<-c("2023259") ;
-setvessel<-"SL9"   ;settrip<-c("2023437", "2023438","2023439", "2023441") ;
-# setvessel<-c("Z99", "SCH99")   ;settrip<-"2023003" ;
-
-# ------------------------------------------------------------
 
 knitr::opts_chunk$set(echo = FALSE,	message = FALSE,	warning = FALSE,	comment = "",	crop = TRUE )
 knitr::opts_chunk$set(fig.width=10) 
@@ -108,6 +98,27 @@ onedrive <- get_onedrive(team="Martin Pastoors", site="FLYSHOOT - General/rdata"
 # load datasets
 load(file.path(onedrive, "elog.RData"))
 load(file.path(onedrive, "elog_trek.RData"))
+
+# elog %>% filter(vessel=="SL9", year==2023) %>% distinct(trip) %>% View()
+
+# ------------------------------------------------------------
+# Select vessel and trip
+# ------------------------------------------------------------
+
+# setvessel<-"SCH135"   ;settrip<-c("2023343") ;
+# setvessel<-"SCH65"   ;settrip<-c("2023259") ;
+setvessel<-"SL9"   ;settrip<-c("2023091200046","2023091800047") ;
+# setvessel<-c("Z99", "SCH99")   ;settrip<-"2023003" ;
+
+# ------------------------------------------------------------
+
+setvessel<-"SL9"   ;startdate<-dmy("27/9/2023"); enddate <- dmy("4/10/2023") ;
+
+settrip  <- 
+  elog %>% 
+  filter(vessel %in% setvessel, catchdate >= startdate, catchdate <= enddate) %>% 
+  distinct(trip) %>% 
+  .$trip
 
 
 e <-
@@ -286,13 +297,14 @@ c4 %>%
 
 _`r tab_nums("samenvatting")`_
 
-\newpage
 
 <!-- ########################################################################################## -->
 <!-- Table: vangst --------------------------- -->
 <!-- ########################################################################################## -->
 
-**Aanvoer per soort (elog)**
+\newpage
+
+**Aanvoer per soort (elog, kg)**
 
 ```{r vangstpersoort, echo=FALSE, message=FALSE, warning=FALSE, comment=NA}
 
@@ -304,15 +316,11 @@ tab_nums(
 t1 <-
   e %>% 
   dplyr::group_by(trip, species) %>% 
-  dplyr::summarize(gewicht     = sum(weight, na.rm=TRUE)) %>% 
-  dplyr::group_by(trip) %>% 
-  dplyr::mutate(perc = gewicht/sum(gewicht, na.rm=TRUE)) %>% 
-  tidyr::pivot_longer(names_to = "variable", values_to = "data", gewicht:perc) 
+  dplyr::summarize(gewicht     = sum(weight, na.rm=TRUE))  
 
 t1 %>% 
-  reshape2::dcast(species ~ trip+variable, value.var="data", sum, margins = c("species")) %>% 
-  mutate(across(grep("perc", names(.)),~scales::percent(., accuracy=1))) %>% 
-  mutate(soorten = tolower(species)) %>% 
+  reshape2::dcast(species ~ trip, value.var="gewicht", sum, margins = c("species","trip")) %>% 
+  # mutate(soorten = tolower(species)) %>% 
 
   pander::pandoc.table(.,
                style = "simple",
@@ -325,6 +333,38 @@ t1 %>%
 ```
 
 _`r tab_nums("vangstpersoort")`_
+
+**Aanvoer per soort (elog, percentage)**
+
+```{r vangstpersoort2, echo=FALSE, message=FALSE, warning=FALSE, comment=NA}
+
+tab_nums(
+  name    = "vangstpersoort2", 
+  level = 1, display = FALSE,
+  caption = "Vangst per soort (percentage)")
+
+t1 <-
+  e %>% 
+  dplyr::group_by(trip, species) %>% 
+  dplyr::summarize(gewicht     = sum(weight, na.rm=TRUE)) %>% 
+  dplyr::group_by(trip) %>% 
+  dplyr::mutate(perc = gewicht/sum(gewicht, na.rm=TRUE))  %>% 
+  dplyr::select(-gewicht)
+
+t1 %>% 
+  reshape2::dcast(species ~ trip, value.var="perc", sum, margins = c("species")) %>% 
+  mutate(across(!grep("species", names(.)),~scales::percent(., accuracy=1))) %>% 
+
+  pander::pandoc.table(.,
+               style = "simple",
+               split.tables=400, 
+               justify = "right",
+               missing=".",
+               round=c(0))
+  
+
+```
+
 
 **Aanvoer per soort en dag (elog)**
 
@@ -474,7 +514,7 @@ et %>%
   scale_y_continuous(breaks = seq(floor(2*ymin)/2, ceiling(2*ymax)/2, 0.5)) +
   labs(x = NULL, y = NULL, size = "kg aanvoer/trek", colour="") +
   guides(size = guide_legend(nrow = 1)) + 
-  facet_wrap(~species)
+  facet_wrap(~species, ncol=3)
 
 
   

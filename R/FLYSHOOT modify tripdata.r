@@ -8,7 +8,7 @@
 # 25/01/2023 checks on marelec data
 
 # TO DO: 
-# 
+# check positions of rectangle in elog
 # =========================================================================================
 
 
@@ -67,8 +67,47 @@ load(file.path(onedrive, "kisten.RData"))
 load(file.path(onedrive, "elog.RData"))
 load(file.path(onedrive, "elog_trek.RData"))
 load(file.path(onedrive, "trip.RData"))
+load(file.path(onedrive, "soorten.RData"))
 
 # skimr::skim(haul)
+
+# haul %>% distinct(captain) %>% View()
+# haul %>% filter(grepl("Harry", captain)) %>% View()
+
+# --------------------------------------------------------------------------------
+# remove trips with underscore in tripname
+# --------------------------------------------------------------------------------
+
+kisten <-
+  kisten %>% 
+  filter(!grepl("_", trip)) 
+
+save(kisten,   file = file.path(onedrive, "kisten.RData"))
+
+# --------------------------------------------------------------------------------
+# correct rectangle lat lon in elog data
+# --------------------------------------------------------------------------------
+
+elog %>% 
+  distinct(rect, lat, lon) %>% 
+  group_by(rect) %>% 
+  mutate(nobs=n()) %>% 
+  filter(nobs>1) %>% 
+  arrange(rect) %>% 
+  View()
+
+elog <-
+  elog %>% 
+  mutate(lat2 = ifelse(is.na(lat2) & (lat-floor(lat)) %notin% c(0, 0.25, 0.5, 0.75),
+                       lat,
+                       lat2)) %>% 
+  mutate(lon2 = ifelse(is.na(lon2) & (lon-floor(lon)) %notin% c(0, 0.5),
+                       lon,
+                       lon2)) %>% 
+  dplyr::select(-lat, -lon) %>% 
+  left_join(rect_df, by="rect") 
+
+save(elog,   file = file.path(onedrive, "elog.RData"))
 
 # --------------------------------------------------------------------------------
 # remove empty columns and change names of certain columns
@@ -151,6 +190,41 @@ save(trip,   file = file.path(onedrive, "trip.RData"))
 
 # skimr::skim(haul_test)
 # setdiff(names(haul), names(haul_test))
+
+# --------------------------------------------------------------------------------
+# calculating live weight in elog files
+# --------------------------------------------------------------------------------
+
+elog <-
+  elog %>% 
+  mutate(liveweight = ifelse(!is.na(conversionfactor), conversionfactor*weight, weight))
+
+elog_trek <-
+  elog_trek %>% 
+  mutate(liveweight = ifelse(!is.na(conversionfactor), conversionfactor*weight, weight))
+
+save(elog,      file = file.path(onedrive, "elog.RData"))
+save(elog_trek, file = file.path(onedrive, "elog_trek.RData"))
+
+
+# --------------------------------------------------------------------------------
+# Adding species to marelec data
+# --------------------------------------------------------------------------------
+
+kisten <-
+  bind_rows(
+    kisten %>% 
+      filter(is.na(species)) %>% 
+      dplyr::select(-species) %>% 
+      left_join(soorten, by="soorten"),
+    kisten %>% 
+      filter(!is.na(species))
+  )
+
+save(kisten,      file = file.path(onedrive, "kisten.RData"))
+
+# sum(kisten$gewicht, na.rm=TRUE)
+# sum(t$gewicht, na.rm=TRUE)
 
 # --------------------------------------------------------------------------------
 # removing erroneous trips

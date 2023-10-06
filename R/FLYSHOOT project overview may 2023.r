@@ -2,6 +2,7 @@
 # FLYSHOOT project overview
 # 
 # 16/05/2023 included all steps in generating project results
+# 22/08/2023
 # =======================================================================================================
 
 options(dplyr.summarise.inform = FALSE)
@@ -26,7 +27,7 @@ source("../mptools/R/get_onedrive.r")
 # set onedrive directory
 onedrive <- get_onedrive(team="Martin Pastoors", site="FLYSHOOT - General")
 
-reportdir <- file.path(onedrive,"report", "FLYSHOOT project overview May 2023")
+reportdir <- file.path(onedrive,"report", "FLYSHOOT project overview August 2023")
 dir.create(reportdir, showWarnings = FALSE)
 
 figuresdir <- file.path(reportdir, "figures")
@@ -71,6 +72,7 @@ h <-
   {if(!is.na(all(vessels))) filter(., vessel %in% vessels) else . } %>% 
   {if(!is.na(all(yrs)))     filter(., year %in% yrs) else . } %>% 
   {if(!is.na(all(mnths)))   filter(., month %in% mnths) else .} %>% 
+  mutate(vessel = ifelse(vessel %in% c("SCH99","Z99"), "SCH99/Z99",vessel)) %>% 
   ungroup()
 
 k <- 
@@ -85,7 +87,8 @@ k <-
   {if(!is.na(all(mnths)))   filter(., month %in% mnths) else .} %>% 
   mutate(haul = ifelse(is.na(haul), haul2, haul)) %>% 
   mutate(soorten = tolower(soorten)) %>% 
-  left_join(soorten, by="soorten") %>% 
+  mutate(vessel = ifelse(vessel %in% c("SCH99","Z99"), "SCH99/Z99",vessel)) %>% 
+  # left_join(soorten, by="soorten") %>% 
   left_join(dplyr::select(h,
                           vessel, trip, haul, division),
             by=c("vessel","trip","haul"))
@@ -99,6 +102,7 @@ e <-
   ungroup() %>% 
   mutate(species = tolower(species)) %>% 
   mutate(species = ifelse(species == "SQR", "SQC", species)) %>% 
+  mutate(vessel = ifelse(vessel %in% c("SCH99","Z99"), "SCH99/Z99",vessel)) %>% 
   left_join(dplyr::select(asfis,
                           species, scientificname, englishname, dutchname),
             by = "species") %>% 
@@ -116,10 +120,10 @@ r <-
   ungroup()
 
 # calculate the scaling of plots
-xmin <- floor(2 * (min(e$lon, na.rm=TRUE)-0.5))/2;
-xmax <- ceiling(2 * (max(e$lon, na.rm=TRUE)+0.5))/2;
-ymin <- floor(2 * (min(e$lat, na.rm=TRUE)-0.5))/2;
-ymax <- ceiling(2* (max(e$lat, na.rm=TRUE)+0.5))/2
+xmin <- floor(2 * (min(e$lon, h$lon, na.rm=TRUE)-0.5))/2;
+xmax <- ceiling(2 * (max(e$lon, h$lon, na.rm=TRUE)+0.5))/2;
+ymin <- floor(2 * (min(e$lat, h$lat, na.rm=TRUE)-0.5))/2;
+ymax <- ceiling(2* (max(e$lat, h$lat, na.rm=TRUE)+0.5))/2
 
 n <- 10
 
@@ -196,12 +200,12 @@ p <-
   ggplot(aes(x=type, y=week)) +
   theme_publication() +
   geom_point() +
-  scale_y_reverse(breaks=seq(1,20,1)) +
+  scale_y_reverse(breaks=seq(1,max(t1$week),1)) +
   labs(x="") +
   facet_wrap(~vessel, nrow=1)
 
 png(filename=file.path(figuresdir, "data type by week.png"),
-    width=9.5, height=5, units="in", res=300, bg="transparent")
+    width=15, height=7.5, units="in", res=300, bg="transparent")
 plot(p, fit = "fixed", just = "left")
 dev.off()
 
@@ -221,9 +225,10 @@ t1 <-
       ndays         = n_distinct(paste(vessel, trip, date)),
       nhauls        = n_distinct(paste(vessel, trip, haul)),
       nrects        = n_distinct(rect),
-      # nlandedcatch  = sum(!is.na(landingweight)),
-      ntotalcatch   = sum(!is.na(totalcatch)),
-      totalcatch    = as.integer(sum(totalcatch, na.rm=TRUE))
+      nlandingweight= sum(!is.na(landingweight)),
+      landingweight = as.integer(sum(landingweight, na.rm=TRUE)),
+      ncatchweight  = sum(!is.na(catchweight)),
+      catchweight   = as.integer(sum(catchweight, na.rm=TRUE))
     ) %>% 
   mutate(year=as.character(year), month=as.character(month)) 
 
@@ -233,8 +238,10 @@ t2 <-
   summarise(
     ndays = sum(ndays),
     nhauls = sum(nhauls),
-    ntotalcatch = sum(ntotalcatch),
-    totalcatch = as.integer(sum(totalcatch))
+    nlandingweight = sum(nlandingweight),
+    landingweight = as.integer(sum(landingweight)),
+    ncatchweight = sum(ncatchweight),
+    catchweight = as.integer(sum(catchweight))
   ) %>% 
   mutate(year = as.character(myyear)) %>% 
   mutate(month = "all")
@@ -269,8 +276,8 @@ t1 <-
       nhauls        = n_distinct(paste(vessel, trip, haul)),
       nrects        = n_distinct(rect),
       # nlandedcatch  = sum(!is.na(landingweight)),
-      ntotalcatch   = sum(!is.na(totalcatch)),
-      totalcatch    = as.integer(sum(totalcatch, na.rm=TRUE))
+      ncatchweight   = sum(!is.na(catchweight)),
+      catchweight    = as.integer(sum(catchweight, na.rm=TRUE))
   )  %>% 
   mutate(year = as.character(year))
 
@@ -280,8 +287,8 @@ t2 <-
   summarise(
     ndays = sum(ndays),
     nhauls = sum(nhauls),
-    ntotalcatch = sum(ntotalcatch),
-    totalcatch = as.integer(sum(totalcatch))
+    ncatchweight = sum(ncatchweight),
+    catchweight = as.integer(sum(catchweight))
   ) %>% 
   mutate(year = as.character(myyear)) %>% 
   mutate(division = "all")
@@ -609,14 +616,25 @@ png(filename=file.path(tablesdir, "elog landings by species and division.png"),
 plot(ft, fit = "fixed", just = "left")
 dev.off()
 
+# ======================================================================================
 # plot of elog data combined with haul data
+# ======================================================================================
 
 # xlim <- range(e$lon, na.rm=TRUE) 
 # ylim <- range(e$lat, na.rm=TRUE)
-xlim <- c(-8,4) 
-ylim <- c(48,53)
+# xlim <- c(-8,4) 
+# ylim <- c(48,53)
 
-k2 <- k %>% 
+# calculate the scaling of plots
+xmin <- floor(2 * (min(h$lon, na.rm=TRUE)-0.5))/2;
+xmax <- ceiling(2 * (max(h$lon, na.rm=TRUE)+0.5))/2;
+ymin <- floor(2 * (min(h$lat, na.rm=TRUE)-0.5))/2;
+ymax <- ceiling(2* (max(h$lat, na.rm=TRUE)+0.5))/2
+xlim <- c(xmin,xmax)
+ylim <- c(ymin,ymax)
+
+k2 <- 
+  k %>% 
   group_by(vessel, trip, haul, year, month) %>% 
   summarise(weight = sum(gewicht, na.rm=TRUE)) %>% 
   distinct() %>% 
@@ -638,15 +656,16 @@ p <-
   theme_publication() +
   coord_quickmap(xlim=xlim , ylim=ylim) +
   geom_polygon(data=cl, aes(x=lon, y=lat, group=group), fill = "grey75") +
-  geom_rect(aes(xmin=lon, xmax=lon+1, ymin=lat, ymax=lat+0.5, fill=weight_class)) +
+  geom_rect(aes(xmin=lon, xmax=lon+1, ymin=lat, ymax=lat+0.5, fill=weight_class), alpha=0.5) +
   geom_point(data=k2, aes(size=weight), alpha=0.5, shape=1) +
   scale_fill_viridis(option = "plasma", direction = -1, discrete=TRUE) +
+  guides(fill = guide_legend(nrow = 1)) +
   labs(x="", y="", fill="elog landings") +
   guides(size = "none") +
   facet_wrap(~month)
 
 png(filename=file.path(figuresdir, "elog landings and haul positions.png"),
-    width=11, height=6, units="in", res=300, bg="transparent")
+    width=12, height=10, units="in", res=300, bg="transparent")
 plot(p, fit = "fixed", just = "left")
 dev.off()
 

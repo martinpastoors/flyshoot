@@ -462,6 +462,7 @@ get_raw_from_pefa_trek <- function(my_file) {
     mutate(across (c("catchdate", "departuredate","arrivaldate", "auctiondate"), 
                    ~excel_timezone_to_utc(., timezone="UTC"))) %>% 
     
+    mutate(liveweight = weight * conversionfactor) %>% 
     
     # Keep only the first lat long observation of each haul
     group_by(vessel, trip, haul) %>% 
@@ -555,7 +556,8 @@ get_haul_from_raw <- function(raw) {
     group_by(vessel, trip, skipper, departuredate, departureport, arrivaldate, arrivalport, haul,
              shoottime, shoottime2, haultime,
              date, year, quarter, month, week, yday, lat, lon, rect, rect_calc, division, division_calc, economiczone, economiczone_calc, gear, meshsize) %>%
-    summarise(landingweight = sum(weight, na.rm=TRUE)) %>%
+    
+    summarise(landingweight = sum(liveweight, na.rm=TRUE)) %>%
     
     # add next haul time  
     group_by(vessel, trip) %>% 
@@ -583,36 +585,42 @@ get_trip_from_h <- function(h) {
   print(paste(".. getting trip from haul (h)"))
   
   tmp  <-
-    
-    h %>% 
-    
+    h %>%
+    group_by(vessel, trip) %>% 
     filter(row_number() == 1) %>% 
-    dplyr::select(departuredate, arrivaldate, departureport, arrivalport) %>% 
-    t() %>% 
-    data.frame() %>%
-    setNames("value") %>% 
-    rownames_to_column(var="variable") %>% 
-    mutate(
-      action   = ifelse(grepl("arrival", variable), "arrival", "departure"),
-      variable = gsub("arrival|departure","", variable) 
-    )
+    dplyr::select(vessel, trip, departuredate, arrivaldate, departureport, arrivalport) %>% 
+    pivot_longer(names_to = "action", values_to = "date", departuredate:arrivaldate) %>%
+    mutate(action = gsub("date", "", action)) %>% 
+    pivot_longer(names_to = "action2", values_to = "port", departureport:arrivalport) %>% 
+    mutate(action2 = gsub("port", "", action2)) %>% 
+    filter(action==action2) %>% 
+    dplyr::select(-action2)
+  
+    # t() %>% 
+    # data.frame() %>%
+    # setNames("value") %>% 
+    # rownames_to_column(var="variable") %>% 
+    # mutate(
+    #   action   = ifelse(grepl("arrival", variable), "arrival", "departure"),
+    #   variable = gsub("arrival|departure","", variable) 
+    # )
+
+  hauls <- h %>% group_by(vessel, trip) %>% summarise(maxhaul=max(haul)+1)
   
   t <- 
-    bind_cols(
-      tmp %>% filter(row_number() <= 2) %>% dplyr::select(action, date=value),
-      tmp %>% filter(row_number() > 2)  %>% dplyr::select(port=value)
-    ) %>% 
-    mutate(date   = as.Date(date, origin="1899-12-30" , tz=unique(timezone))) %>% 
+    tmp %>% 
     mutate(port   = ifelse(port=="Boulogne", "Boulogne sur Mer", port)) %>% 
     
     geocode(port, method = 'osm', lat = lat , lon = lon) %>% 
-    mutate(haul = ifelse(row_number() == 1, 0, nrow(h)+1)) %>% 
-    mutate(vessel = unique(h$vessel)) %>% 
-    mutate(trip = unique(h$trip)) %>% 
+    left_join(hauls, by=c("vessel","trip")) %>% 
+    group_by(vessel, trip) %>% 
+    mutate(haul = ifelse(row_number() == 1, 0, maxhaul)) %>% 
+    dplyr::select(-maxhaul) %>% 
     mutate(source = unique(h$source[!is.na(h$source)])) %>% 
+    ungroup() %>% 
     bind_rows(dplyr::select(h,
                             vessel, trip, haul, date, lat, lon, source)) %>% 
-    arrange(haul) %>% 
+    arrange(vessel, trip, haul) %>% 
     
     # calculate distance between shoot and haul positions
     mutate(distance = geosphere::distHaversine(cbind(lon, lat), cbind(lag(lon), lag(lat)))/1852 ) %>% 
@@ -643,8 +651,15 @@ get_kisten_from_raw <- function(raw) {
     # mutate(maat = gsub("KLASSE ","", maat)) %>% 
     rename(datetime = catchdate) %>% 
     rename(gewicht  = weight) %>% 
-    rename(soorten  = species) %>% 
-    dplyr::select(vessel, trip, haul, datetime, species=soorten, gewicht) %>% 
+
+    left_join(dplyr::select(asfis,
+                            species, englishname, dutchname), 
+              by="species") %>% 
+    mutate(soorten = ifelse(is.na(dutchname), 
+                            paste(englishname, species, sep="/"),
+                            paste(dutchname, species, sep="/"))) %>% 
+    
+    dplyr::select(vessel, trip, haul, datetime, species, soorten, gewicht) %>% 
     mutate(source="pefa trek") %>% 
     ungroup()
   
@@ -659,6 +674,8 @@ get_kisten_from_raw <- function(raw) {
 # ------------------------------------------------------------------------------
 # get_elog_from_raw
 # ------------------------------------------------------------------------------
+
+# NOT USED 
 
 get_elog_from_raw <- function(raw) {
   
@@ -719,3 +736,58 @@ get_tripnumber <- function(my_file) {
   return(e)
   
 } # end of function
+
+get_elog_from_pefa <- function(my_file) {
+  
+  print(paste(".. getting elog from pefa"))
+  
+  e  <-
+    raw  <-
+    readxl::read_excel(my_file, 
+                       col_names=TRUE, 
+                       col_types="text",
+                       .name_repair =  ~make.names(., unique = TRUE))  %>% 
+    data.frame() %>% 
+    lowcase() %>% 
+    rename(rect = icesrectangle) %>% 
+    rename(lat2 = latitude) %>% 
+    rename(lon2 = longitude) %>% 
+    left_join(rect_df, by="rect") %>% 
+    
+    rename(trip   = tripidentifier) %>% 
+    rename(vessel = vesselnumber) %>%
+    mutate(vessel = toupper(vessel)) %>% 
+    mutate(vessel = ifelse(vessel == "SL 09","SL9",vessel)) %>% 
+    
+    mutate(across (any_of(c("boxes", "meshsize", "haul")),
+                   as.integer)) %>%
+    mutate(across (c("catchdate", "departuredate","arrivaldate", "auctiondate", "weight", "lat", "lon", "lat2", "lon2", "conversionfactor"),
+                   as.numeric)) %>%
+    mutate(across (c("catchdate", "departuredate","arrivaldate", "auctiondate"), 
+                   ~excel_timezone_to_utc(., timezone="UTC"))) %>% 
+    
+    mutate(date   = as.Date(catchdate)) %>% 
+    mutate(liveweight = weight * conversionfactor) %>% 
+    
+    mutate(
+      year       = lubridate::year(date),
+      quarter    = lubridate::quarter(date),
+      month      = lubridate::month(date),
+      week       = lubridate::week(date),
+      yday       = lubridate::yday(date)) %>% 
+    
+    mutate(source="pefa") %>% 
+    ungroup()
+  
+  # janitor::compare_df_cols(raw, elog, kisten)
+  # haul <- haul %>% janitor::remove_empty(which = "cols")
+  # skimr::skim(h)
+  
+  
+  return(e)
+  
+} # end of function
+
+# janitor::compare_df_cols(elog_trek, raw)
+# haul <- haul %>% janitor::remove_empty(which = "cols")
+# skimr::skim(h)

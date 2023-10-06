@@ -1,0 +1,317 @@
+---
+title: "JACZON FLYSHOOT v2"
+output:
+  flexdashboard::flex_dashboard:
+runtime: shiny
+---
+
+
+
+```{r global}
+
+rm(list=ls())
+options(dplyr.summarise.inform = FALSE)
+
+library(rmarkdown)                   # note: requires knitr 1.21
+require(tidyverse, quietly=TRUE)     # combined package of dplyr, tidyr, ggplot, readr, purrr and tibble
+require(lubridate, quietly=TRUE)     # data handling
+require(reshape2, quietly=TRUE)      # reshaping data; e.g. cast
+require(RColorBrewer)                # colour schemes
+library(viridis)
+library(pander)
+
+# Source all the utils
+source("../R/FLYSHOOT utils.r")
+
+spatialdir <- "C:/DATA/RDATA"
+load(file.path(spatialdir, "world_lr_sf.RData"))
+load(file.path(spatialdir, "world_mr_sf.RData"))
+load(file.path(spatialdir, "world_lr_df.RData"))
+load(file.path(spatialdir, "world_mr_df.RData"))
+
+rect_df <-
+  loadRData(file.path(spatialdir, "rect_df.RData")) %>% 
+  rename(rect=ICESNAME) %>% 
+  group_by(rect) %>% 
+  filter(row_number() ==1) %>% 
+  dplyr::select(rect, lon=long, lat)
+
+asfis <-
+  loadRData(file.path(spatialdir, "asfis.RData")) %>% 
+  lowcase()
+
+
+# set onedrive directory
+onedrive <- get_onedrive(team="Martin Pastoors", site="FLYSHOOT - General/rdata")
+
+load(file.path(onedrive, "haul.RData"))
+trips <-
+  haul %>% 
+  group_by(vessel) %>% 
+  distinct(vessel, date) %>% 
+  mutate(diff = as.numeric(date-lag(date))) %>% 
+  mutate(id   = ifelse(is.na(diff) | diff>1, 1, 0)) %>% 
+  mutate(trip2 = cumsum(id)) %>% 
+  group_by(vessel, trip2) %>% 
+  mutate(trip2 = paste0(trip2," ",format(min(date), "%d/%m"), "-", format(max(date), "%d/%m"))) %>% 
+  dplyr::select(-id, -diff)
+
+haul <- haul %>% left_join(trips, by=c("vessel","date")) 
+
+kisten <- loadRData(file.path(onedrive, "kisten.RData")) %>% 
+  mutate(date=as.Date(datetime)) %>% 
+  left_join(trips, by=c("vessel","date")) 
+elog <- loadRData(file.path(onedrive, "elog.RData")) %>% 
+  left_join(trips, by=c("vessel","date"))
+elog_trek <- loadRData(file.path(onedrive, "elog_trek.RData")) %>% 
+  left_join(trips, by=c("vessel","date"))
+trip <- loadRData(file.path(onedrive, "trip.RData")) %>% 
+  left_join(trips, by=c("vessel","date"))
+
+
+maxdate <- max(haul$date, na.rm=TRUE)
+
+
+
+
+```
+
+
+Sidebar {.sidebar data-width=225}
+=====================================
+
+```{r}
+# setvessel<-"SCH135"   ;settrip<-c("2023360","2023361") ; comparisons <- FALSE
+# setvessel<-"SCH65"   ;settrip<-c("2023275") ; comparisons <- FALSE
+# setvessel<-"SL9"   ;settrip<-c("2023081600041", "2023082100042") ; comparisons <- FALSE
+# setvessel<-c("Z99", "SCH99")   ;settrip<- c("2023091") ; comparisons <- FALSE
+
+vessels   <- c("SCH65", "SCH99", "SCH135", "SL9", "all")
+years     <- c("2013":"2023","all")
+months    <- c("1":"12","all")
+divisions <- c("27.7.e","27.7.d","27.4.c","27.4.b","27.4.a","all")
+species   <- c("CTC","SQR","MAC","MUR","HOM","WHG", "all")
+
+shiny::selectInput(inputId  = "vessels", 
+                   label    = "Vessels:",
+                   choices  = vessels, 
+                   selected = c("SL9","SCH135"),
+                   multiple = TRUE)
+
+shiny::selectInput(inputId = "years", 
+                   label = "years:",
+                   choices = years, 
+                   selected = c("2021":"2023"),
+                   multiple=TRUE)
+
+shiny::selectInput(inputId = "months", 
+                   label   = "months:",
+                   choices = months, 
+                   selected = "all",
+                   multiple=TRUE)
+
+shiny::selectInput(inputId = "divisions", 
+                   label   = "divisions:",
+                   choices = divisions, 
+                   selected = "27.7.d",
+                   multiple=TRUE)
+
+shiny::selectInput(inputId = "species", 
+                   label   = "species:",
+                   choices = species, 
+                   selected = c("MAC","CTC"),
+                   multiple=TRUE)
+
+
+shiny::selectInput(inputId = "showby", 
+                   label   = "show by:",
+                   choices = c("year","month","week"), 
+                   selected = c("month"),
+                   multiple=FALSE)
+
+# variables to group by
+my_vars <- 
+  shiny::reactive({ x =  c("vessel", "year", "month") })
+
+# species
+s <-
+  shiny::reactive({
+    x =  
+      elog %>% 
+      mutate(division = tolower(faozone)) %>% 
+      
+      {if(all(!grep("all", input$vessels)))    filter(., vessel %in% input$vessels) else {.}} %>%  
+      {if(all(!grep("all", input$years)))      filter(., year %in% input$years) else {.}} %>%  
+      {if(all(!grep("all", input$months)))     filter(., month  %in% input$months) else {.}} %>%  
+      {if(all(!grep("all", input$divisions))) filter(., division %in% input$divisions) else {.}} %>% 
+      {if(all(!grep("all", input$species)))   filter(., species %in% input$species) else {.}} %>%  
+      
+      group_by(species) %>%
+      summarise(weight = sum(weight, na.rm=TRUE)) %>%
+      arrange(desc(weight)) %>%
+      filter(row_number()<=10) %>%
+      mutate(species = forcats::fct_reorder(species, desc(weight)))
+    })
+
+# elog
+e = shiny::reactive({
+    x =  elog %>%
+
+      mutate(division = tolower(faozone)) %>%
+
+      {if(all(!grep("all", input$vessels)))    filter(., vessel %in% input$vessels) else {.}} %>%  
+      {if(all(!grep("all", input$years)))      filter(., year %in% input$years) else {.}} %>%  
+      {if(all(!grep("all", input$months)))     filter(., month  %in% input$months) else {.}} %>%  
+      {if(all(!grep("all", input$divisions))) filter(., division %in% input$divisions) else {.}} %>% 
+      {if(all(!grep("all", input$species)))   filter(., species %in% input$species) else {.}} %>%  
+
+      mutate(species = ifelse(species %in% s()$species, species, "ZZZ")) %>%
+      mutate(species = factor(species, levels=c(as.character(s()$species),"ZZZ"))) %>%
+      group_by_at(vars(one_of(c(my_vars(), "species")))) %>%
+      summarise(weight = sum(weight, na.rm=TRUE)) %>%
+
+      group_by_at(vars(one_of(c(my_vars())))) %>%
+      mutate(perc = weight / sum(weight)) %>%
+
+      mutate(label_pos = cumsum(weight) - weight / 2,
+             perc_text = paste0(round(perc * 100), "%"))
+
+    })
+
+
+
+```
+
+Trial stuff - draft explanation will follow. 
+
+Page 1
+=====================================  
+
+Column {.tabset}
+-------------------------------------
+
+### Catch by vessel, year, month and species
+
+```{r echo=FALSE}
+
+
+# renderTable(e())
+
+renderPlot(
+  ggplot(
+    data=e(), aes(x=month, y=weight)) +
+    theme_publication() +
+    geom_bar(aes(fill=species), stat="identity") +
+    labs(x="month") +
+    scale_x_continuous(breaks=as.integer(unique(e()$month))) +
+    guides(fill = guide_legend(nrow = 1)) +
+    facet_grid(year~vessel)
+  )
+
+
+```
+
+
+
+
+
+
+Page 2
+=====================================
+
+Column {.tabset}
+-------------------------------------
+
+### Catch per tow
+
+```{r eval=FALSE, include=FALSE}
+
+t = shiny::reactive({
+    x =  filter(haul, vessel == input$setvessel,
+                 date >= input$dateRange[1],
+                 date <= input$dateRange[2])} %>% 
+           mutate(week = as.character(week), trip2 = as.character(trip2)) 
+    ) 
+
+xlim <- shiny::reactive({x=c(floor(min(t()$lon, na.rm=TRUE)), 
+                             ceiling(max(t()$lon, na.rm=TRUE)))})
+ylim <- shiny::reactive({x=c(floor(min(t()$lat, na.rm=TRUE)), 
+                             ceiling(max(t()$lat, na.rm=TRUE)))})
+
+renderPlot(
+  ggplot(data=t(), 
+         aes(x=lon, y=lat)) + 
+    theme_publication() +
+    theme(legend.position="none") +
+    coord_quickmap(xlim=xlim() , ylim=ylim()) +
+    geom_polygon(data=world_mr_df, aes(x=long, y=lat, group=group), fill = "grey75") +
+
+    {if(input$showby == "by week") {
+      geom_point(aes(colour=week), size=1)       
+    } else {
+      geom_point(aes(colour=trip2), size=1) 
+    }}+
+    
+    guides(colour = guide_legend(nrow = 1)) +
+    
+    labs(title=input$showby) +
+    
+    {if(input$showby == "by week") {
+      facet_wrap(~week)       
+    } else {
+      facet_wrap(~trip2)       
+    }}
+    
+  )
+
+
+
+```
+
+### Catch compositions
+
+
+
+### Catch proportions
+
+
+
+Page 3
+===================================== 
+
+Column {.tabset}
+-------------------------------------
+
+### The data source
+
+***
+
+Something nice about the program
+
+- ...
+
+- ...
+
+- ...
+
+- ...
+
+### The time panel
+
+***
+
+Here possibly a snapshot of an illustrative species, explaining how to read the graph
+
+### The space panel
+
+
+***
+
+Here possibly a snapshot of an illustrative species, explaining how to read the graph
+
+### Method
+
+
+***
+
+Very brief points on methods with then link to more detailed documentation

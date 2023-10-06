@@ -23,7 +23,7 @@ options(dplyr.summarise.inform = FALSE)
 rm(list=ls())
 
 add_data   = TRUE
-move_data  = FALSE
+move_data  = TRUE
 
 onedrive   = "C:/Users/MartinPastoors/Martin Pastoors/FLYSHOOT - General/rdata"
 tripdir    = "C:/Users/MartinPastoors/Martin Pastoors/FLYSHOOT - General/tripdata"
@@ -70,6 +70,7 @@ load(file.path(onedrive, "elog_trek.RData"))
 load(file.path(onedrive, "trip.RData"))
 
 load(file.path(onedrive, "harbours.RData"))
+load(file.path(onedrive, "soorten.RData"))
 
 # elog <- elog %>% filter(paste0(vessel, trip) %notin% c("SCH1352023344", "SCH1352023345","SCH1352023346", "SCH1352023347")) 
 # save(elog,         file = file.path(onedrive, "elog.RData"))  

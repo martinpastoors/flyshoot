@@ -22,10 +22,10 @@ rm(list=ls())
 # Select vessel and trip
 # ------------------------------------------------------------
 
-# setvessel<-"SCH135"   ;settrip<-c("2023352","2023353") ; comparisons <- FALSE
-setvessel<-"SCH65"   ;settrip<-c("2023268","2023269") ; comparisons <- FALSE
-# setvessel<-"SL9"   ;settrip<-c("2023442","2023443", "2023444") ; comparisons <- TRUE
-# setvessel<-c("Z99", "SCH99")   ;settrip<- c("2023085") ; comparisons <- FALSE
+# setvessel<-"SCH135"   ;settrip<-c("2023363", "2023364") ; comparisons <- FALSE
+setvessel<-"SCH65"   ;settrip<-c("2023279") ; comparisons <- FALSE
+# setvessel<-"SL9"   ;settrip<-c("2023081600041", "2023082100042") ; comparisons <- FALSE
+# setvessel<-c("Z99", "SCH99")   ;settrip<- c( "2023095") ; comparisons <- FALSE
 
 # ------------------------------------------------------------
 
@@ -50,6 +50,8 @@ fig_nums <- captioner::captioner(prefix = "Figure ", levels=1, type=c("n"), infi
 
 # Source all the utils
 source("../../prf/R/my utils.r")
+
+# source("../R/gfw.r")
 
 get_onedrive <- function (team="Martin Pastoors", site="FLYSHOOT - General") {
   
@@ -111,6 +113,8 @@ load(file.path(onedrive, "elog.RData"))
 load(file.path(onedrive, "elog_trek.RData"))
 load(file.path(onedrive, "trip.RData"))
 
+load(file.path(onedrive, "gfw.RData"))
+
 
 # making the data selections
 h <- 
@@ -118,6 +122,10 @@ h <-
   ungroup() %>% 
   filter(vessel  %in% setvessel,
          trip    %in% settrip) %>%  
+  
+  # TEMP FIX
+  mutate(lon = ifelse(lon>2, -1*lon, lon)) %>% 
+
   ungroup()
 
  
@@ -144,8 +152,12 @@ tt <-
   trip %>% 
   filter(vessel  %in% setvessel,
          trip    %in% settrip) %>% 
+  
+  # TEMP FIX
+  mutate(lon = ifelse(lon>2, -1*lon, lon)) %>% 
+
   left_join(dplyr::select(h,
-                          vessel, trip, haul, catchweight),
+                          vessel, trip, haul, catchweight, landingweight),
             by=c("vessel","trip","haul"))
 
 if(nrow(tt) == 0) stop("error in trip data")
@@ -165,6 +177,11 @@ trip2 <-
     startdate = min(haultime, na.rm=TRUE),
     enddate   = max(haultime, na.rm=TRUE)
   )
+
+g <-
+  gfw %>% 
+  filter(vessel  %in% setvessel) %>% 
+  filter(date >= min(h$date), date <= max(h$date))
 
 # calculate the scaling of plots
 # h %>% filter(lat==max(lat, na.rm=TRUE)) %>% View()
@@ -444,10 +461,10 @@ tmp <-
   
   # kisten
   m %>% 
-  mutate(soorten = gsub(" \\(","(", soorten)) %>% 
-  mutate(soorten = gsub("\\)","", soorten)) %>% 
-  tidyr::separate(soorten, into=c("soort","species"), sep="\\(") %>% 
-  mutate(species = toupper(species)) %>% 
+  # mutate(soorten = gsub(" \\(","(", soorten)) %>% 
+  # mutate(soorten = gsub("\\)","", soorten)) %>% 
+  # tidyr::separate(soorten, into=c("soort","species"), sep="\\(") %>% 
+  # mutate(species = toupper(species)) %>% 
   mutate(date = as.Date(datetime)) %>% 
   group_by(vessel, trip, species) %>% 
   summarise(
@@ -519,21 +536,21 @@ _`r tab_nums("vangstpersoortreisenbron")`_
 xlim <- c(xmin,xmax); ylim <- c(ymin,ymax)
 
 
-if (sum(!is.na(m$gewicht)) >0 ) {
+if (sum(!is.na(h$landingweight)) >0 ) {
 
   fig_nums(
     name    = "totalcatchperhaul", level   = 1, display = FALSE,
-    caption = "Totale aanvoer per trek (vanuit Marelec).")
+    caption = "Totale aanvoer per trek (berekend vanuit Marelec).")
 
-  m %>%
-    group_by(vessel, trip, haul) %>%
-    summarise(gewicht = sum(gewicht, na.rm=TRUE)) %>%
-
-    left_join(dplyr::select(h,
-                            vessel, trip, haul, lat, lon, date),
-              by = c("vessel","trip","haul")) %>%
-
-    # ggplot(aes(x=shootlon, y=shootlat)) +
+  # m %>%
+  #   group_by(vessel, trip, haul) %>%
+  #   summarise(gewicht = sum(gewicht, na.rm=TRUE)) %>%
+  # 
+  #   left_join(dplyr::select(h,
+  #                           vessel, trip, haul, lat, lon, date),
+  #             by = c("vessel","trip","haul")) %>%
+  
+  h %>%
     ggplot() +
 
     theme_publication() +
@@ -558,7 +575,7 @@ if (sum(!is.na(m$gewicht)) >0 ) {
               aes(x=lon, y=lat),
               colour="red", size=5) +
 
-    geom_jitter(aes(x=lon, y=lat, size = gewicht, colour = as.character(date)),
+    geom_jitter(aes(x=lon, y=lat, size = landingweight, colour = as.character(date)),
                 alpha = 0.5, width=0.015, height=0.03) +
     scale_size(range = c(1,10)) +
 
@@ -567,6 +584,7 @@ if (sum(!is.na(m$gewicht)) >0 ) {
     labs(x = NULL, y = NULL, size = "kg aanvoer/trek", colour="") +
     guides(size = guide_legend(nrow = 1))
     # + facet_wrap(~source)
+
 
 }
 

@@ -1,0 +1,522 @@
+---
+output:
+  word_document:
+    reference_docx: ../report_template.dotx
+---
+
+
+```{r setup, include=FALSE}
+
+# =====================================================================================================
+# Global Fishing Watch data analyse
+#
+# 22/08/2023
+# =====================================================================================================
+
+knitr::opts_chunk$set(echo = FALSE,	message = FALSE,	warning = FALSE,	comment = "",	crop = TRUE )
+knitr::opts_chunk$set(fig.width=10) 
+
+options(dplyr.summarise.inform = FALSE)
+
+# Reset lists
+rm(list=ls())
+
+download_data <- TRUE
+
+# Libraries
+library(rmarkdown)                   # note: requires knitr 1.21
+
+require(tidyverse, quietly=TRUE)     # combined package of dplyr, tidyr, ggplot, readr, purrr and tibble
+require(lubridate, quietly=TRUE)     # data handling
+require(reshape2, quietly=TRUE)      # reshaping data; e.g. cast
+require(RColorBrewer)                # colour schemes
+library(viridis)
+library(pander)
+library(patchwork)
+library(gridExtra)
+library(sf)
+
+library(captioner)                   # for captions
+tab_nums <- captioner::captioner(prefix = "Table " , levels=1, type=c("n"), infix=".")
+fig_nums <- captioner::captioner(prefix = "Figure ", levels=1, type=c("n"), infix=".")
+
+library(gfwr)
+key <- gfw_auth()
+
+source("../../prf/R/my utils.r")
+source("../../mptools/R/get_onedrive.r")
+source("../R/FLYSHOOT utils.r")
+
+spatialdir <- "C:/DATA/RDATA"
+load(file.path(spatialdir, "world_mr_df.RData"))
+load(file.path(spatialdir, "world_mr_sf.RData"))
+
+fao_sf          <- loadRData(file.path(spatialdir, "fao_sf.RData"))
+fao_sf_division <- fao_sf %>% filter(F_LEVEL=="DIVISION") %>% dplyr::select(F_DIVISION) %>% rename(division = F_DIVISION)
+
+# flyshoot info
+onedrive <- get_onedrive(team="Martin Pastoors", site="FLYSHOOT - General")
+haul <-
+  loadRData(file.path(onedrive, "rdata", "haul.RData")) %>% 
+  arrange(vessel, week, haultime) %>% 
+  group_by(vessel, week) %>% 
+  mutate(haul = row_number())
+
+# ==========================================
+# read vessels from excel file
+# ==========================================
+
+r <- 
+  readxl::read_excel(path=file.path(onedrive, "data","flyshoot vessels update EvL.xlsx")) %>% 
+  mutate(mmsi = as.character(mmsi))
+
+if (download_data) {
+  
+  trawlers <- gfwr::get_vessel_info(
+    query = paste0("mmsi=",paste(r$mmsi, collapse=" OR mmsi=")),
+    search_type = "advanced",
+    dataset = "fishing_vessel",
+    key = key
+  )
+  
+  # Collapse vessel ids into a commas separated list to pass to Events API
+  trawler_ids <- paste0(trawlers$id, collapse = ',')
+    
+  df <-
+    get_event(event_type='fishing',
+              vessel = trawler_ids,
+              # start_date = "2012-01-01", end_date = "2023-12-31",
+              start_date = "2023-01-01", end_date = as.Date(now()),
+              key = key) %>%
+    mutate(year = lubridate::year(start),
+           month = lubridate::month(start),
+           week  = lubridate::week(start),
+           date = as.Date(start)) %>%
+    unnest_wider(regions, names_repair = "unique") %>%
+    unnest_wider(fao, names_sep = "_") %>%
+    unnest_wider(eez, names_sep = "_") %>%
+    unnest_wider(vessel, names_repair = "unique") %>%
+    unnest_wider(event_info, names_repair = "unique") %>%
+    unnest_wider(distances, names_repair = "unique") %>%
+    dplyr::select(-mpa, -authorizations, -rfmo, -majorFao) %>%
+    left_join(r, by=c("ssvid"="mmsi")) %>%
+    arrange(vesselname, year, week, end) %>%
+    group_by(vesselname, year, week) %>%
+    mutate(haul = row_number()) %>%
+  
+    sf::st_as_sf(coords = c("lon", "lat"), crs = 4326, stringsAsFactors = FALSE, remove = FALSE) %>%
+    sf::st_join(., fao_sf_division, join = st_within) %>%
+    sf::st_drop_geometry()
+  
+  gfw <- df
+  save(gfw, file = file.path(onedrive, "gfw.RData"))
+  
+}
+
+df <- 
+  # df %>% 
+  loadRData(file = file.path(onedrive, "gfw.RData")) %>% 
+  filter(division %in% c("27.4.a","27.4.b","27.4.c","27.7.d","27.7.e")) %>% 
+  filter(active=="YES") %>% 
+  rename(flag=flag.x) %>% 
+  dplyr::select(-gt) %>% 
+  left_join(dplyr::select(r,
+                          vessel, loa, breadth, gt), 
+            by="vessel")
+
+# df %>% filter(grepl("METANOIA", name)) %>% View() 
+# trawlers %>% filter(flag=="NLD") %>% View()
+
+
+xmin <- floor(2 * (min(haul$lon, na.rm=TRUE)-0.5))/2;
+xmax <- ceiling(2 * (max(haul$lon, na.rm=TRUE)+0.5))/2;
+ymin <- floor(2 * (min(haul$lat, na.rm=TRUE)-0.5))/2;
+ymax <- ceiling(2* (max(haul$lat, na.rm=TRUE)+0.5))/2
+
+xlim=c(xmin, xmax); ylim=c(ymin, ymax)
+# xlim=c(-3,10); ylim=c(49.5,58)
+
+t <-
+  df %>% 
+  filter(vessel %in% c("SCH135","SCH65", "SL9","SCH99")) %>% 
+  filter(year == 2023) %>% 
+  dplyr::select(vessel, year, week, haul, lat, lon, haultime=end) %>% 
+  mutate(source="GFW")
+  
+# combine jaczon and gfw
+comb <-
+  bind_rows(
+    t,
+    haul %>% 
+      filter(year %in% t$year, 
+             week %in% t$week, 
+             vessel %in% t$vessel) %>% 
+      dplyr::select(vessel, week, haul, lat, lon, haultime) %>% 
+      mutate(source="jaczon")
+  )
+
+# # use EEZ function to get EEZ code of Cote d'Ivoire
+# code_eez <- get_region_id(region_name = 'NLD', region_source = 'eez', key = key) %>% filter(label=="Netherlands")
+# 
+# t <- get_raster(spatial_resolution = 'high',
+#            temporal_resolution = 'yearly',
+#            group_by = 'flagAndGearType',
+#            date_range = '2021-01-01,2021-10-01',
+#            region = code_eez$id,
+#            region_source = 'eez',
+#            key = key) %>% 
+#   lowcase() 
+
+#   region_json = '{"geojson":{"type":"Polygon","coordinates":[[[-76.11328125,-26.273714024406416],[-76.201171875,-26.980828590472093],[-76.376953125,-27.527758206861883],[-76.81640625,-28.30438068296276],[-77.255859375,-28.767659105691244],[-77.87109375,-29.152161283318918],[-78.486328125,-29.45873118535532],[-79.189453125,-29.61167011519739],[-79.892578125,-29.6880527498568],[-80.595703125,-29.61167011519739],[-81.5625,-29.382175075145277],[-82.177734375,-29.07537517955835],[-82.705078125,-28.6905876542507],[-83.232421875,-28.071980301779845],[-83.49609375,-27.683528083787756],[-83.759765625,-26.980828590472093],[-83.84765625,-26.35249785815401],[-83.759765625,-25.64152637306576],[-83.583984375,-25.16517336866393],[-83.232421875,-24.447149589730827],[-82.705078125,-23.966175871265037],[-82.177734375,-23.483400654325635],[-81.5625,-23.241346102386117],[-80.859375,-22.998851594142906],[-80.15625,-22.917922936146027],[-79.453125,-22.998851594142906],[-78.662109375,-23.1605633090483],[-78.134765625,-23.40276490540795],[-77.431640625,-23.885837699861995],[-76.9921875,-24.28702686537642],[-76.552734375,-24.846565348219727],[-76.2890625,-25.48295117535531],[-76.11328125,-26.273714024406416]]]}}'
+# 
+# library(geojsonio)
+# fao.json <- geojson_json(fao_sf %>% filter(F_LEVEL=="DIVISION", toupper(F_CODE)=="27.7.D") %>% st_sf(), geometry="polygon")
+# plot(fao.json)
+# print(fao.json)
+# glimpse(fao.json)
+# 
+# get_raster(
+#   spatial_resolution = 'high',
+#   temporal_resolution = 'yearly',
+#   group_by = 'flagAndGearType',
+#   date_range = '2021-01-01,2021-12-31',
+#   # region = region_json,
+#   region = fao.json,
+#   region_source = 'user_json',
+#   key = key
+#   ) 
+# 
+# gc <- 
+# '{"geojson":{"type": "Polygon",
+#   "coordinates": [[[-76.11328125,-26.273714024406416],[-76.201171875,-26.980828590472093],[-76.376953125,-27.527758206861883],[-76.81640625,-28.30438068296276],[-77.255859375,-28.767659105691244],[-77.87109375,-29.152161283318918],[-78.486328125,-29.45873118535532],[-79.189453125,-29.61167011519739],[-79.892578125,-29.6880527498568],[-80.595703125,-29.61167011519739],[-81.5625,-29.382175075145277],[-82.177734375,-29.07537517955835],[-82.705078125,-28.6905876542507],[-83.232421875,-28.071980301779845],[-83.49609375,-27.683528083787756],[-83.759765625,-26.980828590472093],[-83.84765625,-26.35249785815401],[-83.759765625,-25.64152637306576],[-83.583984375,-25.16517336866393],[-83.232421875,-24.447149589730827],[-82.705078125,-23.966175871265037],[-82.177734375,-23.483400654325635],[-81.5625,-23.241346102386117],[-80.859375,-22.998851594142906],[-80.15625,-22.917922936146027],[-79.453125,-22.998851594142906],[-78.662109375,-23.1605633090483],[-78.134765625,-23.40276490540795],[-77.431640625,-23.885837699861995],[-76.9921875,-24.28702686537642],[-76.552734375,-24.846565348219727],[-76.2890625,-25.48295117535531],[-76.11328125,-26.273714024406416]]]}}'
+# 
+# gc <- '{"type": "Polygon",
+#   "coordinates": [[[-76.11328125,-26.273714024406416],[-76.201171875,-26.980828590472093],[-76.376953125,-27.527758206861883],[-76.81640625,-28.30438068296276],[-77.255859375,-28.767659105691244],[-77.87109375,-29.152161283318918],[-78.486328125,-29.45873118535532],[-79.189453125,-29.61167011519739],[-79.892578125,-29.6880527498568],[-80.595703125,-29.61167011519739],[-81.5625,-29.382175075145277],[-82.177734375,-29.07537517955835],[-82.705078125,-28.6905876542507],[-83.232421875,-28.071980301779845],[-83.49609375,-27.683528083787756],[-83.759765625,-26.980828590472093],[-83.84765625,-26.35249785815401],[-83.759765625,-25.64152637306576],[-83.583984375,-25.16517336866393],[-83.232421875,-24.447149589730827],[-82.705078125,-23.966175871265037],[-82.177734375,-23.483400654325635],[-81.5625,-23.241346102386117],[-80.859375,-22.998851594142906],[-80.15625,-22.917922936146027],[-79.453125,-22.998851594142906],[-78.662109375,-23.1605633090483],[-78.134765625,-23.40276490540795],[-77.431640625,-23.885837699861995],[-76.9921875,-24.28702686537642],[-76.552734375,-24.846565348219727],[-76.2890625,-25.48295117535531],[-76.11328125,-26.273714024406416]]]}'
+#   
+# gc <- '{
+#   "type": "GeometryCollection",
+#   "geometries": [
+#     {"type": "Point", "coordinates": [100.0, 0.0]},
+#     {"type": "LineString", "coordinates": [[101.0, 0.0], [102.0, 1.0]]},
+#     {"type" : "MultiPoint", "coordinates" : [[0,0], [1,1], [2,2]]}
+#   ]
+# }'
+# 
+# sf <- geojsonsf::geojson_sf(gc)
+# 
+
+
+
+```
+
+
+# Global Fishing Watch data of the flyshoot and twinrig fishery in the North Sea and Channel 
+
+M.A. Pastoors
+
+Date: `r format(Sys.time(), '%d/%m/%Y')`
+
+
+Introduction
+
+GFW data
+GFWR package
+Method: 
+get_event(
+  event_type='fishing',
+  vessel = trawler_ids, 
+  start_date = "2012-01-01", 
+  end_date = "2023-12-31",
+  key = key) 
+
+Vessels included in the analysis
+
+```{r echo=FALSE, fig.asp=1.2, message=FALSE, warning=FALSE, comment=NA}
+
+r %>% 
+  relocate(vessel, vesselname) %>% 
+  arrange(flag, vessel, vesselname) %>% 
+  group_by(flag) %>% 
+  do(add_row(., .after=0)) %>%
+
+  pandoc.table(.,
+             style = "simple",
+             split.tables=400, 
+             justify = "left",
+             missing=".",
+             round=c(0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0))
+
+
+
+```
+\newpage
+
+Observations ('hauls') per vessel and year
+
+```{r echo=FALSE, fig.asp=1.2, message=FALSE, warning=FALSE, comment=NA}
+
+df %>% 
+  group_by(flag, vessel, vesselname, year) %>% 
+  summarise(n=n()) %>% 
+  reshape2::dcast(flag+vessel+vesselname ~ year, sum, value.var = "n", margins = c("vessel", "year")) %>% 
+  group_by(flag) %>% 
+  do(add_row(., .after=0)) %>%
+  pandoc.table(.,
+             style = "simple",
+             split.tables=400, 
+             justify = "left",
+             missing=".",
+             round=c(0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0))
+
+
+
+```
+
+\newpage
+
+Mean GT per vessel, number of vessels and total GT by year. 
+
+Number of fishing days and number of hauls. 
+
+```{r echo=FALSE, fig.asp=1.2, message=FALSE, warning=FALSE, comment=NA}
+
+df %>% 
+  filter(division %in% c("27.4.c","27.7.d")) %>% 
+  filter(year < 2023) %>% 
+  
+  group_by(year, flag, gear) %>% 
+  summarise(
+    nhauls = n(),
+    nvessels = n_distinct(vessel),
+    meangt  = mean(gt, na.rm=TRUE),
+    ndays = n_distinct(vessel, date)
+  ) %>% 
+  mutate(totalgt = nvessels * meangt) %>% 
+  mutate(gtdays = ndays * meangt) %>% 
+  pivot_longer(names_to = "variable", values_to = "data", nhauls:gtdays) %>% 
+  mutate(variable = factor(variable, levels=c("meangt","nvessels","totalgt","ndays","gtdays", "nhauls"))) %>% 
+  
+  # View()
+  ggplot(aes(x=year, y=data)) +
+  geom_point(aes(colour=flag)) +
+  geom_line(aes(colour=flag)) +
+  expand_limits(y=0) +
+  scale_x_continuous(breaks=sort(unique(df$year))) +
+  facet_grid(variable~gear, scales="free_y")
+
+```
+
+\newpage
+
+Cumulative umber of fishing days and number of hauls. 
+
+```{r echo=FALSE, fig.asp=1.2, message=FALSE, warning=FALSE, comment=NA}
+
+df %>% 
+  filter(division %in% c("27.4.c","27.7.d")) %>% 
+  filter(year < 2023) %>% 
+  
+  group_by(year, flag, gear) %>% 
+  summarise(
+    nhauls = n(),
+    nvessels = n_distinct(vessel),
+    meangt  = mean(gt, na.rm=TRUE),
+    ndays = n_distinct(vessel, date)
+  ) %>% 
+  mutate(totalgt = nvessels * meangt) %>% 
+  mutate(gtdays = ndays * meangt) %>% 
+  pivot_longer(names_to = "variable", values_to = "data", nhauls:gtdays) %>% 
+  filter(variable != "meangt") %>% 
+  mutate(variable = factor(variable, levels=c("nvessels","totalgt","ndays","gtdays", "nhauls"))) %>% 
+  
+  # View()
+  ggplot(aes(x=year, y=data)) +
+  theme_publication() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  geom_bar(aes(fill=flag), stat="identity") +
+  expand_limits(y=0) +
+  scale_x_continuous(breaks=sort(unique(df$year))) +
+  facet_grid(variable~gear, scales="free_y")
+
+```
+
+\newpage
+
+Checking on number and location of hauls identified from Jaczon selfsampling and derived from GFW (AI-model) for specific week (12) and vessels. 
+
+Conclusion: fewer hauls identified in GFW, but location of hauls overlaps with self-sampling information. 
+
+```{r echo=FALSE, fig.asp=0.4, message=FALSE, warning=FALSE, comment=NA}
+comb %>% 
+  filter(week ==12) %>% 
+  ggplot(aes(x=lon, y=lat)) +
+  coord_quickmap(xlim=c(-2,2) , ylim=c(49.5, 51)) +
+  geom_polygon(data=world_mr_df, aes(x=long, y=lat, group=group), fill = "grey75") +
+  geom_point(aes(colour=source), size=1, alpha=0.6, shape=1) +
+  labs(title="week 12") +
+  facet_wrap(~vessel)
+
+```
+
+\newpage
+
+Checking on number of hauls per week identified from Jaczon selfsampling and derived from GFW (AI-model). 
+
+Conclusion: GFW identifies fewer hauls than actually carried out in the flyshoot fishery (no information on twinrig included in this example). 
+
+```{r echo=FALSE, fig.asp=0.4, message=FALSE, warning=FALSE, comment=NA}
+
+comb %>% 
+  group_by(source, vessel, week) %>% 
+  summarise(nhauls = n()) %>% 
+  group_by(source, vessel) %>% 
+  mutate(mean = mean(nhauls)) %>% 
+  
+  ggplot(aes(x=week, y=nhauls)) +
+  geom_point(aes(colour=source), size=1) +
+  geom_hline(aes(colour=source, yintercept=mean)) +
+  expand_limits(y=0) +
+  facet_wrap(~vessel)
+
+```
+
+
+\newpage
+
+Effort (hauls) by country
+
+```{r echo=FALSE, fig.asp=1.2, message=FALSE, warning=FALSE, comment=NA}
+
+df %>% 
+  # filter(grepl("METANOIA", vesselname)|grepl("MDV", name)) %>% 
+  # filter(vessel=="MDV2") %>% 
+  # filter(year==2023) %>% View()
+  filter(year < 2023) %>% 
+  
+  ggplot(aes(x=lon, y=lat)) +
+  theme_publication() +
+  # coord_quickmap(xlim=c(-3,5) , ylim=c(49.5,53)) +
+  coord_quickmap(xlim=c(-3,10) , ylim=c(49.5,58)) +
+  geom_polygon(data=world_mr_df, aes(x=long, y=lat, group=group), fill = "grey75") +
+  geom_point(aes(colour=flag), size=0.5, alpha=0.2) +
+  # geom_point(aes(colour=vesselname), size=0.5, alpha=0.5) +
+  facet_wrap(~year, ncol=3)
+  # facet_wrap(~week, ncol=10)
+
+
+```
+
+\newpage
+
+Number of hauls per small rectangle (0.05 deg lon x 0.025 deg lat) for selected years and flag. (Note: Germany not shown)
+
+```{r echo=FALSE, fig.asp=1.0, message=FALSE, warning=FALSE, comment=NA}
+
+dx = 0.05; dy = 0.025
+
+t <-
+  df %>% 
+  filter(year %in% c(2013, 2016, 2019, 2022)) %>% 
+  filter(division %in% c("27.4.c", "27.7.d")) %>% 
+  filter(flag != "DEU") %>% 
+  
+  mutate(rect   = encode_zchords(lon, lat, dx = dx, dy = dy)) %>% 
+  group_by(flag, year, rect) %>% 
+  summarise(
+    nhauls        = n()) %>% 
+  separate(rect, c("lon", "lat"), sep = ":", convert = TRUE, remove = FALSE) %>% 
+  ungroup() %>% 
+
+  mutate(., effort_interval = cut(nhauls, 
+                                  scales::trans_breaks("sqrt", function(x) x ^ 2)(c(0, max(nhauls, na.rm=TRUE))), 
+                               dig.lab=10 ) ) %>% 
+  
+  sf::st_as_sf(coords = c("lon", "lat"), crs = 4326, remove = FALSE)  
+
+
+tmax <- 100*ceiling(max(t$nhauls, na.rm=TRUE)/100)
+
+bb <- sf::st_bbox(t)
+
+t %>% 
+
+  ggplot() +
+  theme_publication() +
+  theme(plot.margin = margin(1,1,1,1, "mm")) +
+  theme(plot.title = element_text(hjust = 0.0)) +
+  # theme(legend.position = "none") +
+  
+  geom_sf(data=world_mr_sf, 
+          font = "Arial") +
+  # geom_sf(aes(fill=landing_interval), 
+  #         font = "Arial") +
+  
+  geom_rect(aes(xmin=lon, ymin=lat, xmax=lon+dx, ymax=lat+dy, fill=effort_interval), linewidth=0.2) +
+  scale_fill_viridis(option = "plasma", direction = -1, discrete=TRUE) +
+  
+  # coord_sf(xlim=xlim, ylim=ylim) + 
+  coord_sf(xlim=c(bb$xmin, bb$xmax), ylim=c(bb$ymin, bb$ymax)) + 
+  
+  guides(fill=guide_legend(nrow = 1)) + 
+  labs(x="",y="", title="Nhauls by rectangle") +
+  facet_grid(flag~year)
+  
+
+```
+
+\newpage
+
+Number of hauls per small rectangle (0.05 deg lon x 0.025 deg lat) for selected years and gear types 
+
+```{r echo=FALSE, fig.asp=0.8, message=FALSE, warning=FALSE, comment=NA}
+
+dx = 0.05; dy = 0.025
+
+t <-
+  df %>% 
+  filter(year %in% c(2013, 2016, 2019, 2022)) %>% 
+  filter(division %in% c("27.4.c", "27.7.d")) %>% 
+  mutate(rect   = encode_zchords(lon, lat, dx = dx, dy = dy)) %>% 
+  group_by(gear, year, rect) %>% 
+  summarise(
+    nhauls        = n()) %>% 
+  separate(rect, c("lon", "lat"), sep = ":", convert = TRUE, remove = FALSE) %>% 
+  ungroup() %>% 
+
+  mutate(., effort_interval = cut(nhauls, 
+                                  scales::trans_breaks("sqrt", function(x) x ^ 2)(c(0, max(nhauls, na.rm=TRUE))), 
+                               dig.lab=10 ) ) %>% 
+  
+  sf::st_as_sf(coords = c("lon", "lat"), crs = 4326, remove = FALSE)  
+
+
+tmax <- 100*ceiling(max(t$nhauls, na.rm=TRUE)/100)
+
+bb <- sf::st_bbox(t)
+
+t %>% 
+
+  ggplot() +
+  theme_publication() +
+  theme(plot.margin = margin(1,1,1,1, "mm")) +
+  theme(plot.title = element_text(hjust = 0.0)) +
+  # theme(legend.position = "none") +
+  
+  geom_sf(data=world_mr_sf, 
+          font = "Arial") +
+  # geom_sf(aes(fill=landing_interval), 
+  #         font = "Arial") +
+  
+  geom_rect(aes(xmin=lon, ymin=lat, xmax=lon+dx, ymax=lat+dy, fill=effort_interval), linewidth=0.2) +
+  scale_fill_viridis(option = "plasma", direction = -1, discrete=TRUE) +
+  
+  # coord_sf(xlim=xlim, ylim=ylim) + 
+  coord_sf(xlim=c(bb$xmin, bb$xmax), ylim=c(bb$ymin, bb$ymax)) + 
+  
+  guides(fill=guide_legend(nrow = 1)) + 
+  labs(x="",y="", title="Nhauls by rectangle") +
+  facet_grid(gear~year)
+  
+
+```
+

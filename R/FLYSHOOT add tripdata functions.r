@@ -512,7 +512,8 @@ get_kisten <- function(my_vessel, my_trip2, my_file, h) {
     # assign haul numbers
     mutate(haul = ifelse(time_diff > 20 | is.na(time_diff), 1, 0)) %>% 
     mutate(haul = cumsum(haul)) %>% 
-    dplyr::select(-datum, -tijd) 
+    dplyr::select(-datum, -tijd) %>% 
+    left_join(soorten, by="soorten")
   
   # tmp <-
   #   sqldf::sqldf("select m.vessel, m.trip, m.lotnummer, m.soorten, m.maat, m.gewicht,
