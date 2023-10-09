@@ -22,8 +22,8 @@ rm(list=ls())
 # Select vessel and trip
 # ------------------------------------------------------------
 
-# setvessel<-"SCH135"   ;settrip<-c("2023363", "2023364") ; comparisons <- FALSE
-setvessel<-"SCH65"   ;settrip<-c("2023279") ; comparisons <- FALSE
+setvessel<-"SCH135"   ;settrip<-c("2023365") ; comparisons <- FALSE
+# setvessel<-"SCH65"   ;settrip<-c("2023279") ; comparisons <- FALSE
 # setvessel<-"SL9"   ;settrip<-c("2023081600041", "2023082100042") ; comparisons <- FALSE
 # setvessel<-c("Z99", "SCH99")   ;settrip<- c( "2023095") ; comparisons <- FALSE
 

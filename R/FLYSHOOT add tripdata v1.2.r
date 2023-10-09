@@ -189,12 +189,33 @@ for (i in 1:nrow(my_trips)) {
   
   # from treklijst
   
-  if (any(grepl(paste(my_vessel, my_trip), treklijst_list))) {
+  if (any(grepl(paste(my_vessel, my_trip), treklijst_list)) & 
+      any(!grepl("simplified", treklijst_list))) {
   
     my_file <- filter(my_files,
                       vessel == my_vessel, trip== my_trip, source=="treklijst")$file
     
     h <- get_haul_treklijst(my_vessel, my_trip2, my_file)
+    t <- get_trip_from_haul(h, my_vessel, my_trip2) 
+    
+    if (move_data) {
+      file.copy(my_file, file.path(tripdir, my_vessel), overwrite = TRUE)
+      file.remove(my_file)
+    }
+    
+  # from treklist (simplified) and kisten
+    
+  } else if (any(grepl(paste(my_vessel, my_trip), treklijst_list)) & 
+             any(grepl("simplified", treklijst_list))) {
+    
+    my_file <- filter(my_files,
+                      vessel == my_vessel, trip== my_trip, source=="treklijst")$file
+    my_kisten <- filter(my_files, 
+                        vessel == my_vessel, trip== my_trip, source=="kisten")$file
+    
+    # h <- get_haul_from_pefa_trek(my_vessel, my_trip2, my_file)
+    # t <- get_trip_from_haul(h, my_vessel, my_trip2) 
+    h <- get_haul_kisten(my_vessel, my_trip2, my_file, my_kisten)
     t <- get_trip_from_haul(h, my_vessel, my_trip2) 
     
     if (move_data) {
