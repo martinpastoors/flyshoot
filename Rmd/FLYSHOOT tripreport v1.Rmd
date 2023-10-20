@@ -22,10 +22,10 @@ rm(list=ls())
 # Select vessel and trip
 # ------------------------------------------------------------
 
-setvessel<-"SCH135"   ;settrip<-c("2023365") ; comparisons <- FALSE
-# setvessel<-"SCH65"   ;settrip<-c("2023279") ; comparisons <- FALSE
+setvessel<-"SCH135"   ;settrip<-c("2023367") ; comparisons <- FALSE
+# setvessel<-"SCH65"   ;settrip<-c("2023281", "2023282") ; comparisons <- FALSE
 # setvessel<-"SL9"   ;settrip<-c("2023081600041", "2023082100042") ; comparisons <- FALSE
-# setvessel<-c("Z99", "SCH99")   ;settrip<- c( "2023095") ; comparisons <- FALSE
+# setvessel<-c("Z99", "SCH99")   ;settrip<- c( "2023097") ; comparisons <- FALSE
 
 # ------------------------------------------------------------
 
@@ -315,28 +315,36 @@ c2 <-
   # mutate(source = forcats::fct_reorder(source, source, .desc=FALSE)) %>% 
   reshape2::dcast(vessel+trip ~ source, value.var = "aanvoer", sum, margins=c("trip"))
 
+# species
+s <-
+  e %>% 
+    group_by(species) %>% 
+    summarise(gewicht = sum(weight, na.rm=TRUE)) %>% 
+    arrange (desc(gewicht)) %>% 
+    slice_head(n=8) %>% 
+    distinct(species)
   
 # belangrijkste soorten
 c3 <-
   bind_rows(
+    #species
     e %>% 
+      filter(species %in% s$species) %>% 
       group_by(trip, species) %>% 
-      summarise(gewicht = sum(weight, na.rm=TRUE)) %>% 
-      arrange (desc(gewicht)) %>% 
-      slice_head(n=8),
+      summarise(gewicht = sum(weight, na.rm=TRUE))  ,
+    #other
     e %>% 
-      group_by(trip, species) %>% 
-      summarise(gewicht = sum(weight, na.rm=TRUE)) %>% 
-      arrange (desc(gewicht)) %>% 
-      filter(row_number() > 8) %>% 
+      filter(species %notin% s$species) %>% 
       group_by(trip) %>% 
-      summarise(gewicht = sum(gewicht)) %>% 
+      summarise(gewicht = sum(weight)) %>% 
       mutate(species="OTHER"),
     e %>% 
       group_by(trip) %>% 
       summarise(gewicht = sum(weight, na.rm=TRUE)) %>% 
       mutate(species="TOTAL")
-  )
+  ) %>% 
+  mutate(species = factor(species, levels=c(s$species,"OTHER","TOTAL")))
+
 
 
 c1 %>% 
@@ -361,10 +369,13 @@ c2 %>%
              missing=".",
              round=c(0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0))
 
+cat("Aanvoer (elog)")
+
 c3 %>% 
   ungroup() %>% 
-  mutate(vangst = "aanvoer (elog)") %>% 
-  pivot_wider(names_from = species, values_from = gewicht) %>% 
+  # mutate(vangst = "aanvoer (elog)") %>% 
+  # pivot_wider(names_from = species, values_from = gewicht) %>% 
+  reshape2::dcast(trip ~ species, value.var = "gewicht", sum, margins="trip") %>% 
   pandoc.table(.,
              style = "simple",
              split.tables=400, 
@@ -535,8 +546,17 @@ _`r tab_nums("vangstpersoortreisenbron")`_
 
 xlim <- c(xmin,xmax); ylim <- c(ymin,ymax)
 
-
 if (sum(!is.na(h$landingweight)) >0 ) {
+  t <- h
+} else if (sum(!is.na(h$landingweight)) == 0 & sum(!is.na(m$haul)) > 0 ) {
+  t <- 
+    h %>% 
+    dplyr::select(-landingweight) %>% 
+    left_join(m %>% group_by(vessel, trip, haul) %>% summarise(landingweight=sum(gewicht, na.rm=TRUE)),
+              by=c("vessel","trip","haul"))
+}
+
+if (sum(!is.na(t$landingweight)) >0 ) {
 
   fig_nums(
     name    = "totalcatchperhaul", level   = 1, display = FALSE,
@@ -550,7 +570,7 @@ if (sum(!is.na(h$landingweight)) >0 ) {
   #                           vessel, trip, haul, lat, lon, date),
   #             by = c("vessel","trip","haul")) %>%
   
-  h %>%
+  t %>%
     ggplot() +
 
     theme_publication() +

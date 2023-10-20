@@ -82,6 +82,7 @@ for (y in 2012:2022) {
 }
 
 save(df, file=file.path(spatialdir, "gfw_effort_flagandgeartype.RData"))
+load(file=file.path(spatialdir, "gfw_effort_flagandgeartype.RData"))
 
 # # use EEZ function to get EEZ code of Cote d'Ivoire
 # code_eez <- get_region_id(region_name = 'NLD', region_source = 'eez', key = key) %>% filter(label=="Netherlands")
@@ -149,21 +150,28 @@ Effort (hauls) by country
 
 ```{r echo=FALSE, fig.asp=1.2, message=FALSE, warning=FALSE, comment=NA}
 
-df %>% 
+t <-
+  df %>% 
   # filter(grepl("METANOIA", vesselname)|grepl("MDV", name)) %>% 
   # filter(vessel=="MDV2") %>% 
   # filter(year==2023) %>% View()
-  filter(year < 2023) %>% 
+  filter(flag == "NLD") %>% 
+  filter(year == 2017) %>% 
+  filter(tolower(division) %in% c("27.4.a","27.4.b","27.4.c")) %>% 
+  filter(geartype == "trawlers") %>% 
   
+  group_by(lat, lon) %>% 
+  summarise(apparentfishinghours = sum(apparentfishinghours, na.rm=TRUE)) %>%  
+  
+  mutate(fishinghours_cat = cut(apparentfishinghours, breaks=c(0,50, 100,200,400,800,1600), dig.lab=10 ))
+  
+t %>% 
   ggplot(aes(x=lon, y=lat)) +
   theme_publication() +
   # coord_quickmap(xlim=c(-3,5) , ylim=c(49.5,53)) +
   coord_quickmap(xlim=c(-3,10) , ylim=c(49.5,58)) +
   geom_polygon(data=world_mr_df, aes(x=long, y=lat, group=group), fill = "grey75") +
-  geom_point(aes(colour=flag), size=0.5, alpha=0.2) +
-  # geom_point(aes(colour=vesselname), size=0.5, alpha=0.5) +
-  facet_wrap(~year, ncol=3)
-  # facet_wrap(~week, ncol=10)
+  geom_point(aes(colour=fishinghours_cat), size=0.5, alpha=0.2) 
 
 
 ```

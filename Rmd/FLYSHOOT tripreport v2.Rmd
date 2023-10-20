@@ -107,12 +107,12 @@ load(file.path(onedrive, "elog_trek.RData"))
 
 # setvessel<-"SCH135"   ;settrip<-c("2023343") ;
 # setvessel<-"SCH65"   ;settrip<-c("2023259") ;
-setvessel<-"SL9"   ;settrip<-c("2023091200046","2023091800047") ;
+# setvessel<-"SL9"   ;settrip<-c("2023091200046","2023091800047") ;
 # setvessel<-c("Z99", "SCH99")   ;settrip<-"2023003" ;
 
 # ------------------------------------------------------------
 
-setvessel<-"SL9"   ;startdate<-dmy("27/9/2023"); enddate <- dmy("4/10/2023") ;
+setvessel<-"SL9"   ;startdate<-dmy("10/10/2023"); enddate <- dmy("18/10/2023") ;
 
 settrip  <- 
   elog %>% 
@@ -204,15 +204,27 @@ c2 <-
       summarise(aanvoer = sum(weight, na.rm=TRUE)) %>% 
       mutate(source="elog per trek")
   )
+
+# species
+s <-
+  e %>% 
+    group_by(species) %>% 
+    summarise(gewicht = sum(weight, na.rm=TRUE)) %>% 
+    arrange (desc(gewicht)) %>% 
+    slice_head(n=8) %>% 
+    distinct(species)
+
   
 # belangrijkste soorten elog
 c3 <-
   bind_rows(
+    # by species
     e %>% 
       group_by(trip, species) %>% 
       summarise(gewicht = sum(weight, na.rm=TRUE)) %>% 
       arrange (desc(gewicht)) %>% 
       slice_head(n=8),
+    #other
     e %>% 
       group_by(trip, species) %>% 
       summarise(gewicht = sum(weight, na.rm=TRUE)) %>% 
@@ -221,11 +233,13 @@ c3 <-
       group_by(trip) %>% 
       summarise(gewicht = sum(gewicht)) %>% 
       mutate(species="OTHER"),
+    # total
     e %>% 
       group_by(trip) %>% 
       summarise(gewicht = sum(weight, na.rm=TRUE)) %>% 
       mutate(species="TOTAL")
-  )
+  ) %>% 
+  mutate(species = factor(species, levels=c(s$species,"OTHER","TOTAL")))
 
 # belangrijkste soorten elog per trek
 c4 <-
@@ -247,7 +261,9 @@ c4 <-
       group_by(trip) %>% 
       summarise(gewicht = sum(weight, na.rm=TRUE)) %>% 
       mutate(species="TOTAL")
-  )
+  ) %>% 
+  mutate(species = factor(species, levels=c(s$species,"OTHER","TOTAL")))
+
 
 c1 %>% 
   t() %>% 
@@ -262,19 +278,23 @@ c1 %>%
 c2 %>% 
   ungroup() %>% 
   dplyr::select(-vessel) %>% 
+  reshape2::dcast(trip ~ source, value.var = "aanvoer", sum, margins="trip") %>% 
   # mutate(vangst = "aanvoer") %>% 
-  pivot_wider(names_from = source, values_from = aanvoer) %>% 
+  # pivot_wider(names_from = source, values_from = aanvoer) %>% 
   pandoc.table(.,
              style = "simple",
              split.tables=400, 
-             justify = "left",
+             justify = c("left",rep("right",length(unique(c2$source)))),
              missing=".",
              round=c(0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0))
 
+cat("Aanvoer (elog)")
+
 c3 %>% 
   ungroup() %>% 
-  mutate(vangst = "aanvoer (elog)") %>% 
-  pivot_wider(names_from = species, values_from = gewicht) %>% 
+  # mutate(vangst = "aanvoer (elog)") %>% 
+#   pivot_wider(names_from = species, values_from = gewicht) %>% 
+  reshape2::dcast(trip ~ species, value.var = "gewicht", sum, margins="trip") %>% 
   pandoc.table(.,
              style = "simple",
              split.tables=400, 
@@ -282,10 +302,13 @@ c3 %>%
              missing=".",
              round=c(0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0))
   
+cat("Aanvoer (elog per trek")
+
 c4 %>% 
   ungroup() %>% 
-  mutate(vangst = "aanvoer (elog per trek)") %>% 
-  pivot_wider(names_from = species, values_from = gewicht) %>% 
+  # mutate(vangst = "aanvoer (elog per trek)") %>% 
+  # pivot_wider(names_from = species, values_from = gewicht) %>% 
+  reshape2::dcast(trip ~ species, value.var = "gewicht", sum, margins="trip") %>% 
   pandoc.table(.,
              style = "simple",
              split.tables=400, 
@@ -563,5 +586,71 @@ t %>%
 
 _`r fig_nums("totalcatchperspecies")`_
 
+\newpage
+
+<!-- ########################################################################################## -->
+<!-- Figure: aanvoer per week                                                                   -->
+<!-- ########################################################################################## -->
+
+```{r aanvoerperweek, echo=FALSE, fig.align="center", fig.asp=0.8, message=FALSE, warning=FALSE}
 
 
+# create list of catch by species by week
+if (nrow(elog) > 0) {
+  
+  fig_nums(
+    name    = "aanvoerperweek", level   = 1, display = FALSE,
+    caption = "Vergelijking van aanvoer per soort en week")
+  
+  # sequence
+  s <-
+    elog %>% 
+    filter(vessel %in% setvessel, year == 2023, date <= max(e$date)) %>% 
+    
+    group_by(species) %>% 
+    summarise(weight = sum(weight, na.rm=TRUE)) %>% 
+    
+    arrange (desc(weight)) %>% 
+    group_by() %>% 
+    slice_head(n=10) %>% 
+    left_join(dplyr::select(asfis,
+                            species, englishname), 
+              by=c("species")) %>% 
+    mutate(english_species = paste(englishname, species))
+  
+  # date
+  t <-
+    elog %>% 
+    filter(vessel %in% setvessel, year == 2023, date <= max(e$date)) %>% 
+    
+    mutate(species = ifelse(species %in% s$species, species, "ZZZ")) %>%
+
+    group_by(week, species) %>% 
+    summarise(weight = sum(weight, na.rm=TRUE)) %>% 
+    
+    left_join(dplyr::select(asfis,
+                            species, dutchname, englishname, scientificname), 
+              by=c("species")) %>% 
+    mutate(
+      dutchname   = ifelse(species == "ZZZ", "Overig", dutchname),
+      englishname = ifelse(species == "ZZZ", "Other", englishname),
+      scientificname = ifelse(species == "ZZZ", "", dutchname),
+      english_species = paste(englishname, species)
+    ) %>% 
+    mutate(english_species = factor(english_species, levels=c(s$english_species, "Other ZZZ")))
+  
+  t %>% 
+    ggplot(aes(x=week, y=weight)) +
+    theme_publication() +
+    theme(legend.position = "right", legend.direction = "vertical") +
+    geom_bar(aes(fill=english_species), 
+             stat="identity", position = position_stack(reverse = TRUE), colour="lightgray", linewidth=0.3) +
+    labs(y="aanvoer (kg)", title=paste(paste(setvessel,collapse="/"), "aanvoer per soort en week"), fill="") +
+    scale_fill_brewer(palette="Paired")
+  
+}
+
+
+```
+
+_`r fig_nums("aanvoerperweek")`_

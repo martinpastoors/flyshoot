@@ -183,63 +183,69 @@ for (i in 1:nrow(my_trips)) {
   my_trip   = my_trips[i,"trip"]
   my_trip2  = gsub("_","",my_trip)
   
+  my_treklijst = filter(my_files,
+                        vessel == my_vessel, trip== my_trip, source=="treklijst")$file
+  my_kisten    = filter(my_files, 
+                        vessel == my_vessel, trip== my_trip, source=="kisten")$file
+  my_pefa_trek = filter(my_files,
+                        vessel == my_vessel, trip== my_trip, source=="pefa_trek")$file
+  my_pefa      = filter(my_files,
+                        vessel == my_vessel, trip== my_trip, source=="pefa")$file
+  
   print(paste(my_vessel, my_trip2))
   
   # HAUL ----------------------------------------------------------------------
   
   # from treklijst
   
-  if (any(grepl(paste(my_vessel, my_trip), treklijst_list)) & 
-      any(!grepl("simplified", treklijst_list))) {
+  if (!is_empty(my_treklijst) & !grepl("simplified", my_treklijst))  {
   
-    my_file <- filter(my_files,
-                      vessel == my_vessel, trip== my_trip, source=="treklijst")$file
+    # my_file <- filter(my_files,
+    #                   vessel == my_vessel, trip== my_trip, source=="treklijst")$file
     
-    h <- get_haul_treklijst(my_vessel, my_trip2, my_file)
+    h <- get_haul_treklijst(my_vessel, my_trip2, my_treklijst)
     t <- get_trip_from_haul(h, my_vessel, my_trip2) 
     
     if (move_data) {
-      file.copy(my_file, file.path(tripdir, my_vessel), overwrite = TRUE)
-      file.remove(my_file)
+      file.copy(my_treklijst, file.path(tripdir, my_vessel), overwrite = TRUE)
+      file.remove(my_treklijst)
     }
     
   # from treklist (simplified) and kisten
     
-  } else if (any(grepl(paste(my_vessel, my_trip), treklijst_list)) & 
-             any(grepl("simplified", treklijst_list))) {
+    } else if (!is_empty(my_treklijst) & grepl("simplified", my_treklijst)) {
     
-    my_file <- filter(my_files,
-                      vessel == my_vessel, trip== my_trip, source=="treklijst")$file
-    my_kisten <- filter(my_files, 
-                        vessel == my_vessel, trip== my_trip, source=="kisten")$file
+    # my_file <- filter(my_files,
+    #                   vessel == my_vessel, trip== my_trip, source=="treklijst")$file
+    # my_kisten <- filter(my_files, 
+    #                     vessel == my_vessel, trip== my_trip, source=="kisten")$file
     
     # h <- get_haul_from_pefa_trek(my_vessel, my_trip2, my_file)
     # t <- get_trip_from_haul(h, my_vessel, my_trip2) 
-    h <- get_haul_kisten(my_vessel, my_trip2, my_file, my_kisten)
+    h <- get_haul_kisten(my_vessel, my_trip2, my_treklijst, my_kisten)
     t <- get_trip_from_haul(h, my_vessel, my_trip2) 
     
     if (move_data) {
-      file.copy(my_file, file.path(tripdir, my_vessel), overwrite = TRUE)
-      file.remove(my_file)
+      file.copy(my_treklijst, file.path(tripdir, my_vessel), overwrite = TRUE)
+      file.remove(my_treklijst)
     }
     
   # from pefa trek 
     
-  } else if (any(grepl(paste(my_vessel, my_trip), pefa_trek_list))) {
+  } else if (!is_empty(my_pefa_trek)) {
 
-    my_file <- filter(my_files,
-                      vessel == my_vessel, trip== my_trip, source=="pefa_trek")$file
+    # my_file <- filter(my_files,
+    #                   vessel == my_vessel, trip== my_trip, source=="pefa_trek")$file
     
-    h <- get_haul_from_pefa_trek(my_vessel, my_trip2, my_file)
+    h <- get_haul_from_pefa_trek(my_vessel, my_trip2, my_pfa_trek)
     t <- get_trip_from_haul(h, my_vessel, my_trip2) 
     
   # from kisten & pefa 
     
-  } else if (any(grepl(paste(my_vessel, my_trip), kisten_list)) &
-             any(grepl(paste(my_vessel, my_trip), pefa_list))) {
+  } else if (!is_empty(my_kisten) & !is_empty(my_pefa)) {
     
-    my_kisten <- filter(my_files, vessel == my_vessel, trip== my_trip, source=="kisten")$file
-    my_pefa   <- filter(my_files, vessel == my_vessel, trip== my_trip, source=="pefa")$file
+    # my_kisten <- filter(my_files, vessel == my_vessel, trip== my_trip, source=="kisten")$file
+    # my_pefa   <- filter(my_files, vessel == my_vessel, trip== my_trip, source=="pefa")$file
     
     h <- get_haul_kisten_pefa(my_vessel, my_trip2, my_kisten, my_pefa) 
     t <- get_trip_from_haul(h, my_vessel, my_trip2) 
@@ -247,10 +253,10 @@ for (i in 1:nrow(my_trips)) {
     
   # from kisten only (no positions) 
     
-  } else if (any(grepl(paste(my_vessel, my_trip), kisten_list))) {
-  
-    my_file <- filter(my_files,
-                      vessel == my_vessel, trip== my_trip, source=="pefa")$file
+  } else if (!is_empty(my_kisten)) {
+    
+    # my_file <- filter(my_files,
+    #                   vessel == my_vessel, trip== my_trip, source=="pefa")$file
     
     # TO BE DONE
   

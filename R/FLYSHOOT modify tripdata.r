@@ -244,6 +244,11 @@ save(kisten,      file = file.path(onedrive, "kisten.RData"))
 # kisten <- kisten %>% mutate(trip = ifelse(vessel=="SL9"& trip=="2023418", "2023417",trip))
 # elog <- elog %>% mutate(trip = ifelse(vessel=="SL9"& trip=="2023418", "2023417",trip)) 
 
+# haul   <- haul %>% filter(vessel != "SCH153")
+# trip   <- trip %>% filter(vessel != "SCH153")
+# kisten <- kisten %>% filter(vessel != "SCH153")
+# elog   <- elog %>% filter(vessel != "SCH153")
+
 # elog <-
 #   elog %>% 
 #   filter(!(vessel=="SL9" & year == 2018 &  week == 52 & source=="m-catch")) %>% 
@@ -890,4 +895,27 @@ t %>%
   facet_wrap(~variable, scales = "free_x")
 
 
+
+# --------------------------------------------------------------------------------
+# size information in kisten CTC
+# --------------------------------------------------------------------------------
+myspecies <- "CTC"
+
+kisten %>% 
+  mutate(week = lubridate::week(datetime)) %>% 
+  filter(species == myspecies) %>% 
+  drop_na(maat) %>% 
+  group_by(week, maat) %>% 
+  summarise(gewicht = sum(gewicht, na.rm=TRUE)) %>% 
+  group_by(week) %>% 
+  filter(sum(gewicht) >= 2000) %>% 
+  
+  ggplot(aes(x=week, y=gewicht)) +
+  theme_publication() +
+  # geom_bar(aes(fill=maat), stat="identity") +
+  geom_bar(aes(fill=maat), stat="identity", position = position_fill()) +
+  labs(title=myspecies)
+
+  #geom_point() +
+  #facet_wrap(~maat)
 
