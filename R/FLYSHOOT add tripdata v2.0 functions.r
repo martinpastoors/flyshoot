@@ -452,6 +452,7 @@ get_raw_from_pefa_trek <- function(my_file) {
     rename(vessel = vesselnumber) %>%
     mutate(vessel = toupper(vessel)) %>% 
     mutate(vessel = ifelse(vessel == "SL 09","SL9",vessel)) %>% 
+    mutate(vessel = gsub(" ","",vessel)) %>% 
     
     {if(any(grepl("haulid",names(.)))) {rename(., haul = haulid)} else{.}} %>% 
     
@@ -742,7 +743,7 @@ get_elog_from_pefa <- function(my_file) {
   print(paste(".. getting elog from pefa"))
   
   e  <-
-    raw  <-
+    # raw  <-
     readxl::read_excel(my_file, 
                        col_names=TRUE, 
                        col_types="text",
@@ -758,6 +759,7 @@ get_elog_from_pefa <- function(my_file) {
     rename(vessel = vesselnumber) %>%
     mutate(vessel = toupper(vessel)) %>% 
     mutate(vessel = ifelse(vessel == "SL 09","SL9",vessel)) %>% 
+    mutate(vessel = gsub(" ","",vessel)) %>% 
     
     mutate(across (any_of(c("boxes", "meshsize", "haul")),
                    as.integer)) %>%

@@ -75,6 +75,24 @@ load(file.path(onedrive, "soorten.RData"))
 # haul %>% filter(grepl("Harry", captain)) %>% View()
 
 # --------------------------------------------------------------------------------
+# remove trips with hyphen or space in vesselname
+# --------------------------------------------------------------------------------
+
+# haul %>% distinct(vessel, trip) %>% filter(grepl("-", vessel)) %>% View()
+
+haul      <- haul %>% filter(!grepl("-| ", vessel)) 
+kisten    <- kisten %>% filter(!grepl("-| ", vessel)) 
+elog      <- elog %>% filter(!grepl("-| ", vessel)) 
+elog_trek <- elog_trek %>% filter(!grepl("-| ", vessel)) 
+trip      <- trip %>% filter(!grepl("-| ", vessel)) 
+
+save(haul,      file = file.path(onedrive, "haul.RData"))
+save(kisten,    file = file.path(onedrive, "kisten.RData"))
+save(elog,      file = file.path(onedrive, "elog.RData"))
+save(elog_trek, file = file.path(onedrive, "elog_trek.RData"))
+save(trip,      file = file.path(onedrive, "trip.RData"))
+
+# --------------------------------------------------------------------------------
 # remove trips with underscore in tripname
 # --------------------------------------------------------------------------------
 
@@ -858,13 +876,13 @@ t %>%
 # checking aanvoer en discards van Aravis
 # --------------------------------------------------------------------------------
 
-mytrip <- c("2023002", "2023003")
+mytrip <- c("2023098", "2023099", "2023100", "2023101", "2023102")
 
 h <-
   haul %>% 
   filter(trip %in% mytrip) %>% 
-  filter(!is.na(totalcatch)) %>% 
-  dplyr::select(vessel, trip, haul, date, shoottime, haultime, totalcatch) %>% 
+  filter(!is.na(catchweight)) %>% 
+  dplyr::select(vessel, trip, haul, date, shoottime, haultime, catchweight) %>% 
   mutate(haul = stringr::str_pad(haul, width=2, pad="0")) 
 
 m <- 
@@ -876,9 +894,13 @@ m <-
 
 t <-
   left_join(h, m, by=c("vessel","trip","haul")) %>% 
+  mutate(triphaul = paste(trip, haul)) %>%
   mutate(landings=ifelse(is.na(landings), 0, landings)) %>% 
-  mutate(discards = totalcatch - landings) %>% 
-  filter(discards >= 0) %>% 
+  mutate(discards = catchweight - landings) %>% 
+  # filter(discards >= 0) %>% 
+  mutate(perc_discards = round((catchweight - landings) / catchweight, digits=2)) %>% 
+  mutate(perc_discards = scales::percent(perc_discards, accuracy=1)) %>% 
+  mutate(colour = ifelse(landings>catchweight, "red","black")) %>% 
   ungroup()  
   # summarise(
   #   discards = median(discards),
@@ -886,7 +908,7 @@ t <-
   # )
 
 t %>% 
-  dplyr::select(-totalcatch) %>% 
+  dplyr::select(-catchweight) %>% 
   tidyr::pivot_longer(names_to = "variable", values_to = "data",c("landings","discards")) %>% 
   
   ggplot(aes(x=data)) +
@@ -894,7 +916,22 @@ t %>%
   geom_histogram(aes(fill=variable)) +
   facet_wrap(~variable, scales = "free_x")
 
-
+t %>%
+  dplyr::select(-discards) %>% 
+  pivot_longer(names_to = "variable", values_to = "data", catchweight:landings) %>% 
+  
+  ggplot(aes(x=triphaul, y=data)) +
+  theme_publication() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  geom_bar(aes(fill=variable),
+           stat="identity", alpha=1, width=0.8, just=0.8, position = position_dodge2(width=1, preserve = "single")) +
+  geom_text(data = dplyr::select(t,
+                                 triphaul, catchweight, perc_discards, colour), 
+            aes(x=triphaul, y=catchweight, label=perc_discards, colour=colour),
+            inherit.aes = FALSE, hjust=0, vjust=0, size=3, nudge_y = 50, angle=90) +
+  # scale_x_continuous(breaks=seq(1,max(t1$haul, m$haul, na.rm=TRUE), 1)) +
+  scale_colour_manual(values = t$colour) +
+  labs(x="trek", y="kg", title="totale vangst en aanvoer per trek") 
 
 # --------------------------------------------------------------------------------
 # size information in kisten CTC
@@ -919,3 +956,13 @@ kisten %>%
   #geom_point() +
   #facet_wrap(~maat)
 
+# --------------------------------------------------------------------------------
+# Aravis 2023 catch by species and trip
+# --------------------------------------------------------------------------------
+
+elog %>% 
+  filter(vessel %in% c("Z99","SCH99"), year==2023) %>% 
+  group_by(vessel, trip, species) %>% 
+  summarise(weight = sum(weight, na.rm=TRUE)) %>% 
+  filter(species=="HER") %>% 
+  View()

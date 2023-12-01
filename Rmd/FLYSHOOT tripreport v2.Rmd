@@ -112,7 +112,9 @@ load(file.path(onedrive, "elog_trek.RData"))
 
 # ------------------------------------------------------------
 
-setvessel<-"SL9"   ;startdate<-dmy("10/10/2023"); enddate <- dmy("18/10/2023") ;
+# setvessel<-"SL9"   ;startdate<-dmy("8/11/2023"); enddate <- dmy("15/11/2023") ;
+# setvessel<-"SCH65"   ;startdate<-dmy("27/11/2023"); enddate <- dmy("30/11/2023") ;
+setvessel<-"SCH135"   ;startdate<-dmy("29/11/2023"); enddate <- dmy("30/11/2023") ;
 
 settrip  <- 
   elog %>% 
@@ -220,18 +222,20 @@ c3 <-
   bind_rows(
     # by species
     e %>% 
+      filter(species %in% s$species) %>% 
       group_by(trip, species) %>% 
-      summarise(gewicht = sum(weight, na.rm=TRUE)) %>% 
-      arrange (desc(gewicht)) %>% 
-      slice_head(n=8),
+      summarise(gewicht = sum(weight, na.rm=TRUE)),  
+      # arrange (desc(gewicht)) %>% 
+      # slice_head(n=8),
     #other
     e %>% 
-      group_by(trip, species) %>% 
-      summarise(gewicht = sum(weight, na.rm=TRUE)) %>% 
-      arrange (desc(gewicht)) %>% 
-      filter(row_number() > 8) %>% 
+      filter(species %notin% s$species) %>% 
+      # group_by(trip, species) %>% 
+      # summarise(gewicht = sum(weight, na.rm=TRUE)) %>% 
+      # arrange (desc(gewicht)) %>% 
+      # filter(row_number() > 8) %>% 
       group_by(trip) %>% 
-      summarise(gewicht = sum(gewicht)) %>% 
+      summarise(gewicht = sum(weight)) %>% 
       mutate(species="OTHER"),
     # total
     e %>% 
@@ -245,17 +249,19 @@ c3 <-
 c4 <-
   bind_rows(
     et %>% 
+      filter(species %in% s$species) %>% 
       group_by(trip, species) %>% 
-      summarise(gewicht = sum(weight, na.rm=TRUE)) %>% 
-      arrange (desc(gewicht)) %>% 
-      slice_head(n=8),
+      summarise(gewicht = sum(weight, na.rm=TRUE)), 
+      # arrange (desc(gewicht)) %>% 
+      # slice_head(n=8),
     et %>% 
-      group_by(trip, species) %>% 
-      summarise(gewicht = sum(weight, na.rm=TRUE)) %>% 
-      arrange (desc(gewicht)) %>% 
-      filter(row_number() > 8) %>% 
+      filter(species %notin% s$species) %>% 
+      # group_by(trip, species) %>% 
+      # summarise(gewicht = sum(weight, na.rm=TRUE)) %>% 
+      # arrange (desc(gewicht)) %>% 
+      # filter(row_number() > 8) %>% 
       group_by(trip) %>% 
-      summarise(gewicht = sum(gewicht)) %>% 
+      summarise(gewicht = sum(weight)) %>% 
       mutate(species="OTHER"),
     et %>% 
       group_by(trip) %>% 
@@ -654,3 +660,61 @@ if (nrow(elog) > 0) {
 ```
 
 _`r fig_nums("aanvoerperweek")`_
+
+\newpage
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, comment=NA, fig.asp=1.0}
+
+fig_nums(
+  name    = "aanvoerperweekenjaar", level   = 1, display = FALSE,
+  caption = "Cumulatieve aanvoer per soort, week en jaar")
+
+s <-
+  elog %>% 
+  filter(vessel %in% setvessel, year == 2023, date <= max(e$date)) %>% 
+  mutate(species = ifelse(species == "SQC", "SQR", species)) %>%  
+  
+  group_by(species) %>% 
+  summarise(weight = sum(weight, na.rm=TRUE)) %>% 
+  
+  arrange (desc(weight)) %>% 
+  group_by() %>% 
+  slice_head(n=10) %>% 
+  left_join(dplyr::select(asfis,
+                          species, englishname), 
+            by=c("species")) %>% 
+  mutate(english_species = paste(englishname, species))
+
+ee <- 
+  elog %>%
+  filter(vessel %in% setvessel, year >= year(max(e$date))-3, date <= max(e$date), species %in% s$species) %>% 
+  mutate(vessel = ifelse(vessel %in% c("SCH99","Z99"), "SCH99/Z99", vessel)) %>% 
+  mutate(species = ifelse(species == "SQC", "SQR", species)) %>%  
+  group_by(vessel, species, year, week) %>% 
+  summarise(landingweight = sum(weight, na.rm=TRUE)) %>% 
+  group_by(vessel, species, year) %>% 
+  mutate(cumweight = cumsum(landingweight)) %>% 
+  mutate(year = as.character(year)) %>% 
+  mutate(species = factor(species, levels=s$species))
+
+# plot total catch and landings
+ee %>% 
+  ggplot() +
+  theme_publication() +
+  # theme(legend.position = "none") +
+  geom_line(aes(x=week, y=cumweight, colour=year, linewidth=year, alpha=year)) +
+  scale_linewidth_manual("year", values = c("2020"=.5, "2021"=.5, "2022"=.5, "2023"=1.5), guide = "none") +
+  scale_colour_manual("year", values = c("2020"="gray80", "2021"="gray50", "2022"="gray20", "2023"="red")) +
+  scale_alpha_manual("year", values = c(1, 1, 1, 0.5), guide = "none") +
+  # geom_hline(aes(yintercept=meanweight, colour=species)) +
+  # geom_text(aes(x=1, y=meanweight, label=as.integer(meanweight)), hjust=0, vjust=0, nudge_y = 200) +
+  labs(title=paste(unique(ee$vessel), "cumulatieve aanvoer per soort, week en jaar"), y="aanvoer (kg, cumulatief)") +
+  facet_wrap(~species, scales="free_y") 
+  # facet_grid(rows=vars(year), cols=vars(species), scales="free_y")
+
+
+
+```
+
+
+_`r fig_nums("aanvoerperweekenjaar")`_

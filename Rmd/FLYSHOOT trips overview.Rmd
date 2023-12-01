@@ -181,6 +181,8 @@ For: Jaczon BV
 
 By: Martin Pastoors
 
+Report generated: `r format(Sys.time(), '%d/%m/%Y')`
+
 ```{r echo=FALSE, message=FALSE, warning=FALSE, comment=NA, fig.asp=0.6}
 
 fig_nums(
@@ -262,8 +264,8 @@ comb %>%
   theme_publication() +
   ggalt::geom_dumbbell(aes(x = startdate, xend = enddate, y=source, group=1, colour=source),
                        size=3, size_x = 0, size_xend = 0, alpha=0.4) +
-  geom_text(data=comb %>% filter(source=="haul"),
-            aes(x = startdate, y=source, label=trip, vjust=vjust), hjust=0.5, size=3) +
+  # geom_text(data=comb %>% filter(source=="haul"),
+  #           aes(x = startdate, y=source, label=trip, vjust=vjust), hjust=0.5, size=3) +
   facet_grid(vessel~.)
 
 ```
@@ -413,6 +415,83 @@ ee %>%
 
 ```
 
+\newpage
+
+Cumulatieve anvoer in 2023 per soort, per schip en per week.  
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, comment=NA, fig.asp=1.0}
+
+ee <- 
+  e %>%
+  filter(species %in% top$species) %>% 
+  filter(year == max(e$year, na.rm=TRUE)) %>% 
+  mutate(vessel = ifelse(vessel %in% c("SCH99","Z99"), "SCH99/Z99", vessel)) %>% 
+  group_by(species, vessel, week) %>% 
+  summarise(landingweight = sum(weight, na.rm=TRUE)) %>% 
+  group_by(species, vessel) %>% 
+  mutate(cumweight = cumsum(landingweight)) %>% 
+  mutate(species = factor(species, levels=top$species))
+
+# plot total catch and landings
+ee %>% 
+  ggplot() +
+  theme_publication() +
+  # theme(legend.position = "none") +
+  geom_line(aes(x=week, y=cumweight, colour=vessel)) +
+  facet_wrap(~species, scales="free_y")
+  # facet_grid(rows=vars(year), cols=vars(species), scales="free_y")
+
+
+
+```
+
+
+```{r eval=FALSE, fig.asp=1.0, message=FALSE, warning=FALSE, comment=NA, include=FALSE}
+
+# Vergelijking Marelec wegingen en Elog 
+
+kk <- 
+  k %>%
+  filter(species %in% top$species) %>% 
+  mutate(vessel = ifelse(vessel %in% c("SCH99","Z99"), "SCH99/Z99", vessel)) %>% 
+  group_by(species, vessel, year, week) %>% 
+  summarise(marelec_weight = sum(gewicht, na.rm=TRUE))  
+
+ee <- 
+  e %>%
+  filter(year %in% kk$year) %>% 
+  filter(species %in% top$species) %>% 
+  mutate(vessel = ifelse(vessel %in% c("SCH99","Z99"), "SCH99/Z99", vessel)) %>% 
+  group_by(species, vessel, year, week) %>% 
+  summarise(elog_weight = sum(weight, na.rm=TRUE))  
+
+t <-
+  left_join(ee, kk, by=c("species","vessel", "year","week")) %>% 
+  drop_na(marelec_weight, elog_weight) %>% 
+  pivot_longer(names_to = "variable", values_to = "data", elog_weight:marelec_weight) %>% 
+  mutate(variable = gsub("_weight","", variable)) %>% 
+  arrange(variable, species, year, week) %>% 
+  group_by(variable, species, year, week) %>% 
+  summarise(data = sum(data)) %>% 
+  group_by(variable, species, year) %>% 
+  mutate(cumdata = cumsum(data))
+
+# plot total catch and landings
+  # mutate(year = as.character(year)) %>% 
+  # mutate(species = factor(species, levels=top$species)) 
+
+t %>%   
+  ggplot() +
+  theme_publication() +
+  geom_line(aes(x=week, y=cumdata, colour=variable)) +
+  # geom_hline(aes(yintercept=meanweight, colour=species)) +
+  # geom_text(aes(x=1, y=meanweight, label=as.integer(meanweight)), hjust=0, vjust=0, nudge_y = 200) +
+  facet_wrap(~species, scales="free_y")
+  # facet_grid(rows=vars(year), cols=vars(species), scales="free_y")
+
+
+
+```
 
 
 

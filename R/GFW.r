@@ -64,7 +64,7 @@ gfw <-
   unnest_wider(vessel, names_repair = "unique") %>%
   unnest_wider(event_info, names_repair = "unique") %>%
   unnest_wider(distances, names_repair = "unique") %>%
-  dplyr::select(-mpa, -authorizations, -rfmo, -majorFao) %>%
+  dplyr::select(-mpa, -rfmo, -majorFao) %>%
   left_join(r, by=c("ssvid"="mmsi")) %>%
   arrange(vesselname, year, week, end) %>%
   group_by(vesselname, year, week) %>%
