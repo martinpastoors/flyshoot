@@ -112,9 +112,9 @@ load(file.path(onedrive, "elog_trek.RData"))
 
 # ------------------------------------------------------------
 
-# setvessel<-"SL9"   ;startdate<-dmy("8/11/2023"); enddate <- dmy("15/11/2023") ;
+setvessel<-"SL9"   ;startdate<-dmy("22/11/2023"); enddate <- dmy("29/11/2023") ;
 # setvessel<-"SCH65"   ;startdate<-dmy("27/11/2023"); enddate <- dmy("30/11/2023") ;
-setvessel<-"SCH135"   ;startdate<-dmy("29/11/2023"); enddate <- dmy("30/11/2023") ;
+# setvessel<-"SCH135"   ;startdate<-dmy("29/11/2023"); enddate <- dmy("30/11/2023") ;
 
 settrip  <- 
   elog %>% 

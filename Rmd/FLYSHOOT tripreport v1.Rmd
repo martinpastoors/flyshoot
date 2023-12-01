@@ -22,10 +22,10 @@ rm(list=ls())
 # Select vessel and trip
 # ------------------------------------------------------------
 
-setvessel<-"SCH135"   ;settrip<-c("2023377") ; comparisons <- FALSE
+# setvessel<-"SCH135"   ;settrip<-c("2023377") ; comparisons <- FALSE
 # setvessel<-"SCH65"   ;settrip<-c("2023289","2023290") ; comparisons <- FALSE
 # setvessel<-"SL9"   ;settrip<-c("2023081600041", "2023082100042") ; comparisons <- FALSE
-# setvessel<-c("Z99", "SCH99")   ;settrip<- c( "2023105","2023106") ; comparisons <- FALSE
+setvessel<-c("Z99", "SCH99")   ;settrip<- c( "2023107","2023108","2023109") ; comparisons <- FALSE
 
 # ------------------------------------------------------------
 
@@ -731,7 +731,7 @@ if (nrow(m) > 0 & sum(!is.na(h$catchweight))>0) {
               aes(x=haul, y=totaal, label=perc_discards),
               inherit.aes = FALSE, hjust=0, vjust=1, size=3) +
     geom_text(data=tt2,
-              aes(x = min(t1$haul), label=paste("Overall discards", perc_discards,"    ")),
+              aes(x = min(t1$haul), label=paste("Overall discards per trip", perc_discards,"    ")),
               y = Inf,  hjust=1, vjust=1, nudge_y=-1, inherit.aes = FALSE, size=4, fontface="bold") +
     scale_fill_manual(name='',
                      breaks=c('aanvoer', 'totale vangst'),
@@ -739,8 +739,9 @@ if (nrow(m) > 0 & sum(!is.na(h$catchweight))>0) {
     # scale_x_continuous(breaks=seq(1,max(t1$haul, m$haul, na.rm=TRUE), 1)) +
     labs(x="trek", y="kg", title="totale vangst en aanvoer per trek") +
     coord_flip() +
-    scale_x_reverse(breaks=seq(min(t1$haul), max(t1$haul), 1)) +
-    facet_wrap(~trip, ncol=1)
+    scale_x_reverse(breaks=seq(1,50,1)) +
+    # scale_x_reverse(breaks=seq(min(t1$haul), max(t1$haul), 1)) +
+    facet_grid(trip~., scales="free_y", space="free_y")
 
   p
 
