@@ -25,7 +25,7 @@ rm(list=ls())
 # setvessel<-"SCH135"   ;settrip<-c("2023377") ; comparisons <- FALSE
 # setvessel<-"SCH65"   ;settrip<-c("2023289","2023290") ; comparisons <- FALSE
 # setvessel<-"SL9"   ;settrip<-c("2023081600041", "2023082100042") ; comparisons <- FALSE
-setvessel<-c("Z99", "SCH99")   ;settrip<- c( "2023107","2023108","2023109") ; comparisons <- FALSE
+setvessel<-c("Z99", "SCH99")   ;settrip<- c( "2023114","2023115") ; comparisons <- FALSE
 
 # ------------------------------------------------------------
 

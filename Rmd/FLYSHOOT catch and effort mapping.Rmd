@@ -86,8 +86,8 @@ haul   <- loadRData(file.path(onedrive, "rdata/haul.RData")) %>%
   mutate(landingweight = as.numeric(ifelse(is.na(landingweight.x), landingweight.y, landingweight.x))) %>% 
   dplyr::select(-landingweight.x, -landingweight.y)
   
-dx <- 0.1
-dy <- 0.05
+dx <- 0.5
+dy <- 0.25
 
 catch_effort <-
   haul %>% 
@@ -170,7 +170,7 @@ t %>%
   # geom_sf(aes(fill=landing_interval), 
   #         font = "Arial") +
   
-  geom_rect(aes(xmin=lon, ymin=lat, xmax=lon+dx, ymax=lat+dy, fill=landing_interval), colour="gray", linewidth=0.2) +
+  geom_rect(aes(xmin=lon, ymin=lat, xmax=lon+dx, ymax=lat+dy, fill=landing_interval), colour=NA, linewidth=0.2) +
   scale_fill_viridis(option = "plasma", direction = -1, discrete=TRUE) +
   
   # geom_text(data=ttt, 

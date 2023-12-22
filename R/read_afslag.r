@@ -13,15 +13,15 @@ source("../prf/r/my utils.R")
 asfis <-
   loadRData("C:/DATA/RDATA/asfis.RData") %>% 
   rename_all(tolower) %>% 
-  dplyr::select(species, scientific_name, english_name, dutch_name)
+  dplyr::select(species, scientificname, englishname, dutchname)
 
 p <-
-  readxl::read_excel(file.path("C:/Users/MartinPastoors/Martin Pastoors/FLYSHOOT - General/data","prices EvL 22-03-2023.xlsx"),
+  readxl::read_excel(file.path("C:/Users/MartinPastoors/Martin Pastoors/FLYSHOOT - General/data","regulated species.xlsx"),
                      col_names=TRUE, 
                      # col_types="text",
                      range = c("A1:G1000"),
                      .name_repair =  ~make.names(., unique = TRUE)) %>% 
-  dplyr::select(species, dutch_name, regulated)
+  dplyr::select(species, dutchname=dutch_name, regulated)
 
   
 filelist <- list.files(
@@ -49,8 +49,8 @@ for (i in 1:length(filelist)) {
         mutate(year = as.integer(gsub(".xlsx","", year))) %>% 
         setNames(gsub("eur","", names(.))) %>% 
         dplyr::select(-x) %>% 
-        rename(dutch_name=specie) %>%
-        left_join(p, by="dutch_name") 
+        rename(dutchname=specie) %>%
+        left_join(p, by="dutchname") 
     )
 }
 

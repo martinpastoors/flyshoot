@@ -6,6 +6,8 @@
 
 get_haul_treklijst <- function(my_vessel, my_trip2, my_file) {
 
+  # my_file <- my_treklijst
+  
   # check in trip number
   if (c(readxl::read_excel(my_file, 
                            sheet = "Haul",  

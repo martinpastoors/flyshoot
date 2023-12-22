@@ -13,8 +13,8 @@ options(dplyr.summarise.inform = FALSE)
 # Libraries
 require(tidyverse, quietly=TRUE)     # combined package of dplyr, tidyr, ggplot, readr, purrr and tibble
 # Source all the utils
-source("../prf/R/my utils.r")
-source("../mptools/R/get_onedrive.r")
+source("R/FLYSHOOT utils.r")
+# source("../mptools/R/get_onedrive.r")
 
 spatialdir <- "C:/DATA/RDATA"
 asfis <- 
@@ -39,12 +39,13 @@ price  <-
   readr::read_rds(file.path(onedrive, "rdata/prices.rds")) %>% 
   dplyr::select(year, species, avgprice) 
 
+maxyear <- max(price$year, na.rm=TRUE)
 
 top   <- 
   loadRData(file.path(onedrive, "data/elog pefa.RData")) %>% 
   
   filter(tolower(faozone) %in% c("27.7.d","27.4.b","27.4.c")) %>% 
-  filter(year %in% 2018:2022) %>% 
+  filter(year %in% (maxyear-5):maxyear) %>% 
   
   mutate(species = toupper(species)) %>% 
   mutate(species = ifelse(species == "JAX","HOM",species)) %>% 

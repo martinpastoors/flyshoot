@@ -82,8 +82,14 @@ asfis <-
 onedrive <- get_onedrive(team="Martin Pastoors", site="FLYSHOOT - General")
 
 # load datasets
-haul   <- loadRData(file.path(onedrive, "rdata/haul.RData"))
-kisten <- loadRData(file.path(onedrive, "rdata/kisten.RData")) 
+haul   <- 
+  loadRData(file.path(onedrive, "rdata/haul.RData")) %>%   
+  mutate(vessel = ifelse(vessel %in% c("SCH99","Z99"), "SCH99_Z99", vessel)) 
+
+kisten <- 
+  loadRData(file.path(onedrive, "rdata/kisten.RData")) %>%   
+  mutate(vessel = ifelse(vessel %in% c("SCH99","Z99"), "SCH99_Z99", vessel)) 
+
 elog   <- 
   loadRData(file.path(onedrive, "rdata/elog.RData")) %>% 
   mutate(species = toupper(species)) %>% 
@@ -95,6 +101,7 @@ elog   <-
                           species, scientificname, englishname, dutchname),
             by = "species") %>% 
   mutate(species = toupper(species))  %>% 
+  mutate(vessel = ifelse(vessel %in% c("SCH99","Z99"), "SCH99_Z99", vessel)) %>% 
   
   # remove 348 records without rectangle information
   drop_na(rect) %>% 
@@ -128,6 +135,7 @@ elog   <-
 #   geom_point(aes(colour=vessel, size=weight), alpha=0.5) +
 #   facet_wrap(~year)
 
+# datasets with price and regulated information derived from read_afslag.r
   
 price  <- 
   readr::read_rds(file.path(onedrive, "rdata/prices.rds")) %>% 
@@ -143,7 +151,7 @@ regulated  <-
 
 # sort(unique(elog$species))
 
-yrs       <- 2012:2022
+yrs       <- 2013:2023
 mnths     <- NA
 vessels   <- NA
 
@@ -151,12 +159,16 @@ vessels   <- NA
 divisions <- c("27.7.d", "27.7.e") # fix error in division 4.a
 # divisions <- c("27.4.b", "27.4.c")
 
+
+
 # Folder for storing figures  
 if(!any(is.na(divisions))) {
-  folder <- paste("CPUE", paste(divisions, collapse="-")) 
+  folder <- paste("CPUE", paste(divisions, collapse="-"), paste0(year(now()), month(now()), day(now()))) 
 } else {
-  folder <- "CPUE northsea-channel"
+  folder <- paste("CPUE northsea-channel", paste0(year(now()), month(now()), day(now())))
 }
+
+dir.create   (file.path(onedrive, "report",folder), showWarnings = FALSE)
 
 dir.create   (file.path(onedrive, "report",folder, "figures"), showWarnings = FALSE)
 figuresdir <- file.path(onedrive, "report",folder, "figures")
@@ -176,7 +188,7 @@ e <-
   {if(!is.na(all(yrs)))     filter(., year %in% yrs) else . } %>% 
   {if(!is.na(all(mnths)))   filter(., month %in% mnths) else .} %>% 
   {if(!any(is.na(divisions))) filter(., division %in% divisions) else .} %>% 
-  
+
   left_join(regulated, by="species") %>% 
   mutate(regulated = case_when(
     is.na(regulated) & species %in% c("BSE","DGX","ANF","DGH","HER","PLE")             ~ "R",
@@ -1182,6 +1194,14 @@ t <-
   {if(toprectanglesonly) {  
     filter(., paste(species, rect) %in% paste(top_rectangles$species, top_rectangles$rect))
   } else {.}} %>%  
+  
+  # na.omit() %>% 
+
+  # group_by(species) %>% 
+  # mutate(tst = n_distinct(year)) %>% 
+  # distinct(year)
+  
+  filter(n_distinct(year) == length(yrs)) %>% 
 
   ungroup() %>% 
   # mutate(catch = DescTools::Winsorize(catch, probs=winsorize)) %>% 
@@ -1192,6 +1212,8 @@ t <-
   dplyr::mutate(quarter = as.character(quarter)) %>% 
   dplyr::mutate(lat = as.character(lat)) %>% 
   dplyr::mutate(lon = as.character(lon)) 
+  
+
 
 # years
 years <-
@@ -1199,6 +1221,8 @@ years <-
   ungroup() %>% 
   distinct(species, year) %>% 
   arrange(species, year)
+
+# years %>% group_by(species) %>% summarise(n=n()) %>% View()
 
 # Get the unique variables for predictions
 temp <-
