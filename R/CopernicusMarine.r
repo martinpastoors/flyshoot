@@ -97,22 +97,24 @@ copernicus_product_details(t[[9,1]]) %>% View()
 names(t)
 
 
-ds <- "NWSHELF_MULTIYEAR_PHY_004_009"
-ly <- "cmems_mod_nws_phy-bottomt_my_7km-2D_P1D-m"
-va <- "bottomT"
+ds <- "NWSHELF_ANALYSISFORECAST_PHY_004_013"
+ly <- "cmems_mod_nws_phy_anfc_0.027deg-3D_P1M-m"
+va <- "sea_water_potential_temperature_at_sea_floor"
 
 # ds <- "NWSHELF_MULTIYEAR_PHY_004_009"
-# ly <- "cmems_mod_nws_phy-bottomt_my_7km-2D_P1M-m"
-# va <- "sea_water_potential_temperature_at_sea_floor"
+# ly <- "cmems_mod_nws_phy-bottomt_my_7km-2D_P1D-m"
+# va <- "bottomT"
 
-copernicus_product_details(product="NWSHELF_MULTIYEAR_PHY_004_009") %>% View()
+ds <- "NWSHELF_MULTIYEAR_PHY_004_009"
+ly <- "cmems_mod_nws_phy-bottomt_my_7km-2D_P1M-m"
+va <- "sea_water_potential_temperature_at_sea_floor"
 
-copernicus_product_details(product="NWSHELF_MULTIYEAR_PHY_004_009",
-                           layer  = "cmems_mod_nws_phy-bottomt_my_7km-2D_P1D-m") %>% View()
+copernicus_product_details(product=ds) %>% View()
 
-copernicus_product_details(product  = "NWSHELF_MULTIYEAR_PHY_004_009",
-                           layer    = "cmems_mod_nws_phy-bottomt_my_7km-2D_P1D-m",
-                           variable = "bottomT") %>% View()
+copernicus_product_details(product=ds,
+                           layer  = ly) %>% View()
+
+copernicus_product_details(product  = ds, layer=ly, variable = va) %>% View()
 
 destination <- tempfile("copernicus", fileext = ".nc")
 
@@ -122,8 +124,8 @@ copernicus_download_motu(
   layer         = "cmems_mod_nws_phy-bottomt_my_7km-2D_P1M-m",
   variable      = "bottomT",
   output        = "netcdf",
-  region        = c(-2, 49, 2, 51),  # xmin, ymin, xmax, ymax.
-  timerange     = c("1993-12-16", "2022-12-17"), 
+  region        = c(-2, 49, 10, 58),  # xmin, ymin, xmax, ymax.
+  timerange     = c("1995-12-16", "2022-12-17"), 
   sub_variables = c("bottomT"),
   overwrite = TRUE
 )
@@ -133,7 +135,7 @@ mydata <- stars::read_stars(destination)
 
 # dim(mydata)
 # dim(mydata[1,,,c(1,265)])
-plot(mydata[1,,,seq(1,349,12)], col = hcl.colors(100), axes = TRUE)
+plot(mydata[1,,,seq(1,325,12)], col = hcl.colors(100), axes = FALSE, mfrow=c(5,7))
 
 as.data.frame(mydata) %>% setNames(c("x","y","time","value")) %>% drop_na(value) %>% mutate(year=year(time), month=month(time)) %>% filter(month==12) %>% 
   group_by(year) %>% 

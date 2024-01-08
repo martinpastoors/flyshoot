@@ -25,7 +25,7 @@ rm(list=ls())
 # setvessel<-"SCH135"   ;settrip<-c("2023377") ; comparisons <- FALSE
 # setvessel<-"SCH65"   ;settrip<-c("2023289","2023290") ; comparisons <- FALSE
 # setvessel<-"SL9"   ;settrip<-c("2023081600041", "2023082100042") ; comparisons <- FALSE
-setvessel<-c("Z99", "SCH99")   ;settrip<- c( "2023114","2023115") ; comparisons <- FALSE
+setvessel<-c("Z99", "SCH99")   ;settrip<- c( "2024117","2024118") ; comparisons <- FALSE
 
 # ------------------------------------------------------------
 
@@ -760,7 +760,7 @@ _`r my_caption`_
 <!-- Figure: aanvoer per week                                                                   -->
 <!-- ########################################################################################## -->
 
-```{r aanvoerperweek, echo=FALSE, fig.align="center", fig.asp=0.8, message=FALSE, warning=FALSE}
+```{r aanvoerperweek, echo=FALSE, fig.align="center", fig.asp=1.2, message=FALSE, warning=FALSE}
 
 
 # create list of catch by species by week
@@ -772,7 +772,7 @@ if (nrow(m) > 0) {
   
   s <-
     elog %>% 
-    filter(vessel %in% setvessel, year == 2023, date <= max(e$date)) %>% 
+    filter(vessel %in% setvessel, year >= 2023, date <= max(e$date)) %>% 
     mutate(species = ifelse(species == "SQC", "SQC", species)) %>%  
     
     group_by(species) %>% 
@@ -789,12 +789,12 @@ if (nrow(m) > 0) {
 
   t <-
     elog %>% 
-    filter(vessel %in% setvessel, year == 2023, date <= max(e$date)) %>% 
+    filter(vessel %in% setvessel, year >= 2023, date <= max(e$date)) %>% 
     
     mutate(species = ifelse(species == "SQC", "SQR", species)) %>%  
     mutate(species = ifelse(species %in% s$species, species, "ZZZ")) %>%
 
-    group_by(week, species) %>% 
+    group_by(year, week, species) %>% 
     summarise(weight = sum(weight, na.rm=TRUE)) %>% 
     
     left_join(dplyr::select(asfis,
@@ -815,7 +815,8 @@ if (nrow(m) > 0) {
     geom_bar(aes(fill=english_species), 
              stat="identity", position = position_stack(reverse = TRUE), colour="lightgray", linewidth=0.3) +
     labs(y="aanvoer (kg)", title=paste(paste(setvessel,collapse="/"), "aanvoer per soort en week"), fill="") +
-    scale_fill_brewer(palette="Paired")
+    scale_fill_brewer(palette="Paired") +
+    facet_wrap(~year, ncol=1)
   
 }
 

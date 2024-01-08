@@ -121,7 +121,7 @@ get_haul_treklijst <- function(my_vessel, my_trip2, my_file) {
     # add next haul time  
     group_by(vessel, trip) %>% 
     mutate(nexthaultime = lead(haultime)) %>% 
-    mutate(nexthaultime = ifelse(is.na(nexthaultime), lubridate::dmy_hm("31/12/2023 23:59"), nexthaultime)) %>% 
+    mutate(nexthaultime = ifelse(is.na(nexthaultime), lubridate::dmy_hm(paste0("31/12/",max(lubridate::year(haultime)), " 23:59")), nexthaultime)) %>% 
     mutate(nexthaultime = as_datetime(nexthaultime))  %>% 
     
     dplyr::rename(
