@@ -1,0 +1,1163 @@
+---
+output:
+  word_document:
+    reference_docx: ../report_template.dotx
+---
+
+
+```{r setup, include=FALSE}
+
+# =====================================================================================================
+# BEAMTRAWL CPUE analysis North Sea sole without modelling
+# 
+# 15/02/2024 Adapted from FLYSHOOT CPUE analysis North Sea and channel without modelling
+# =====================================================================================================
+
+knitr::opts_chunk$set(echo = FALSE,	message = FALSE,	warning = FALSE,	comment = "",	crop = TRUE )
+knitr::opts_chunk$set(fig.width=10) 
+
+options(dplyr.summarise.inform = FALSE)
+
+# Reset lists
+rm(list=ls())
+
+recalculatemaps   <- TRUE            # recalculate catch maps (takes relatively long)
+toprectanglesonly <- TRUE            # CPUE analysis for top rectangles (by species) only?
+
+# Libraries
+library(rmarkdown)                   # note: requires knitr 1.21
+
+require(tidyverse, quietly=TRUE)     # combined package of dplyr, tidyr, ggplot, readr, purrr and tibble
+require(lubridate, quietly=TRUE)     # data handling
+require(reshape2, quietly=TRUE)      # reshaping data; e.g. cast
+require(RColorBrewer)                # colour schemes
+library(viridis)
+library(pander)
+library(patchwork)
+library(gridExtra)
+library(ggrepel)
+
+library(captioner)                   # for captions
+tab_nums <- captioner::captioner(prefix = "Table " , levels=1, type=c("n"), infix=".")
+fig_nums <- captioner::captioner(prefix = "Figure ", levels=1, type=c("n"), infix=".")
+
+# Source all the utils
+# source("../../prf/R/my utils.r")
+# source("../../mptools/R/get_onedrive.r")
+source("../R/FLYSHOOT utils.r")
+
+source("../R/datras_bubble.R")
+
+spatialdir <- "C:/DATA/RDATA"
+
+# spatial data files
+
+load(file.path(spatialdir, "world_lr_sf.RData"))
+load(file.path(spatialdir, "world_mr_sf.RData"))
+load(file.path(spatialdir, "world_hr_sf.RData"))
+
+load(file.path(spatialdir, "world_mr_df.RData"))
+load(file.path(spatialdir, "fao_sf.RData"))
+load(file.path(spatialdir, "eez.sf.RData"))
+load(file.path(spatialdir, "rect_lr_sf.RData"))
+
+icesrect <-
+  rect_lr_sf %>% 
+  sf::st_drop_geometry() %>% 
+  rename(rect=ICESNAME) %>% 
+  mutate(lat = (SOUTH + NORTH)/2) %>% 
+  mutate(lon = (EAST + WEST)/2) %>% 
+  dplyr::select(rect, lat, lon)
+
+asfis <- 
+  loadRData(file.path(spatialdir, "asfis.RData")) %>% 
+  rename_all(tolower) %>% 
+  mutate(species = tolower(species))
+
+# ===============================================================================
+#  Load and filter the trip data
+# ===============================================================================
+
+# set onedrive directory
+onedrive <- file.path(get_onedrive(team="Martin Pastoors", site="MPFF - General"), "PROJECTS", "SOL4", "data")
+
+# read pefa
+e1  <-
+  readxl::read_excel(file.path(onedrive, "pefa export KW145.xlsx"), 
+                     col_names=TRUE, 
+                     col_types="text",
+                     .name_repair =  ~make.names(., unique = TRUE))  %>% 
+  data.frame() %>% 
+  lowcase() %>% 
+  rename(rect = icesrectangle) %>% 
+
+  rename(lat = latitude) %>% 
+  rename(lon = longitude) %>% 
+  
+  {if(any(grepl("haulid",names(.)))) {rename(., haul = haulid)} else{.}} %>% 
+  
+  mutate(across (any_of(c("boxes", "meshsize", "haul")),
+                 as.integer)) %>%
+  mutate(across (c("catchdate", "departuredate","arrivaldate", "auctiondate", 
+                   "catchdate", "weight", "lat", "lon", "conversionfactor"),
+                 as.numeric)) %>%
+  mutate(across (c("catchdate", "departuredate","arrivaldate", "auctiondate"), 
+                 ~excel_timezone_to_utc(., timezone="UTC"))) %>% 
+
+  rename(vessel = vesselnumber) %>% 
+  rename(catch  = weight) %>% 
+  rename(gear   = geartype) %>% 
+  rename(eez    = economiczone) %>% 
+  rename(trip   = tripidentifier) %>%
+  mutate(trip   = as.numeric(trip)) %>% 
+  rename(date   = catchdate) %>%   
+  mutate(date   = as.Date(date)) %>% 
+  
+  {if(any(grepl("haul",names(.)))) {mutate(., haul = haul - min(haul, na.rm=TRUE)+1)} else{.}} %>% 
+
+  mutate(
+    year       = lubridate::year(date),
+    quarter    = lubridate::quarter(date),
+    month      = lubridate::month(date),
+    week       = lubridate::week(date),
+    yday       = lubridate::yday(date)) %>% 
+  
+  mutate(species = tolower(species)) %>% 
+  left_join(dplyr::select(asfis,
+                          species, scientificname, englishname, dutchname),
+            by = "species") %>% 
+  mutate(species = toupper(species))  %>% 
+  
+  left_join(icesrect, by="rect") %>%
+  mutate(
+    lat = ifelse(is.na(lat.x), as.numeric(lat.y) + 0.25, as.numeric(lat.x)),
+    lon = ifelse(is.na(lon.x), as.numeric(lon.y) + 0.5, as.numeric(lon.x))
+  ) %>%
+  dplyr::select(-lon.x, -lon.y, -lat.x, -lat.y ) %>% 
+  
+  ungroup() %>% 
+  janitor::remove_empty(which = "cols") 
+
+  
+
+e2 <-
+  readxl::read_excel(file.path(onedrive, "Ecatch export JCV.xlsx"),
+                     sheet="landed catch details table") %>% 
+  dplyr::select(trip    = trip_id,
+                species = fish_specie,
+                date    = activity_date,
+                catch   = catch_weight, 
+                lat, lon, 
+                rect    = ices_rectangle,
+                faozone    = fao_zone,
+                eez     = economical_zone,
+                presentation = fish_presentation,
+                vesselname = vessel_name,
+                vessel     = vessel_hull_number,
+                gear    = gear_type) %>% 
+
+  mutate(lat2 = ifelse(lon>50, lon, lat)) %>% 
+  mutate(lon2 = ifelse(lon>50, lat, lon)) %>% 
+  dplyr::select(-lat, -lon) %>% 
+  rename(lat=lat2, lon=lon2) %>% 
+  mutate(species = tolower(species)) %>% 
+  left_join(dplyr::select(asfis,
+                          species, scientificname, englishname, dutchname),
+            by = "species") %>% 
+  mutate(species = toupper(species))  %>% 
+  
+  # remove 348 records without rectangle information
+  drop_na(rect) %>% 
+  
+  mutate(date = as.Date(date)) %>% 
+  mutate(year = lubridate::year(date)) %>% 
+  mutate(month = lubridate::month(date)) %>% 
+  mutate(trip = as.numeric(trip)) %>% 
+  janitor::remove_empty(which = "cols") 
+
+e3 <-
+  readxl::read_excel(file.path(onedrive, "NVB data tong 2021-2023.xlsx")) %>% 
+  rename(
+    faozone = ICES_gebied,
+    vessel  = vaartuig,
+    rect    = Statistisch_vak,
+    eez     = Zone,
+    species = Vissoort,
+    catch   = Vangst_Lvnd,
+    departure = Vertrek_datum,
+    arrival   = Aankomst_datum,
+    gear      = Vistuig_type
+  ) %>% 
+  mutate(
+    effort = as.integer(difftime(arrival, departure, units = "days") ) + 1,
+    cpue   = catch / effort
+  ) %>% 
+
+  mutate(species = tolower(species)) %>% 
+  left_join(dplyr::select(asfis,
+                          species, scientificname, englishname, dutchname),
+            by = "species") %>% 
+  mutate(species = toupper(species))  %>% 
+  
+  # remove 348 records without rectangle information
+  drop_na(rect) %>% 
+  mutate(date = arrival) %>% 
+  mutate(year = lubridate::year(date)) %>% 
+  mutate(month = lubridate::month(date)) %>% 
+  janitor::remove_empty(which = "cols") 
+
+
+# janitor::compare_df_cols(e1, e2)
+
+# load datasets
+elog <-
+  bind_rows(
+    dplyr::select(e1, one_of(names(e2))), 
+    e2,
+    dplyr::select(e3, one_of(names(e2)))) %>% 
+  # filter(year %in% 2021:2023) %>% 
+  
+  left_join(rect_lr_sf, by=c("rect"= "ICESNAME")) %>% 
+  dplyr::select(-ID, -SOUTH, -NORTH, -WEST, -EAST) %>% 
+  ungroup() 
+
+# skimr::skim(elog)
+
+xmin <- 0;
+xmax <- 7;
+ymin <- 51;
+ymax <- 54
+
+bb <- sf::st_bbox(c(xmin = xmin, xmax = xmax, ymax = ymax, ymin = ymin), crs = sf::st_crs(4326))
+
+
+# BTS survey data
+load(file="C:/TEMP/bts.RData")
+
+hauls <-
+  hh %>% 
+  ungroup() %>% 
+  rename(lon=shootlong, lat=shootlat) %>% 
+  distinct(survey, vessel, country, year, id, lat, lon, statrec)
+
+rbyh <- 
+  hl %>% 
+  # filter(species %in% select_species) %>% 
+  dplyr::select(
+    c("id", "survey", "quarter","country","vessel", "gear", "sweeplngt", "haulno", "year", 
+      "hauldur", "lat"="shootlat","lon"="shootlong","statrec", "depth", "haulval", "datatype", "distance",
+      "doorspread","wingspread", "species", "latin", "english_name", "length","n"="number_per_hour")
+  ) %>% 
+  arrange(survey, quarter, year, id, species, length) %>% 
+  mutate(B = n * 0.001 * length^3) |> 
+  
+  # sum over lengths
+  group_by(survey, quarter, vessel, country, id, year, species) |>
+  summarise(
+    B = sum(B), 
+    N = sum(n),
+    meanlength = weighted.mean(length, n), 
+    .groups = "drop") |> 
+  
+  
+  # Winsorize by species
+  group_by(survey, species) %>%
+  mutate(N = DescTools::Winsorize(N, probs=c(0, 0.98), na.rm=TRUE)) %>%
+  
+  # add zero hauls by species
+  group_by(survey, quarter, vessel, country, year) %>% 
+  tidyr::complete(id, species, fill=list(N=0, B=0)) %>% 
+  mutate(type = ifelse(N==0, "zero","value")) %>% 
+
+  # add lat lon
+  left_join(dplyr::select(hauls, 
+                          id, rect=statrec, lat, lon), 
+            by =c("id")) %>% 
+  
+  # add species names and haul attributes
+  ungroup() %>%
+  arrange(year, quarter, vessel, country, id, species) %>% 
+
+  filter(species == "SOL") %>% 
+  filter(year %in% unique(elog$year))  
+
+rbyh2 <-
+  rbyh %>% 
+  group_by(year, rect) %>% 
+  summarise(
+    B = mean(B, na.rm=TRUE),
+    lat = mean(lat), 
+    lon = mean(lon)
+  )
+  
+# NorNed cable
+nc <- sf::st_read("C:/TEMP/NorNed.gpx")
+
+# xmin <- floor(2 *   (min(elog$lon, na.rm=TRUE)-0.5))/2;
+# xmax <- ceiling(2 * (max(elog$lon, na.rm=TRUE)+0.5))/2;
+# ymin <- floor(2 *   (min(elog$lat, na.rm=TRUE)-0.5))/2;
+# ymax <- ceiling(2*  (max(elog$lat, na.rm=TRUE)+0.5))/2
+
+
+```
+
+
+# TBB sole fishery CPUE analysis
+
+M.A. Pastoors
+
+Date: `r format(Sys.time(), '%d/%m/%Y')`
+
+&nbsp;
+
+&nbsp;
+
+
+```{r, echo=FALSE, out.width = "100px", fig.align="left", message=FALSE, warning=FALSE, cache=FALSE}
+
+  knitr::include_graphics("../MPFF logo with text.png")
+
+```
+
+\newpage
+
+**Executive summary**
+
+\newpage
+
+**Introduction**
+
+\newpage
+
+**Map of TBB effort, sole catch and sole catch/day by ICES rectangle and year**
+
+```{r echo=FALSE, fig.asp=1.2, message=FALSE, warning=FALSE, comment=NA}
+
+mycaption <- "TBB effort, sole catch and sole catch/day by ICES rectangle and year"
+
+fig_nums(
+  name    = "overview1", 
+  level = 1, display = FALSE,
+  caption = mycaption)
+
+t <-
+  elog %>% 
+  filter(gear=="TBB", species=="SOL") %>% 
+  filter(year %in% 2021:2023) %>% 
+  group_by(year, rect, geometry) %>% 
+  summarise(
+    catch = sum(catch, na.rm=TRUE),
+    effort = n_distinct(vessel, date)) %>% 
+  
+  mutate(
+    cpue = catch/effort
+  ) %>% 
+  
+  ungroup() %>% 
+  
+  mutate(., effort_interval = cut(effort, scales::trans_breaks("sqrt", function(x) x ^ 2)(c(0, max(effort, na.rm=TRUE))), 
+                               dig.lab=10 ) ) %>% 
+  mutate(., catch_interval = cut(catch, scales::trans_breaks("sqrt", function(x) x ^ 2)(c(0, max(catch, na.rm=TRUE))), 
+                               dig.lab=10 ) ) %>% 
+  mutate(., cpue_interval = cut(cpue, scales::trans_breaks("sqrt", function(x) x ^ 2)(c(0, max(cpue, na.rm=TRUE))), 
+                               dig.lab=10 ) ) %>% 
+  
+  sf::st_as_sf()
+
+
+# bb <- sf::st_bbox(t)
+
+p1 <-
+  t %>% 
+  ggplot() +
+  theme_publication() +
+  theme(plot.margin = margin(1,1,1,1, "mm")) +
+  theme(plot.title = element_text(hjust = 0.0)) +
+  # theme(legend.position = "none") +
+  
+  geom_sf(data=rect_lr_sf, fill=NA, colour="gray") +
+  geom_sf(data=eez.sf, fill=NA, linetype="dashed") +
+  geom_sf(data=world_mr_sf) +
+  
+  geom_sf(aes(fill=effort_interval), alpha=0.6) +
+  geom_point(aes(size = effort, geometry = geometry), stat = "sf_coordinates", shape=1, show.legend=FALSE) + 
+
+  coord_sf(xlim=c(bb$xmin,bb$xmax), ylim=c(bb$ymin, bb$ymax)) + 
+  scale_fill_viridis(option = "plasma", direction = -1, discrete=TRUE) +
+  guides(fill=guide_legend(nrow = 1)) + 
+  labs(x="",y="", title="effort") +
+  facet_wrap(~year, ncol=3)
+  
+p2 <-
+  t %>% 
+  ggplot() +
+  theme_publication() +
+  theme(plot.margin = margin(1,1,1,1, "mm")) +
+  theme(plot.title = element_text(hjust = 0.0)) +
+  # theme(legend.position = "none") +
+  
+  geom_sf(data=rect_lr_sf, fill=NA, colour="gray") +
+  geom_sf(data=eez.sf, fill=NA, linetype="dashed") +
+  geom_sf(data=world_mr_sf) +
+  
+  geom_sf(aes(fill=catch_interval), alpha=0.6) +
+  geom_point(aes(size = catch, geometry = geometry), stat = "sf_coordinates", shape=1, show.legend=FALSE) + 
+
+  coord_sf(xlim=c(bb$xmin,bb$xmax), ylim=c(bb$ymin, bb$ymax)) + 
+  scale_fill_viridis(option = "plasma", direction = -1, discrete=TRUE) +
+  guides(fill=guide_legend(nrow = 1)) + 
+  labs(x="",y="", title="catch") +
+  facet_wrap(~year, ncol=3)
+
+p3 <-
+  t %>% 
+  ggplot() +
+  theme_publication() +
+  theme(plot.margin = margin(1,1,1,1, "mm")) +
+  theme(plot.title = element_text(hjust = 0.0)) +
+  # theme(legend.position = "none") +
+  
+  geom_sf(data=rect_lr_sf, fill=NA, colour="gray") +
+  geom_sf(data=eez.sf, fill=NA, linetype="dashed") +
+  geom_sf(data=world_mr_sf) +
+  
+  geom_sf(aes(fill=cpue_interval), alpha=0.6) +
+  geom_point(aes(size = cpue, geometry = geometry), stat = "sf_coordinates", shape=1, show.legend=FALSE) + 
+
+  coord_sf(xlim=c(bb$xmin,bb$xmax), ylim=c(bb$ymin, bb$ymax)) + 
+  scale_fill_viridis(option = "plasma", direction = -1, discrete=TRUE) +
+  guides(fill=guide_legend(nrow = 1)) + 
+  labs(x="",y="", title="catch/day") +
+  facet_wrap(~year, ncol=3)
+
+p1 / p2 / p3
+
+```
+
+_`r fig_nums("overview1")`_
+
+\newpage
+
+**Map of AUGUST TBB effort, sole catch and sole catch/day by ICES rectangle and year**
+
+CPUE plot overlaid with the survey biomass per haul
+
+```{r echo=FALSE, fig.asp=1.2, message=FALSE, warning=FALSE, comment=NA}
+
+mycaption <- "August TBB effort, sole catch and sole catch/day by ICES rectangle and year"
+
+fig_nums(
+  name    = "overview2", 
+  level = 1, display = FALSE,
+  caption = mycaption)
+
+t <-
+  elog %>% 
+  filter(gear=="TBB", species=="SOL", month %in% 8:9) %>% 
+  filter(year %in% 2021:2023) %>% 
+  group_by(year, rect, geometry) %>% 
+  summarise(
+    catch = sum(catch, na.rm=TRUE),
+    effort = n_distinct(vessel, date)) %>% 
+  
+  mutate(
+    cpue = catch/effort
+  ) %>% 
+  
+  ungroup() %>% 
+  
+  mutate(., effort_interval = cut(effort, scales::trans_breaks("sqrt", function(x) x ^ 2)(c(0, max(effort, na.rm=TRUE))), 
+                               dig.lab=10 ) ) %>% 
+  mutate(., catch_interval = cut(catch, scales::trans_breaks("sqrt", function(x) x ^ 2)(c(0, max(catch, na.rm=TRUE))), 
+                               dig.lab=10 ) ) %>% 
+  mutate(., cpue_interval = cut(cpue, scales::trans_breaks("sqrt", function(x) x ^ 2)(c(0, max(cpue, na.rm=TRUE))), 
+                               dig.lab=10 ) ) %>% 
+  
+  sf::st_as_sf()
+
+
+# bb <- sf::st_bbox(t)
+
+p1 <-
+  t %>% 
+  ggplot() +
+  theme_publication() +
+  theme(plot.margin = margin(1,1,1,1, "mm")) +
+  theme(plot.title = element_text(hjust = 0.0)) +
+  # theme(legend.position = "none") +
+  
+  geom_sf(data=rect_lr_sf, fill=NA, colour="gray") +
+  geom_sf(data=eez.sf, fill=NA, linetype="dashed") +
+  geom_sf(data=world_mr_sf) +
+  
+  geom_sf(aes(fill=effort_interval), alpha=0.6) +
+  geom_point(aes(size = effort, geometry = geometry), stat = "sf_coordinates", shape=1, show.legend=FALSE) + 
+
+  coord_sf(xlim=c(bb$xmin,bb$xmax), ylim=c(bb$ymin, bb$ymax)) + 
+  scale_fill_viridis(option = "plasma", direction = -1, discrete=TRUE) +
+  guides(fill=guide_legend(nrow = 1)) + 
+  labs(x="",y="", title="effort") +
+  facet_wrap(~year, ncol=3)
+  
+p2 <-
+  t %>% 
+  ggplot() +
+  theme_publication() +
+  theme(plot.margin = margin(1,1,1,1, "mm")) +
+  theme(plot.title = element_text(hjust = 0.0)) +
+  # theme(legend.position = "none") +
+  
+  geom_sf(data=rect_lr_sf, fill=NA, colour="gray") +
+  geom_sf(data=eez.sf, fill=NA, linetype="dashed") +
+  geom_sf(data=world_mr_sf) +
+  
+  geom_sf(aes(fill=catch_interval), alpha=0.6) +
+  geom_point(aes(size = catch, geometry = geometry), stat = "sf_coordinates", shape=1, show.legend=FALSE) + 
+
+  coord_sf(xlim=c(bb$xmin,bb$xmax), ylim=c(bb$ymin, bb$ymax)) + 
+  scale_fill_viridis(option = "plasma", direction = -1, discrete=TRUE) +
+  guides(fill=guide_legend(nrow = 1)) + 
+  labs(x="",y="", title="catch") +
+  facet_wrap(~year, ncol=3)
+
+p3 <-
+  t %>% 
+  ggplot() +
+  theme_publication() +
+  theme(plot.margin = margin(1,1,1,1, "mm")) +
+  theme(plot.title = element_text(hjust = 0.0)) +
+  # theme(legend.position = "none") +
+  
+  # geom_text(data=icesrect, 
+  #           aes(x=lon, y=lat, label=rect), 
+  #           hjust=0.5, vjust=0.5, size=3) +
+
+  geom_sf(data=rect_lr_sf, fill=NA, colour="gray") +
+  geom_sf(data=eez.sf, fill=NA, linetype="dashed") +
+  geom_sf(data=world_mr_sf) +
+  
+  geom_sf(aes(fill=cpue_interval), alpha=0.6) +
+  # geom_point(aes(size = cpue, geometry = geometry), stat = "sf_coordinates", shape=1, show.legend=FALSE) + 
+  
+  # survey data
+  # ggplot2::geom_point(data=rbyh,
+  #                     ggplot2::aes(lon, lat),
+  #                     size = 0.3, colour = "black", show.legend = F, shape=3) +
+  # ggplot2::geom_point(data = rbyh,
+  #                     ggplot2::aes(lon, lat, size = B , colour=country),
+  #                     alpha = 0.4, show.legend=FALSE) +
+  
+  ggplot2::geom_point(data = rbyh2,
+                      ggplot2::aes(lon, lat, size = B ),
+                      alpha = 0.4, show.legend=FALSE, colour="red", fill="red") +
+
+  coord_sf(xlim=c(bb$xmin,bb$xmax), ylim=c(bb$ymin, bb$ymax)) + 
+  scale_fill_viridis(option = "plasma", direction = -1, discrete=TRUE) +
+  guides(fill=guide_legend(nrow = 1)) + 
+  labs(x="",y="", title="TBB catch/day & BTS biomass") +
+  facet_wrap(~year, ncol=3)
+
+p1 / p2 / p3
+
+```
+
+_`r fig_nums("overview2")`_
+
+\newpage
+
+**AUGUST TBB sole catch/day against BTS sole biomass for each ICES rectangle**
+
+
+```{r echo=FALSE, fig.asp=0.4, message=FALSE, warning=FALSE, comment=NA}
+
+mycaption <- "TBB sole catch/day vs BTS sole biomass"
+
+fig_nums(
+  name    = "overview3", 
+  level = 1, display = FALSE,
+  caption = mycaption)
+
+t <-
+  elog %>% 
+  filter(gear=="TBB", species=="SOL", month==8) %>% 
+  filter(year %in% 2021:2023) %>% 
+  group_by(year, rect, geometry) %>% 
+  summarise(
+    catch = sum(catch, na.rm=TRUE),
+    effort = n_distinct(vessel, date)) %>% 
+  
+  mutate(
+    cpue = catch/effort
+  ) %>% 
+  dplyr::select(year, rect, cpue) %>% 
+  left_join(rbyh2, by=c("year","rect"))
+
+# bb <- sf::st_bbox(t)
+
+t %>% 
+  ggplot(aes(x=cpue, y=B)) +
+  theme_publication() +
+  theme(plot.margin = margin(1,1,1,1, "mm")) +
+  theme(plot.title = element_text(hjust = 0.0)) +
+  # theme(legend.position = "none") +
+  geom_point() +  
+  geom_text(aes(label=rect)) +  
+  geom_smooth(method="lm") +
+  labs(x="TBB CPUE (catch/day)",y="BTS Biomass", title="CPUE vs biomass per rectangle") +
+  facet_wrap(~year, ncol=3)
+  
+
+```
+
+_`r fig_nums("overview3")`_
+
+\newpage
+
+```{r eval=FALSE, fig.asp=0.4, message=FALSE, warning=FALSE, comment=NA, include=FALSE}
+
+# NOT SHOWN 
+
+mycaption <- "TBB sole catch/day in 34F2"
+
+fig_nums(
+  name    = "overview4", 
+  level = 1, display = FALSE,
+  caption = mycaption)
+
+t <-
+  elog %>% 
+  filter(gear=="TBB", species=="SOL") %>%
+  filter(rect=="34F2") %>% 
+  
+  group_by(year, month, rect) %>% 
+  summarise(
+    catch = sum(catch, na.rm=TRUE),
+    effort = n_distinct(vessel, date)) %>% 
+  
+  mutate(
+    cpue = catch/effort
+  ) %>% 
+  dplyr::select(year, month, rect, cpue) 
+
+
+t %>% 
+  ggplot(aes(x=month, y=cpue)) +
+  theme_publication() +
+  theme(plot.margin = margin(1,1,1,1, "mm")) +
+  theme(plot.title = element_text(hjust = 0.0)) +
+  # theme(legend.position = "none") +
+  geom_point(aes(colour=as.character(year))) +  
+  geom_line(aes(colour=as.character(year))) +  
+  labs(x="month",y="TBB CPUE (catch/day)") +
+  
+  expand_limits(y=0)
+  
+# _`r fig_nums("overview4")`_
+
+```
+
+
+\newpage
+
+# ANNEX (annual details by vessel)
+
+**Map of total beamtrawl effort by vessel, by ICES rectangle and year**
+
+```{r echo=FALSE, fig.asp=1.2, message=FALSE, warning=FALSE, comment=NA}
+
+mycaption <- "Effort (days) by vessel, ICES rectangle and year"
+
+fig_nums(
+  name    = "effort1", 
+  level = 1, display = FALSE,
+  caption = mycaption)
+
+t <-
+  elog %>% 
+  filter(
+    lat >= bb$ymin, lat <= bb$ymax,
+    lon >= bb$xmin, lon <= bb$xmax
+  ) %>% 
+  filter(gear=="TBB", species=="SOL") %>% 
+  
+  group_by(year, vessel, rect, geometry) %>% 
+  summarise(effort = n_distinct(vessel, date)) %>% 
+  
+  ungroup() %>% 
+  
+  mutate(., effort_interval = cut(effort, scales::trans_breaks("sqrt", function(x) x ^ 2)(c(0, max(effort, na.rm=TRUE))), 
+                               dig.lab=10 ) ) %>% 
+  
+  sf::st_as_sf()
+
+
+# bb <- sf::st_bbox(t)
+
+# levels / breaks
+lvl <- sort(unique(t$effort_interval))
+
+tt <-
+  t %>%
+  group_by(vessel, year) %>% 
+  summarise(effort = as.integer(sum(effort, na.rm=TRUE))) %>% 
+  sf::st_drop_geometry()
+
+# p1 <-
+t %>% 
+
+  ggplot() +
+  theme_publication() +
+  theme(plot.margin = margin(1,1,1,1, "mm")) +
+  theme(plot.title = element_text(hjust = 0.0)) +
+  # theme(legend.position = "none") +
+  
+  geom_sf(data=rect_lr_sf, fill=NA, colour="gray") +
+  geom_sf(data=eez.sf, fill=NA, linetype="dashed") +
+  geom_sf(data=world_mr_sf) +
+  geom_sf(aes(fill=effort_interval), alpha=0.6) +
+  geom_point(aes(size = effort, geometry = geometry), 
+             stat = "sf_coordinates", shape=1, show.legend=FALSE) + 
+  geom_text(data=tt, 
+            aes(x=Inf, y=Inf, label=paste(effort,"days")), 
+            hjust=1, vjust=1) +
+
+  coord_sf(xlim=c(bb$xmin,bb$xmax), ylim=c(bb$ymin, bb$ymax)) + 
+  scale_fill_viridis(option = "plasma", direction = -1, discrete=TRUE, breaks=lvl, limits=lvl) +
+  guides(fill=guide_legend(nrow = 1)) + 
+  labs(x="",y="", title=mycaption) +
+  facet_grid(vessel~year)
+  
+
+```
+
+_`r fig_nums("effort1")`_
+
+\newpage
+
+**Map of beamtrawl sole catch by vessel, by ICES rectangle and year**
+
+```{r, echo=FALSE, fig.asp=1.2, message=FALSE, warning=FALSE, comment=NA}
+
+mycaption <- "TBB Sole catch by vessel, ICES rectangle and year"
+
+fig_nums(
+  name    = "solecatch1", 
+  level = 1, display = FALSE,
+  caption = mycaption)
+
+t <-
+  elog %>% 
+  filter(
+    lat >= bb$ymin, lat <= bb$ymax,
+    lon >= bb$xmin, lon <= bb$xmax
+  ) %>% 
+  filter(gear=="TBB", species=="SOL") %>% 
+  group_by(year, vessel, rect, geometry) %>% 
+  summarise(catch = sum(catch, na.rm=TRUE)) %>% 
+  ungroup() %>% 
+  # sf::st_drop_geometry() %>%   
+  
+  # left_join(rect_lr_sf, by=c("rect"= "ICESNAME")) %>% 
+  # dplyr::select(-ID, -SOUTH, -NORTH, -WEST, -EAST) %>% 
+  
+  # mutate(catch_interval = cut(as.integer(catch), breaks=c(1 %o% 10^(0:12)), dig.lab=10 ) ) %>% 
+  mutate(., 
+    catch_interval = cut(catch, 
+                         scales::trans_breaks("sqrt", function(x) x ^ 2)
+                         (c(0, max(catch, na.rm=TRUE))), 
+                         dig.lab=10 ) ) %>% 
+  sf::st_as_sf()
+
+# bounding box
+# bb <- sf::st_bbox(t)
+
+# levels / breaks
+lvl <- sort(unique(t$catch_interval))
+
+tt <-
+  t %>%
+  group_by(vessel, year) %>% 
+  summarise(catch = as.integer(sum(catch, na.rm=TRUE)/1000)) %>% 
+  sf::st_drop_geometry()
+  
+t %>% 
+  ggplot() +
+  theme_publication() +
+  theme(plot.margin = margin(1,1,1,1, "mm")) +
+  
+  geom_sf(data=rect_lr_sf, fill=NA, colour="gray") +
+  geom_sf(data=eez.sf, fill=NA, linetype="dashed") +
+  geom_sf(data=world_mr_sf, font = "Arial") +
+  geom_sf(aes(fill=catch_interval), alpha=0.6) +
+  geom_point(aes(size = catch, geometry = geometry), stat = "sf_coordinates", shape=1, font = "Arial", show.legend=FALSE) + 
+  geom_text(data=tt, 
+            aes(x=Inf, y=Inf, label=paste(catch,"ton")), 
+            hjust=1, vjust=1) +
+  coord_sf(xlim=as.integer(c(bb$xmin,bb$xmax)), ylim=as.integer(c(bb$ymin, bb$ymax))) + 
+  scale_fill_viridis(option = "plasma", direction = -1, discrete=TRUE, breaks=lvl, limits=lvl) +
+  guides(fill=guide_legend(nrow = 1), size = "none") + 
+  labs(x="",y="", title = mycaption) +
+  facet_grid(vessel~year)
+    
+
+  
+```
+
+_`r fig_nums("solecatch1")`_
+
+\newpage
+
+**Map of beamtrawl sole CPUE (catch/day) by vessel, by ICES rectangle and year**
+
+```{r, echo=FALSE, fig.asp=1.2, message=FALSE, warning=FALSE, comment=NA}
+
+mycaption <- "TBB Sole catch rate by vessel, ICES rectangle and year"
+
+fig_nums(
+  name    = "solecpue1", 
+  level = 1, display = FALSE,
+  caption = mycaption)
+
+t <-
+  elog %>% 
+  filter(
+    lat >= bb$ymin, lat <= bb$ymax,
+    lon >= bb$xmin, lon <= bb$xmax
+  ) %>% 
+  filter(gear=="TBB", species=="SOL") %>% 
+  group_by(year, vessel, rect, geometry) %>% 
+  summarise(
+    catch = sum(catch, na.rm=TRUE),
+    effort = n_distinct(vessel, date)) %>% 
+  mutate(
+    cpue = catch/effort
+  ) %>% 
+  ungroup() %>% 
+
+  mutate(., 
+    cpue_interval = cut(cpue, 
+                         scales::trans_breaks("sqrt", function(x) x ^ 2)
+                         (c(0, max(cpue, na.rm=TRUE))), 
+                         dig.lab=10 ) ) %>% 
+  sf::st_as_sf()
+
+# bounding box
+# bb <- sf::st_bbox(t)
+
+# levels / breaks
+lvl <- sort(unique(t$cpue_interval))
+
+tt <-
+  t %>%
+  group_by(year, vessel) %>% 
+  summarise(cpue = as.integer(mean(cpue, na.rm=TRUE))) %>% 
+  sf::st_drop_geometry()
+  
+t %>% 
+  ggplot() +
+  theme_publication() +
+  theme(plot.margin = margin(1,1,1,1, "mm")) +
+  
+  geom_sf(data=rect_lr_sf, fill=NA, colour="gray") +
+  geom_sf(data=eez.sf, fill=NA, linetype="dashed") +
+  geom_sf(data=world_mr_sf, font = "Arial") +
+  geom_sf(aes(fill=cpue_interval), font = "Arial", alpha=0.6) +
+  geom_point(aes(size = cpue, geometry = geometry), stat = "sf_coordinates", shape=1, show.legend = FALSE) + 
+  geom_text(data=tt, 
+            aes(x=Inf, y=Inf, label=paste(cpue,"kg/day")), 
+            hjust=1, vjust=1) +
+  coord_sf(xlim=as.integer(c(bb$xmin,bb$xmax)), ylim=as.integer(c(bb$ymin, bb$ymax))) + 
+  scale_fill_viridis(option = "plasma", direction = -1, discrete=TRUE, breaks=lvl, limits=lvl) +
+  guides(fill=guide_legend(nrow = 1), size = "none") + 
+  labs(x="",y="", title = mycaption) +
+  facet_grid(vessel~year)
+    
+
+  
+```
+
+_`r fig_nums("solecpue1")`_
+
+\newpage
+
+# ANNEX (AUGUST details by vessel)
+
+**Map of AUGUST total beamtrawl effort by vessel, by ICES rectangle and year**
+
+```{r echo=FALSE, fig.asp=1.2, message=FALSE, warning=FALSE, comment=NA}
+
+mycaption <- "AUGUST Effort (days) by vessel, ICES rectangle and year"
+
+fig_nums(
+  name    = "effort2", 
+  level = 1, display = FALSE,
+  caption = mycaption)
+
+t <-
+  elog %>% 
+  filter(
+    lat >= bb$ymin, lat <= bb$ymax,
+    lon >= bb$xmin, lon <= bb$xmax
+  ) %>% 
+  filter(gear=="TBB", species=="SOL") %>% 
+  
+  filter(month == 8) %>% 
+  
+  group_by(year, vessel, rect, geometry) %>% 
+  summarise(effort = n_distinct(vessel, date)) %>% 
+  
+  ungroup() %>% 
+  
+  mutate(., effort_interval = cut(effort, scales::trans_breaks("sqrt", function(x) x ^ 2)(c(0, max(effort, na.rm=TRUE))), 
+                               dig.lab=10 ) ) %>% 
+  
+  sf::st_as_sf()
+
+
+# bb <- sf::st_bbox(t)
+
+# levels / breaks
+lvl <- sort(unique(t$effort_interval))
+
+tt <-
+  t %>%
+  group_by(vessel, year) %>% 
+  summarise(effort = as.integer(sum(effort, na.rm=TRUE))) %>% 
+  sf::st_drop_geometry()
+
+# p1 <-
+t %>% 
+
+  ggplot() +
+  theme_publication() +
+  theme(plot.margin = margin(1,1,1,1, "mm")) +
+  theme(plot.title = element_text(hjust = 0.0)) +
+  # theme(legend.position = "none") +
+  
+  geom_sf(data=rect_lr_sf, fill=NA, colour="gray") +
+  geom_sf(data=eez.sf, fill=NA, linetype="dashed") +
+  geom_sf(data=world_mr_sf) +
+  geom_sf(aes(fill=effort_interval), alpha=0.6) +
+  geom_point(aes(size = effort, geometry = geometry), 
+             stat = "sf_coordinates", shape=1, show.legend=FALSE) + 
+  geom_text(data=tt, 
+            aes(x=Inf, y=Inf, label=paste(effort,"days")), 
+            hjust=1, vjust=1) +
+
+  coord_sf(xlim=c(bb$xmin,bb$xmax), ylim=c(bb$ymin, bb$ymax)) + 
+  scale_fill_viridis(option = "plasma", direction = -1, discrete=TRUE, breaks=lvl, limits=lvl) +
+  guides(fill=guide_legend(nrow = 1)) + 
+  labs(x="",y="", title=mycaption) +
+  facet_grid(vessel~year)
+  
+
+```
+
+_`r fig_nums("effort2")`_
+
+\newpage
+
+**Map of AUGUST beamtrawl sole catch by vessel, by ICES rectangle and year**
+
+```{r, echo=FALSE, fig.asp=1.2, message=FALSE, warning=FALSE, comment=NA}
+
+mycaption <- "AUGUST TBB Sole catch by vessel, ICES rectangle and year"
+
+fig_nums(
+  name    = "solecatch2", 
+  level = 1, display = FALSE,
+  caption = mycaption)
+
+t <-
+  elog %>% 
+  filter(
+    lat >= bb$ymin, lat <= bb$ymax,
+    lon >= bb$xmin, lon <= bb$xmax
+  ) %>% 
+  filter(gear=="TBB", species=="SOL") %>% 
+  
+  filter(month == 8) %>% 
+  
+  group_by(year, vessel, rect, geometry) %>% 
+  summarise(catch = sum(catch, na.rm=TRUE)) %>% 
+  ungroup() %>% 
+  # sf::st_drop_geometry() %>%   
+  
+  # left_join(rect_lr_sf, by=c("rect"= "ICESNAME")) %>% 
+  # dplyr::select(-ID, -SOUTH, -NORTH, -WEST, -EAST) %>% 
+  
+  # mutate(catch_interval = cut(as.integer(catch), breaks=c(1 %o% 10^(0:12)), dig.lab=10 ) ) %>% 
+  mutate(., 
+    catch_interval = cut(catch, 
+                         scales::trans_breaks("sqrt", function(x) x ^ 2)
+                         (c(0, max(catch, na.rm=TRUE))), 
+                         dig.lab=10 ) ) %>% 
+  sf::st_as_sf()
+
+# bounding box
+# bb <- sf::st_bbox(t)
+
+# levels / breaks
+lvl <- sort(unique(t$catch_interval))
+
+tt <-
+  t %>%
+  group_by(vessel, year) %>% 
+  summarise(catch = as.integer(sum(catch, na.rm=TRUE)/1000)) %>% 
+  sf::st_drop_geometry()
+  
+t %>% 
+  ggplot() +
+  theme_publication() +
+  theme(plot.margin = margin(1,1,1,1, "mm")) +
+  
+  geom_sf(data=rect_lr_sf, fill=NA, colour="gray") +
+  geom_sf(data=eez.sf, fill=NA, linetype="dashed") +
+  geom_sf(data=world_mr_sf, font = "Arial") +
+  geom_sf(aes(fill=catch_interval), alpha=0.6) +
+  geom_point(aes(size = catch, geometry = geometry), stat = "sf_coordinates", shape=1, font = "Arial", show.legend=FALSE) + 
+  geom_text(data=tt, 
+            aes(x=Inf, y=Inf, label=paste(catch,"ton")), 
+            hjust=1, vjust=1) +
+  coord_sf(xlim=as.integer(c(bb$xmin,bb$xmax)), ylim=as.integer(c(bb$ymin, bb$ymax))) + 
+  scale_fill_viridis(option = "plasma", direction = -1, discrete=TRUE, breaks=lvl, limits=lvl) +
+  guides(fill=guide_legend(nrow = 1), size = "none") + 
+  labs(x="",y="", title = mycaption) +
+  facet_grid(vessel~year)
+    
+
+  
+```
+
+_`r fig_nums("solecatch2")`_
+
+\newpage
+
+**Map of AUGUST beamtrawl sole CPUE (catch/day) by vessel, by ICES rectangle and year**
+
+```{r, echo=FALSE, fig.asp=1.2, message=FALSE, warning=FALSE, comment=NA}
+
+mycaption <- "AUGUST TBB Sole catch rate by vessel, ICES rectangle and year"
+
+fig_nums(
+  name    = "solecpue2", 
+  level = 1, display = FALSE,
+  caption = mycaption)
+
+t <-
+  elog %>% 
+  filter(
+    lat >= bb$ymin, lat <= bb$ymax,
+    lon >= bb$xmin, lon <= bb$xmax
+  ) %>% 
+  filter(gear=="TBB", species=="SOL") %>% 
+  
+  filter(month == 8) %>% 
+  
+  group_by(year, vessel, rect, geometry) %>% 
+  summarise(
+    catch = sum(catch, na.rm=TRUE),
+    effort = n_distinct(vessel, date)) %>% 
+  mutate(
+    cpue = catch/effort
+  ) %>% 
+  ungroup() %>% 
+
+  mutate(., 
+    cpue_interval = cut(cpue, 
+                         scales::trans_breaks("sqrt", function(x) x ^ 2)
+                         (c(0, max(cpue, na.rm=TRUE))), 
+                         dig.lab=10 ) ) %>% 
+  sf::st_as_sf()
+
+# bounding box
+# bb <- sf::st_bbox(t)
+
+# levels / breaks
+lvl <- sort(unique(t$cpue_interval))
+
+tt <-
+  t %>%
+  group_by(year, vessel) %>% 
+  summarise(cpue = as.integer(mean(cpue, na.rm=TRUE))) %>% 
+  sf::st_drop_geometry()
+  
+t %>% 
+  ggplot() +
+  theme_publication() +
+  theme(plot.margin = margin(1,1,1,1, "mm")) +
+  
+  geom_sf(data=rect_lr_sf, fill=NA, colour="gray") +
+  geom_sf(data=eez.sf, fill=NA, linetype="dashed") +
+  geom_sf(data=world_mr_sf, font = "Arial") +
+  geom_sf(aes(fill=cpue_interval), font = "Arial", alpha=0.6) +
+  geom_point(aes(size = cpue, geometry = geometry), stat = "sf_coordinates", shape=1, show.legend = FALSE) + 
+  geom_text(data=tt, 
+            aes(x=Inf, y=Inf, label=paste(cpue,"kg/day")), 
+            hjust=1, vjust=1) +
+  coord_sf(xlim=as.integer(c(bb$xmin,bb$xmax)), ylim=as.integer(c(bb$ymin, bb$ymax))) + 
+  scale_fill_viridis(option = "plasma", direction = -1, discrete=TRUE, breaks=lvl, limits=lvl) +
+  guides(fill=guide_legend(nrow = 1), size = "none") + 
+  labs(x="",y="", title = mycaption) +
+  facet_grid(vessel~year)
+    
+
+  
+```
+
+_`r fig_nums("solecpue2")`_
+
+\newpage
+
+**Map of MAC catch by ICES rectangle, year and month**
+
+```{r echo=FALSE, fig.asp=1.2, message=FALSE, warning=FALSE, comment=NA}
+
+t <-
+  elog %>% 
+  filter(gear=="TBB", species=="MAC") %>% 
+  filter(year %in% 2021:2023) %>% 
+  group_by(year, month, rect, geometry) %>% 
+  summarise(
+    catch = sum(catch, na.rm=TRUE),
+    effort = n_distinct(vessel, date)) %>% 
+  
+  mutate(
+    cpue = catch/effort
+  ) %>% 
+  
+  ungroup() %>% 
+  
+  mutate(., effort_interval = cut(effort, scales::trans_breaks("sqrt", function(x) x ^ 2)(c(0, max(effort, na.rm=TRUE))), 
+                               dig.lab=10 ) ) %>% 
+  mutate(., catch_interval = cut(catch, scales::trans_breaks("sqrt", function(x) x ^ 2)(c(0, max(catch, na.rm=TRUE))), 
+                               dig.lab=10 ) ) %>% 
+  mutate(., cpue_interval = cut(cpue, scales::trans_breaks("sqrt", function(x) x ^ 2)(c(0, max(cpue, na.rm=TRUE))), 
+                               dig.lab=10 ) ) %>% 
+  
+  sf::st_as_sf()
+
+
+# bb <- sf::st_bbox(t)
+
+t %>% 
+  ggplot() +
+  theme_publication() +
+  theme(plot.margin = margin(1,1,1,1, "mm")) +
+  theme(plot.title = element_text(hjust = 0.0)) +
+  # theme(legend.position = "none") +
+  
+  geom_sf(data=rect_lr_sf, fill=NA, colour="gray") +
+  geom_sf(data=eez.sf, fill=NA, linetype="dashed") +
+  geom_sf(data=world_mr_sf) +
+  
+  geom_sf(aes(fill=effort_interval), alpha=0.6) +
+  geom_point(aes(size = effort, geometry = geometry), stat = "sf_coordinates", shape=1, show.legend=FALSE) + 
+
+  coord_sf(xlim=c(bb$xmin,bb$xmax), ylim=c(bb$ymin, bb$ymax)) + 
+  scale_fill_viridis(option = "plasma", direction = -1, discrete=TRUE) +
+  guides(fill=guide_legend(nrow = 1)) + 
+  labs(x="",y="", title="effort") +
+  facet_grid(month~year)
+  
+```

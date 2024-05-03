@@ -45,16 +45,17 @@
     filter(grepl("PHY", product_id)) 
   
   ds <- "NWSHELF_MULTIYEAR_PHY_004_009"
-  ds <- "NWSHELF_ANALYSISFORECAST_PHY_004_013"
+  # ds <- "NWSHELF_ANALYSISFORECAST_PHY_004_013"
   # ds <- "SST_BAL_SST_L3S_NRT_OBSERVATIONS_010_032"
-
+  ds <- "GLOBAL_ANALYSISFORECAST_PHY_001_024"
+  
   df <- data.frame(stringsAsFactors = FALSE)
-  for (i in 1:length(  copernicus_product_details(product=ds)$layers )) {
+  for (i in 1:length(  cms_product_details(product=ds)$layers )) {
     print(i)
     df <- bind_rows(df, 
                     bind_cols(
                       data.frame(ds=ds),
-                      as.data.frame(unlist(copernicus_product_details(product=ds)$layers[[i]])) %>%  
+                      as.data.frame(unlist(cms_product_details(product=ds)$layers[[i]])) %>%  
                         rownames_to_column() %>% 
                         setNames(c("var","value")) %>% 
                         pivot_wider(names_from = var, values_from = value)  
@@ -62,21 +63,21 @@
     )
   }
   
-  df %>% filter(grepl("monthly",tolower(subdatasetTitle))) %>% filter(row_number()==1) %>% pull(tValues)
+  df %>% filter(grepl("daily",tolower(subdatasetTitle))) %>% View()
   
 
-  copernicus_product_details(product=ds)$layers  
-  copernicus_product_details(product=ds, layer="sea_surface_temperature") 
-  copernicus_product_details(t[1,1])$layers[[1]] %>% View()
+  cms_product_details(product=ds)$layers  
+  cms_product_details(product=ds, layer="sea_surface_temperature") 
+  cms_product_details(t[1,1])$layers[[1]] %>% View()
   
-t <- copernicus_products_list() %>% filter(grepl("temperature", tolower(title))) 
-t <- copernicus_products_list() %>% filter(grepl("cmems", tolower(title))) 
+t <- cms_products_list() %>% filter(grepl("temperature", tolower(title))) 
+t <- cms_products_list() %>% filter(grepl("cmems", tolower(title))) 
 
 s1 <- 1
 for (s1 in 1:nrow(t) ) {
   cat("   ")
   print(paste(s1, t[s1,1]))
-  pd <- copernicus_product_details(product=t[s1,1])
+  pd <- cms_product_details(product=t[s1,1])
   for (s2 in 1:length(pd$layers)) {
     print(paste(s2, 
                 pd$layers[[s2]]$variableId
@@ -92,7 +93,7 @@ unlist(t[[1,"geoResolution"]]) %>% as.data.frame() %>% rownames_to_column() %>% 
 unlist(t[[1,"stacOrCswTbox"]]) %>% as.data.frame() %>% setNames("datetime") %>% bind_cols(data.frame(type=c("start","end"))) %>% 
   mutate(datetime=trunc(as.POSIXct(datetime))) %>% pivot_wider(names_from = type, values_from = datetime)
 
-copernicus_product_details(t[[9,1]]) %>% View()
+cms_product_details(t[[9,1]]) %>% View()
 
 names(t)
 
@@ -109,24 +110,28 @@ ds <- "NWSHELF_MULTIYEAR_PHY_004_009"
 ly <- "cmems_mod_nws_phy-bottomt_my_7km-2D_P1M-m"
 va <- "sea_water_potential_temperature_at_sea_floor"
 
-copernicus_product_details(product=ds) %>% View()
+ds <- "GLOBAL_ANALYSISFORECAST_PHY_001_024"
+ly <- "cmems_mod_glo_phy_anfc_0.083deg_P1D-m"
+va <- "tob"
+  
+cms_product_details(product=ds) %>% View()
 
-copernicus_product_details(product=ds,
+cms_product_details(product=ds,
                            layer  = ly) %>% View()
 
-copernicus_product_details(product  = ds, layer=ly, variable = va) %>% View()
+cms_product_details(product  = ds, layer=ly, variable = va) %>% View()
 
 destination <- tempfile("copernicus", fileext = ".nc")
 
-copernicus_download_motu(
+cms_download_subset(
   destination   = destination,
-  product       = "NWSHELF_MULTIYEAR_PHY_004_009",
-  layer         = "cmems_mod_nws_phy-bottomt_my_7km-2D_P1M-m",
-  variable      = "bottomT",
-  output        = "netcdf",
+  product       = ds,
+  layer         = ly,
+  variable      = va,
+  # output        = "netcdf",
   region        = c(-2, 49, 10, 58),  # xmin, ymin, xmax, ymax.
-  timerange     = c("1995-12-16", "2022-12-17"), 
-  sub_variables = c("bottomT"),
+  timerange     = c("1995-12-16", "2024-1-31"), 
+  # sub_variables = c("bottomT"),
   overwrite = TRUE
 )
 
@@ -135,9 +140,10 @@ mydata <- stars::read_stars(destination)
 
 # dim(mydata)
 # dim(mydata[1,,,c(1,265)])
-plot(mydata[1,,,seq(1,325,12)], col = hcl.colors(100), axes = FALSE, mfrow=c(5,7))
+plot(mydata[1,,,seq(1180,1186,1)], col = hcl.colors(100), axes = FALSE, mfrow=c(5,7))
+plot(mydata[1,,,c(815,816,817,818, 1180,1181,1182,1183)], col = hcl.colors(100), axes = FALSE, mfrow=c(2,4))
 
-as.data.frame(mydata) %>% setNames(c("x","y","time","value")) %>% drop_na(value) %>% mutate(year=year(time), month=month(time)) %>% filter(month==12) %>% 
+as.data.frame(mydata) %>% setNames(c("x","y","time","value")) %>% drop_na(value) %>% mutate(year=year(time), month=month(time)) %>% filter(month==1) %>% 
   group_by(year) %>% 
   summarise(value = as.numeric(mean(value))) %>% 
   
@@ -177,12 +183,12 @@ leaflet::leaflet() %>%
   )
 
 
-copernicus_product_details(product  = "GLOBAL_ANALYSISFORECAST_PHY_001_024") %>% View()
+cms_product_details(product  = "GLOBAL_ANALYSISFORECAST_PHY_001_024") %>% View()
 
-copernicus_product_details(product  = "GLOBAL_ANALYSISFORECAST_PHY_001_024",
+cms_product_details(product  = "GLOBAL_ANALYSISFORECAST_PHY_001_024",
                            layer    = "cmems_mod_glo_phy-cur_anfc_0.083deg_P1D-m") %>% View()
 
-copernicus_product_details(product  = "GLOBAL_ANALYSISFORECAST_PHY_001_024",
+cms_product_details(product  = "GLOBAL_ANALYSISFORECAST_PHY_001_024",
                            layer    = "cmems_mod_glo_phy-cur_anfc_0.083deg_P1D-m",
                            variable = "sea_water_velocity") %>% View()
 

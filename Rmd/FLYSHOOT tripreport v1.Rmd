@@ -25,7 +25,7 @@ rm(list=ls())
 # setvessel<-"SCH135"   ;settrip<-c("2023377") ; comparisons <- FALSE
 # setvessel<-"SCH65"   ;settrip<-c("2023289","2023290") ; comparisons <- FALSE
 # setvessel<-"SL9"   ;settrip<-c("2023081600041", "2023082100042") ; comparisons <- FALSE
-setvessel<-c("Z99", "SCH99")   ;settrip<- c( "2024117","2024118") ; comparisons <- FALSE
+setvessel<-c("Z99", "SCH99")   ;settrip<- c( "2024138","2024139") ; comparisons <- FALSE
 
 # ------------------------------------------------------------
 
@@ -731,8 +731,8 @@ if (nrow(m) > 0 & sum(!is.na(h$catchweight))>0) {
               aes(x=haul, y=totaal, label=perc_discards),
               inherit.aes = FALSE, hjust=0, vjust=1, size=3) +
     geom_text(data=tt2,
-              aes(x = min(t1$haul), label=paste("Overall discards per trip", perc_discards,"    ")),
-              y = Inf,  hjust=1, vjust=1, nudge_y=-1, inherit.aes = FALSE, size=4, fontface="bold") +
+              aes(x=min(t1$haul-0.5),label=paste("Overall discards per trip", perc_discards,"    ")),
+              y = Inf,  hjust=1, vjust=1, position = position_nudge(x = 0.5), inherit.aes = FALSE, size=4, fontface="bold") +
     scale_fill_manual(name='',
                      breaks=c('aanvoer', 'totale vangst'),
                      values=c('aanvoer'='blue', 'totale vangst'='red')) +
@@ -773,7 +773,7 @@ if (nrow(m) > 0) {
   s <-
     elog %>% 
     filter(vessel %in% setvessel, year >= 2023, date <= max(e$date)) %>% 
-    mutate(species = ifelse(species == "SQC", "SQC", species)) %>%  
+    mutate(species = ifelse(species == "SQC", "SQR", species)) %>%  
     
     group_by(species) %>% 
     summarise(weight = sum(weight, na.rm=TRUE)) %>% 
@@ -837,7 +837,7 @@ _`r fig_nums("aanvoerperweek")`_
 
   s <-
     elog %>% 
-    filter(vessel %in% setvessel, year == 2023, date <= max(e$date)) %>% 
+    filter(vessel %in% setvessel, year >= 2023, date <= max(e$date)) %>% 
     mutate(species = ifelse(species == "SQC", "SQR", species)) %>%  
     
     group_by(species) %>% 
@@ -853,9 +853,9 @@ _`r fig_nums("aanvoerperweek")`_
 
 ee <- 
   elog %>%
+  mutate(species = ifelse(species == "SQC", "SQR", species)) %>%  
   filter(vessel %in% setvessel, year >= year(max(e$date))-3, date <= max(e$date), species %in% s$species) %>% 
   mutate(vessel = ifelse(vessel %in% c("SCH99","Z99"), "SCH99/Z99", vessel)) %>% 
-  mutate(species = ifelse(species == "SQC", "SQR", species)) %>%  
   group_by(vessel, species, year, week) %>% 
   summarise(landingweight = sum(weight, na.rm=TRUE)) %>% 
   group_by(vessel, species, year) %>% 
@@ -869,9 +869,9 @@ ee %>%
   theme_publication() +
   # theme(legend.position = "none") +
   geom_line(aes(x=week, y=cumweight, colour=year, linewidth=year, alpha=year)) +
-  scale_linewidth_manual("year", values = c("2020"=.5, "2021"=.5, "2022"=.5, "2023"=1.5), guide = "none") +
-  scale_colour_manual("year", values = c("2020"="gray80", "2021"="gray50", "2022"="gray20", "2023"="red")) +
-  scale_alpha_manual("year", values = c(1, 1, 1, 0.5), guide = "none") +
+  scale_linewidth_manual("year", values = c("2020"=.5,       "2021"=.5,       "2022"=.5,       "2023"=0.5,      "2024"=1.5), guide = "none") +
+  scale_colour_manual   ("year", values = c("2020"="gray80", "2021"="gray60", "2022"="gray40", "2023"="blue", "2024"="red")) +
+  scale_alpha_manual("year", values = c(1, 1, 1, 1, 0.5), guide = "none") +
   # geom_hline(aes(yintercept=meanweight, colour=species)) +
   # geom_text(aes(x=1, y=meanweight, label=as.integer(meanweight)), hjust=0, vjust=0, nudge_y = 200) +
   labs(title=paste(unique(ee$vessel), "cumulatieve aanvoer per soort, week en jaar"), y="aanvoer (kg, cumulatief)") +

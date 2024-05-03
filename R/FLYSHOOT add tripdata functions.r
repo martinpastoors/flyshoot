@@ -747,61 +747,41 @@ get_kisten <- function(my_vessel, my_trip2, my_file, h) {
     # currently problematic
     arrange(datetime) %>% 
     mutate(time_diff = as.numeric(datetime - lag(datetime))/60) %>% 
-    
-    # assign haul numbers
-    mutate(haul = ifelse(time_diff > 20 | is.na(time_diff), 1, 0)) %>% 
-    mutate(haul = cumsum(haul)) %>% 
-    dplyr::select(-datum, -tijd) %>% 
-    left_join(soorten, by="soorten") 
-    
-    # # @@@!!!! TEMP
-    # filter(lotnummer==241)
+    left_join(soorten, by="soorten")  
   
-  tmp <-
-    # sqldf::sqldf("select m.vessel, m.trip, m.lotnummer, m.soorten, m.maat, m.gewicht,
-    #                      m.datetime, m.haul2, h.haul from m
-    sqldf::sqldf("select m.vessel, m.trip, m.lotnummer, m.soorten, m.maat, m.gewicht,
+  if(any(grepl("haul", names(m)))) {
+    m <-
+      m %>% 
+      mutate(haul = as.numeric(haul))
+    
+  } else {
+    
+    # if haul not (manually added) to kisten, assign haul numbers
+    m <- 
+      m %>% 
+      mutate(haul = ifelse(time_diff > 20 | is.na(time_diff), 1, 0)) %>% 
+      mutate(haul = cumsum(haul)) %>% 
+      dplyr::select(-datum, -tijd)  
+    
+    tmp <-
+      # sqldf::sqldf("select m.vessel, m.trip, m.lotnummer, m.soorten, m.maat, m.gewicht,
+      #                      m.datetime, m.haul2, h.haul from m
+      sqldf::sqldf("select m.vessel, m.trip, m.lotnummer, m.soorten, m.maat, m.gewicht,
                          m.datetime, h.haul, h.haultime, h.nexthaultime from m
           join h on m.vessel   == h.vessel and
                     m.trip     == h.trip and
                     m.datetime >= h.haultime and
                     m.datetime <  h.nexthaultime") %>%
-    as_tibble()
-  
-  # # t <- m %>% group_by(haul) %>% summarise(xmin = min(datetime, na.rm=TRUE), xmax=max(datetime, na.rm=TRUE))
-  # t <- tmp %>% group_by(haul) %>% summarise(xmin = min(datetime, na.rm=TRUE), xmax=max(datetime, na.rm=TRUE))
-  # h %>% 
-  #   # filter(nexthaultime-haultime < 24) %>% 
-  #   ggplot(aes(x=haultime, y=1)) +
-  #   theme_publication() +
-  #   geom_point(aes(size=catchweight), shape=1, fill=NA) +
-  #   # geom_point(aes(x=nexthaultime, y=1.2), colour="red") +
-  #   ggalt::geom_dumbbell(aes(x = shoottime, xend = haultime, y=1, group=1),
-  #                        size=3, size_x = 0, size_xend = 0, alpha=0.4) +
-  #   # geom_segment(aes(xend=nexthaultime, y=1, yend=1.2)) +
-  #   geom_text(aes(label=haul), vjust=1, nudge_y = -0.05)+
-  #   geom_point(data=tmp,
-  #              aes(x=datetime, y=1.1),
-  #              colour="blue") +
-  #   # geom_point(data=m,
-  #   #            aes(x=datetime, y=1.1),
-  #   #            colour="blue") +
-  #   geom_segment(data=t, aes(x=xmin, xend=xmin, y=1, yend=1.2), colour="blue", linetype="dashed") +
-  #   geom_segment(data=t, aes(x=xmax, xend=xmax, y=1, yend=1.2), colour="red", linetype="dashed") +
-  #   geom_text(data=t, aes(x=xmin, y=1.25, label=haul), colour="blue") +
-  #   expand_limits(y=0.75)
-  
-  
-  m <- left_join(dplyr::select(m,
-                               -haul),
-                 dplyr::select(tmp,
-                               lotnummer, haul),
-                 by="lotnummer")  
-    # group_by(haul) %>% 
-    # mutate(haul = ifelse(haul == 6 & row_number() < 94, 5, haul))
-  
-  # x %>% group_by(haul) %>% summarise(n=n())
-  
+      as_tibble()
+
+    m <- left_join(dplyr::select(m,
+                                 -haul),
+                   dplyr::select(tmp,
+                                 lotnummer, haul),
+                   by="lotnummer")  
+    
+  }
+
   return(m)
   
 } # end of function

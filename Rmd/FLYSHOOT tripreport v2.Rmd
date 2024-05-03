@@ -105,18 +105,11 @@ load(file.path(onedrive, "elog_trek.RData"))
 # Select vessel and trip
 # ------------------------------------------------------------
 
-# setvessel<-"SCH135"   ;settrip<-c("2023343") ;
-# setvessel<-"SCH65"   ;settrip<-c("2023259") ;
-# setvessel<-"SL9"   ;settrip<-c("2023091200046","2023091800047") ;
-# setvessel<-c("Z99", "SCH99")   ;settrip<-"2023003" ;
-
-# ------------------------------------------------------------
-
-setvessel<-"SL9"   
+setvessel<-"SL9"
 # setvessel<-"SCH135"
 # setvessel<-"SCH65"
 
-startdate<-dmy("18/12/2023"); enddate <- dmy("22/12/2023") ;
+startdate<-dmy("24/4/2024"); enddate <- dmy("1/5/2024") ;
 
 settrip  <- 
   elog %>% 
@@ -600,7 +593,7 @@ _`r fig_nums("totalcatchperspecies")`_
 <!-- Figure: aanvoer per week                                                                   -->
 <!-- ########################################################################################## -->
 
-```{r aanvoerperweek, echo=FALSE, fig.align="center", fig.asp=0.8, message=FALSE, warning=FALSE}
+```{r aanvoerperweek, echo=FALSE, fig.align="center", fig.asp=1.2, message=FALSE, warning=FALSE}
 
 
 # create list of catch by species by week
@@ -613,7 +606,7 @@ if (nrow(elog) > 0) {
   # sequence
   s <-
     elog %>% 
-    filter(vessel %in% setvessel, year == 2023, date <= max(e$date)) %>% 
+    filter(vessel %in% setvessel, year >= 2023, date <= max(e$date)) %>% 
     
     group_by(species) %>% 
     summarise(weight = sum(weight, na.rm=TRUE)) %>% 
@@ -629,11 +622,12 @@ if (nrow(elog) > 0) {
   # date
   t <-
     elog %>% 
-    filter(vessel %in% setvessel, year == 2023, date <= max(e$date)) %>% 
+    filter(vessel %in% setvessel, year >= 2023, date <= max(e$date)) %>% 
     
+    mutate(species = ifelse(species == "SQC", "SQR", species)) %>%  
     mutate(species = ifelse(species %in% s$species, species, "ZZZ")) %>%
 
-    group_by(week, species) %>% 
+    group_by(year, week, species) %>% 
     summarise(weight = sum(weight, na.rm=TRUE)) %>% 
     
     left_join(dplyr::select(asfis,
@@ -654,7 +648,8 @@ if (nrow(elog) > 0) {
     geom_bar(aes(fill=english_species), 
              stat="identity", position = position_stack(reverse = TRUE), colour="lightgray", linewidth=0.3) +
     labs(y="aanvoer (kg)", title=paste(paste(setvessel,collapse="/"), "aanvoer per soort en week"), fill="") +
-    scale_fill_brewer(palette="Paired")
+    scale_fill_brewer(palette="Paired") +
+    facet_wrap(~year, ncol=1)
   
 }
 
@@ -673,7 +668,7 @@ fig_nums(
 
 s <-
   elog %>% 
-  filter(vessel %in% setvessel, year == 2023, date <= max(e$date)) %>% 
+  filter(vessel %in% setvessel, year >= 2023, date <= max(e$date)) %>% 
   mutate(species = ifelse(species == "SQC", "SQR", species)) %>%  
   
   group_by(species) %>% 
@@ -689,9 +684,9 @@ s <-
 
 ee <- 
   elog %>%
+  mutate(species = ifelse(species == "SQC", "SQR", species)) %>%  
   filter(vessel %in% setvessel, year >= year(max(e$date))-3, date <= max(e$date), species %in% s$species) %>% 
   mutate(vessel = ifelse(vessel %in% c("SCH99","Z99"), "SCH99/Z99", vessel)) %>% 
-  mutate(species = ifelse(species == "SQC", "SQR", species)) %>%  
   group_by(vessel, species, year, week) %>% 
   summarise(landingweight = sum(weight, na.rm=TRUE)) %>% 
   group_by(vessel, species, year) %>% 
@@ -705,9 +700,9 @@ ee %>%
   theme_publication() +
   # theme(legend.position = "none") +
   geom_line(aes(x=week, y=cumweight, colour=year, linewidth=year, alpha=year)) +
-  scale_linewidth_manual("year", values = c("2020"=.5, "2021"=.5, "2022"=.5, "2023"=1.5), guide = "none") +
-  scale_colour_manual("year", values = c("2020"="gray80", "2021"="gray50", "2022"="gray20", "2023"="red")) +
-  scale_alpha_manual("year", values = c(1, 1, 1, 0.5), guide = "none") +
+  scale_linewidth_manual("year", values = c("2020"=.5,       "2021"=.5,       "2022"=.5,       "2023"=0.5,      "2024"=1.5), guide = "none") +
+  scale_colour_manual   ("year", values = c("2020"="gray80", "2021"="gray60", "2022"="gray40", "2023"="blue", "2024"="red")) +
+  scale_alpha_manual("year", values = c(1, 1, 1, 1, 0.5), guide = "none") +
   # geom_hline(aes(yintercept=meanweight, colour=species)) +
   # geom_text(aes(x=1, y=meanweight, label=as.integer(meanweight)), hjust=0, vjust=0, nudge_y = 200) +
   labs(title=paste(unique(ee$vessel), "cumulatieve aanvoer per soort, week en jaar"), y="aanvoer (kg, cumulatief)") +

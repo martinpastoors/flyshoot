@@ -471,7 +471,7 @@ get_raw_from_pefa_trek <- function(my_file) {
       lat = first(na.omit(lat)),
       lon = first(na.omit(lon))
     ) %>%
-    mutate(across (c("lat","lon"),    ~zoo::na.locf(.))) %>% 
+    mutate(across (c("lat","lon"),    ~zoo::na.locf(., na.rm=FALSE))) %>% 
 
     # Keep only the first date of each haul
     mutate(date   = as.Date(catchdate)) %>% 
@@ -552,7 +552,7 @@ get_haul_from_raw <- function(raw) {
     rename(economiczone=economiczone.x, economiczone_calc=economiczone.y) %>% 
     
     group_by(vessel, trip) %>% 
-    mutate(across (c("rect","division","economiczone"),    ~zoo::na.locf(.))) %>% 
+    mutate(across (c("rect","division","economiczone"),    ~zoo::na.locf(., na.rm=FALSE))) %>% 
 
     group_by(vessel, trip, skipper, departuredate, departureport, arrivaldate, arrivalport, haul,
              shoottime, shoottime2, haultime,
@@ -699,7 +699,7 @@ get_elog_from_raw <- function(raw) {
     ) %>% 
     
     group_by(vessel, trip) %>% 
-    mutate(across (c("rect","division","economiczone"),    ~zoo::na.locf(.))) %>% 
+    mutate(across (c("rect","division","economiczone"),    ~zoo::na.locf(., na.rm=FALSE))) %>% 
     
     mutate(source="pefa trek") %>% 
     ungroup()
