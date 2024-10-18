@@ -99,6 +99,13 @@ h <-
   {if(!is.na(all(mnths)))   filter(., month %in% mnths) else .} %>% 
   ungroup()
 
+# h %>%
+#   dplyr::select(shoottime, haultime, lat, lon, windforce, winddirection, depth=waterdepth) %>%
+#   sample_n(1100) %>%
+#   drop_na(shoottime, haultime) %>% 
+#   writexl::write_xlsx(path="testfile.xlsx")
+
+
 k <- 
   kisten %>%
   mutate(
@@ -312,35 +319,54 @@ kk %>%
 
 \newpage
 
-Aanvoer per soort, per schip en per week in het lopende jaar
+Aanvoer per soort en per week
 
 ```{r echo=FALSE, message=FALSE, warning=FALSE, comment=NA, fig.asp=0.6}
 
-kk <- 
-  k %>%
-  filter(species %in% c("CTC", "SQR", "MUR","MAC")) %>% 
-  mutate(week=lubridate::week(datetime)) %>% 
-  mutate(vessel = ifelse(vessel %in% c("SCH99","Z99"), "SCH99/Z99", vessel)) %>% 
-  group_by(species, vessel, year, week) %>% 
-  summarise(landingweight = sum(gewicht, na.rm=TRUE)) %>% 
-  group_by(species, year) %>% 
-  mutate(meanweight = mean(landingweight, na.rm=TRUE))
+# kk <- 
+#   k %>%
+#   filter(species %in% c("CTC", "SQR", "MUR","MAC")) %>% 
+#   mutate(week=lubridate::week(datetime)) %>% 
+#   mutate(vessel = ifelse(vessel %in% c("SCH99","Z99"), "SCH99/Z99", vessel)) %>% 
+#   group_by(species, vessel, year, week) %>% 
+#   summarise(landingweight = sum(gewicht, na.rm=TRUE)) %>% 
+#   group_by(species, year) %>% 
+#   mutate(meanweight = mean(landingweight, na.rm=TRUE))
 
 # k %>% mutate(week=lubridate::week(datetime)) %>% filter(week==5, vessel=="SCH135") %>% View()  
 # k %>% filter(grepl("_", trip)) %>% distinct(trip) 
 # k %>% filter(grepl("085", trip)) %>% distinct(trip) 
 
 # plot total catch and landings
-kk %>% 
-  ggplot(aes(group=vessel)) +
+# kk %>% 
+#   ggplot(aes(group=vessel)) +
+#   theme_publication() +
+#   # theme(legend.position = "none") +
+#   # geom_bar(aes(x=week, y=landingweight, fill=vessel), stat="identity") +
+#   geom_line(aes(x=week, y=landingweight, colour=vessel)) +
+#   geom_hline(aes(yintercept=meanweight)) +
+#   geom_text(aes(x=1, y=meanweight, label=as.integer(meanweight)), hjust=0, vjust=0, nudge_y = 200) +
+#   facet_grid(rows=vars(year), cols=vars(species), scales="free_y")
+
+ee <- 
+  e %>%
+  filter(species %in% top$species[1:6]) %>% 
+  mutate(vessel = ifelse(vessel %in% c("SCH99","Z99"), "SCH99/Z99", vessel)) %>% 
+  group_by(species, year, week) %>% 
+  summarise(landingweight = sum(weight, na.rm=TRUE)) %>% 
+  group_by(species, year) %>% 
+  mutate(meanweight = mean(landingweight, na.rm=TRUE)) %>% 
+  mutate(year = as.character(year)) %>% 
+  mutate(species = factor(species, levels=top$species[1:6]))
+
+# plot total catch and landings
+ee %>% 
+  ggplot() +
   theme_publication() +
   # theme(legend.position = "none") +
   # geom_bar(aes(x=week, y=landingweight, fill=vessel), stat="identity") +
-  geom_line(aes(x=week, y=landingweight, colour=vessel)) +
-  geom_hline(aes(yintercept=meanweight)) +
-  geom_text(aes(x=1, y=meanweight, label=as.integer(meanweight)), hjust=0, vjust=0, nudge_y = 200) +
-  facet_grid(rows=vars(year), cols=vars(species), scales="free_y")
-
+  geom_bar(aes(x=week, y=landingweight, fill=species), stat="identity") +
+  facet_wrap(~year, ncol=1)
 
 
 ```
@@ -636,12 +662,12 @@ h %>%
 ```
 
 
-```{r aanvoerendiscards, eval=FALSE, fig.align="center", fig.asp=1.2, message=FALSE, warning=FALSE, include=FALSE}
+```{r aanvoerendiscards, echo=FALSE, fig.align="center", fig.asp=1.2, message=FALSE, warning=FALSE}
 
 print_option <- FALSE
 
 # create list of catch by species by haul. From hm, or sph or else species = "oth"
-if (nrow(m) > 0 & sum(!is.na(h$catchweight))>0) {
+if (nrow(k) > 0 & sum(!is.na(h$catchweight))>0) {
 
   print_option <- TRUE
 
@@ -692,6 +718,9 @@ if (nrow(m) > 0 & sum(!is.na(h$catchweight))>0) {
     theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
     geom_point() +
     geom_smooth() +
+    tidyquant::geom_ma(n=5) + 
+    scale_y_continuous(labels = scales::percent) +
+    scale_x_date(date_breaks = "1 month", date_labels = "%B %Y") +
     labs(title="Percentage discards SCH99 Aravis")
   
 
@@ -722,13 +751,18 @@ xlim <- c(xmin, xmax); ylim <- c(ymin, ymax)
 myspecies <- "MAC"
 
 for (myspecies in top$species) {
-  p <-
+  
+  t <-
     k %>%
     filter(species %in% myspecies) %>% 
-    group_by(species, vessel, year, month, rect, lat, lon) %>%
-    summarise(gewicht = sum(gewicht, na.rm=TRUE)) %>%
+    mutate(date = lubridate::as_date(datetime)) %>% 
+    group_by(species, vessel, year, month, date, rect, haul, lat, lon) %>%
+    summarise(gewicht = sum(gewicht, na.rm=TRUE))
+
+  tt <- scales::trans_breaks("sqrt", function(x) x^2)(c(0, max(t$gewicht)))
   
-    ggplot() +
+  p <-
+    ggplot(data=t) +
   
     theme_publication() +
     theme(
@@ -751,12 +785,12 @@ for (myspecies in top$species) {
     #           colour="red", size=5) +
   
     geom_point(data=h,
-               aes(x=lon, y=lat),
-               colour="gray50", shape=3, size=0.5) +
+               aes(x=lon, y=lat, colour=as.character(year)),
+               shape=3, size=0.5, stroke=0.1, alpha=0.4) +
     geom_point(aes(x=lon, y=lat, size = gewicht, colour = as.character(year)),
-                alpha = 0.4) +
-    scale_size(range = c(0.5, 5)) +
-  
+                alpha = 0.4, shape=21) +
+    # scale_size(range = c(0.5, 5)) +
+    scale_size_continuous(breaks=tt, range=c(0.1, 5)) +
     # scale_x_continuous(breaks = seq(floor(xmin), ceiling(xmax), 1)) +
     # scale_y_continuous(breaks = seq(floor(2*ymin)/2, ceiling(2*ymax)/2, 0.5)) +
     labs(x = NULL, y = NULL, size = "kg aanvoer/trek", colour="",
@@ -809,7 +843,7 @@ knitr::include_graphics(file.path(onedrive, "report", "FLYSHOOT trips overview",
 <!-- Figure: Mackerel by size category                                            -->
 <!-- ########################################################################################## -->
 
-```{r echo=FALSE, fig.align="center", fig.asp=1.0, message=FALSE, warning=FALSE}
+```{r eval=FALSE, fig.align="center", fig.asp=1.0, message=FALSE, warning=FALSE, include=FALSE}
 
 # create list of catch by species by haul. From hm, or sph or else species = "oth"
 myspecies <- "MAC"
@@ -836,3 +870,125 @@ k %>%
   facet_wrap(~year, ncol=2)
 
 ```
+
+<!-- ########################################################################################## -->
+<!-- Figure: catch per division                                         -->
+<!-- ########################################################################################## -->
+
+```{r echo=FALSE, fig.align="center", fig.asp=1.0, message=FALSE, warning=FALSE}
+
+# k %>%
+#   filter(division %in% c("27.4.b","27.4.c","27.7.d", "27.7.e")) %>% 
+#   group_by(species, year, week, division) %>%
+#   summarise(
+#     gewicht = sum(gewicht, na.rm=TRUE),
+#     date    = as_date(min(datetime, na.rm=TRUE))
+#   ) %>%
+e %>%
+  rename(division=faozone) %>% 
+  filter(division %in% c("27.4.b","27.4.c","27.7.d", "27.7.e")) %>% 
+  group_by(species, year, week, division) %>%
+  summarise(
+    gewicht = sum(weight, na.rm=TRUE),
+    date    = as_date(min(catchdate, na.rm=TRUE))
+  ) %>%
+
+  ggplot() +
+
+  theme_publication() +
+  theme(
+    # panel.grid.major = element_blank(),
+    # panel.grid.minor = element_blank(),
+    text             = element_text(size=12),
+    # plot.margin      = unit(c(0,0,0,0), "cm"),
+    # panel.background = element_rect(fill = "lightskyblue1")
+  ) +
+  geom_bar(aes(x=week, y=gewicht, fill=division), stat="identity") +
+  labs(x = "week", y = "kg", title=paste("Total landings by division")) +
+  guides(fill = guide_legend(nrow = 1)) + 
+  # scale_x_continuous(breaks=1:53) +
+  # facet_grid(year~division)
+  facet_wrap(~year, ncol=1)
+
+```
+
+
+<!-- ########################################################################################## -->
+<!-- Figure: Mackerel catch per division                                         -->
+<!-- ########################################################################################## -->
+
+```{r echo=FALSE, fig.align="center", fig.asp=1.0, message=FALSE, warning=FALSE}
+
+# create list of catch by species by haul. From hm, or sph or else species = "oth"
+e %>%
+  rename(division=faozone, gewicht=weight) %>% 
+  filter(species %in% top$species[1:6]) %>% 
+  filter(division %in% c("27.4.b","27.4.c","27.7.d","27.7.e")) %>% 
+  group_by(species, year, month, division) %>%
+  summarise(gewicht = sum(gewicht, na.rm=TRUE)) %>%
+
+  ggplot() +
+
+  theme_publication() +
+  theme(text = element_text(size=12)) +
+  geom_bar(aes(x=month, y=gewicht, fill=species), stat="identity") +
+  labs(x = "week", y = "kg", title=paste("Landings by species")) +
+  guides(fill = guide_legend(nrow = 1)) + 
+  # scale_x_continuous(breaks=1:53) +
+  facet_grid(year~division)
+
+```
+
+
+<!-- ########################################################################################## -->
+<!-- Figure: total catch against mean                                                           -->
+<!-- ########################################################################################## -->
+
+```{r echo=FALSE, fig.align="center", fig.asp=1.0, message=FALSE, warning=FALSE}
+
+t1 <- 
+  e %>%
+  rename(division=faozone) %>% 
+  filter(division %in% c("27.4.b","27.4.c","27.7.d", "27.7.e")) %>% 
+  mutate(vessel = ifelse(vessel == "Z99", "SCH99", vessel)) %>% 
+  mutate(catchdate = as_date(catchdate)) %>% 
+  group_by(vessel, year, week) %>%
+  summarise(
+    gewicht = sum(weight, na.rm=TRUE),
+    ndays   = n_distinct(catchdate)
+  ) %>%
+  group_by(vessel, year) %>% 
+  mutate(
+    cumweight = cumsum(gewicht),
+    catch_day = gewicht / ndays)
+
+# t1 %>% group_by(vessel, year) %>% summarise(catch = sum(gewicht, na.rm=TRUE), ndays=sum(ndays, na.rm=TRUE)) %>% View()
+
+t2 <-
+  t1 %>% 
+  filter(year %notin% myyear) %>% 
+  group_by(vessel, week) %>% 
+  summarise(
+    meancumweight = mean(cumweight, na.rm=TRUE),
+    meancatch_day = mean(catch_day, na.rm=TRUE))
+
+t3 <-
+  left_join(t1, t2, by=c("vessel", "week")) %>% 
+  mutate(
+    dev1 = cumweight - meancumweight,
+    dev2 = catch_day - meancatch_day
+  )
+
+t3 %>% 
+  ggplot() +
+
+  theme_publication() +
+  geom_bar(aes(x=week, y=dev2, fill=vessel), stat="identity") +
+  labs(x = "week", y = "kg", title=paste("Deviance")) +
+  guides(fill = guide_legend(nrow = 1)) + 
+  # scale_x_continuous(breaks=1:53) +
+  # facet_grid(year~division)
+  facet_grid(vessel~year)
+
+```
+

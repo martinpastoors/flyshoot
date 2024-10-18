@@ -1,0 +1,589 @@
+---
+output:
+  word_document:
+    reference_docx: ../MPFF report template v1.1.dotx
+---
+
+
+```{r setup, include=FALSE}
+
+# ==========================================================================================================
+# Generate FLYSHOOT overview presentations
+# 
+# 06/05/2024 adapted from trip overview Rmd
+# ==========================================================================================================
+
+knitr::opts_chunk$set(echo = FALSE,	message = FALSE,	warning = FALSE,	comment = "",	crop = TRUE )
+knitr::opts_chunk$set(fig.width=10) 
+
+options(dplyr.summarise.inform = FALSE)
+
+# Reset lists
+rm(list=ls())
+
+# Libraries
+library(rmarkdown)                   # note: requires knitr 1.21
+
+require(tidyverse, quietly=TRUE)     # combined package of dplyr, tidyr, ggplot, readr, purrr and tibble
+require(lubridate, quietly=TRUE)     # data handling
+require(reshape2, quietly=TRUE)      # reshaping data; e.g. cast
+require(RColorBrewer)                # colour schemes
+library(viridis)
+library(pander)
+library(ggrepel)
+
+library(captioner)                   # for captions
+tab_nums <- captioner::captioner(prefix = "Table " , levels=1, type=c("n"), infix=".")
+fig_nums <- captioner::captioner(prefix = "Figure ", levels=1, type=c("n"), infix=".")
+
+# Source all the utils
+source("../../prf/R/my utils.r")
+
+get_onedrive <- function (team="Martin Pastoors", site="FLYSHOOT - General") {
+  
+  if (Sys.info()['sysname'] == 'Windows') {
+    
+    # set onedrive directory
+    if(dir.exists(file.path(Sys.getenv('USERPROFILE'), team, site))) {
+      onedrive <- file.path(Sys.getenv('USERPROFILE'), team, site)   
+    } else if(dir.exists(file.path('C:/DATA/PFA', team, site))) {
+      onedrive <- file.path('C:/DATA/PFA', team, site)
+    } else if(dir.exists(file.path('D:/DATA/PFA', team, site))) {
+      onedrive <- file.path('D:/DATA/PFA', team, site)
+    } else {
+      stop("Onedrive directory not found")
+    }
+  }
+  
+  return(onedrive)
+}
+
+spatialdir <- "C:/DATA/RDATA"
+
+# spatial data files
+
+load(file.path(spatialdir, "world_mr_sf.RData"))
+load(file.path(spatialdir, "world_mr_df.RData"))
+load(file.path(spatialdir, "rect_lr_sf.RData"))
+
+load(file.path(spatialdir, "world_lr_df.RData"))
+
+load(file.path(spatialdir, "asfis.RData"))
+
+# ===============================================================================
+#  Load and filter the trip data
+# ===============================================================================
+
+# set onedrive directory
+onedrive <- get_onedrive(team="Martin Pastoors", site="FLYSHOOT - General")
+
+# load datasets
+haul   <- loadRData(file.path(onedrive, "rdata/haul.RData"))
+kisten <- loadRData(file.path(onedrive, "rdata/kisten.RData")) 
+elog   <- loadRData(file.path(onedrive, "rdata/elog.RData")) %>% 
+  mutate(species = toupper(species)) %>% 
+  mutate(species = ifelse(species=="JAX","HOM",species))
+gfw   <- loadRData(file.path(onedrive, "rdata/gfw.RData")) 
+
+yrs     <- 2018:2024
+mnths   <- NA
+vessels <- c("SL9","SCH99", "Z99", "SCH135","SCH65")
+
+myyear <- max(yrs)
+
+# making the data selections
+h <- 
+  haul %>%
+  ungroup() %>% 
+  {if(!is.na(all(vessels))) filter(., vessel %in% vessels) else . } %>% 
+  {if(!is.na(all(yrs)))     filter(., year %in% yrs) else . } %>% 
+  {if(!is.na(all(mnths)))   filter(., month %in% mnths) else .} %>% 
+  ungroup()
+
+k <- 
+  kisten %>%
+  mutate(
+    year  = lubridate::year(datetime),
+    month = lubridate::month(datetime),
+    week = lubridate::week(datetime)
+  ) %>% 
+  ungroup() %>% 
+  {if(!is.na(all(vessels))) filter(., vessel %in% vessels) else . } %>% 
+  {if(!is.na(all(yrs)))     filter(., year %in% yrs) else . } %>% 
+  {if(!is.na(all(mnths)))   filter(., month %in% mnths) else .} %>% 
+  mutate(haul = ifelse(is.na(haul), haul2, haul)) %>% 
+  dplyr::select(-haul2) %>% 
+  left_join(dplyr::select(h, 
+                          vessel, trip, haul, division, lat, lon, rect),
+            by=c("vessel","trip","haul"))
+
+e <- 
+  elog %>%
+  ungroup() %>% 
+  {if(!is.na(all(vessels))) filter(., vessel %in% vessels) else . } %>% 
+  {if(!is.na(all(yrs)))     filter(., year %in% yrs) else . } %>% 
+  {if(!is.na(all(mnths)))   filter(., month %in% mnths) else .} %>% 
+  ungroup() %>% 
+  # mutate(species = tolower(species)) %>% 
+  mutate(species = ifelse(species == "SQC", "SQR", species)) %>% 
+  left_join(dplyr::select(asfis,
+                          species, scientificname, englishname, dutchname),
+            by = "species") %>% 
+  mutate(species = toupper(species))  
+
+g <- 
+  gfw %>%
+  ungroup() %>% 
+  {if(!all(is.na(vessels))) filter(., vessel %in% vessels) else . } %>% 
+  {if(!all(is.na(yrs)))     filter(., year %in% yrs) else . } %>% 
+  {if(!all(is.na(mnths)))   filter(., month %in% mnths) else .} %>% 
+  dplyr::select(vessel, year, month, week, lon, lat)
+
+# calculate the scaling of plots
+xmin <- floor(2 * (min(e$lon, na.rm=TRUE)-0.5))/2;
+xmax <- ceiling(2 * (max(e$lon, na.rm=TRUE)+0.5))/2;
+ymin <- floor(2 * (min(e$lat, na.rm=TRUE)-0.5))/2;
+ymax <- ceiling(2* (max(e$lat, na.rm=TRUE)+0.5))/2
+
+
+
+n <- 16
+
+effort <-
+  e %>% 
+  dplyr::group_by(vessel, year) %>% 
+  dplyr::summarize(ndays = n_distinct(paste(vessel, date))) 
+
+catch <-
+  e %>% 
+  dplyr::group_by(vessel, year, species, 
+                  scientificname, englishname, dutchname) %>% 
+  dplyr::summarize(weight = sum(weight, na.rm=TRUE)) %>% 
+  dplyr::group_by(vessel, year) %>% 
+  dplyr::mutate(perc = weight/sum(weight, na.rm=TRUE)) %>% 
+  left_join(effort, by=c("vessel", "year")) %>% 
+  mutate(catch_day = weight / ndays)
+
+top <-
+  catch %>% 
+  filter(year == max(yrs)) %>% 
+  dplyr::group_by(species) %>% 
+  dplyr::summarize(weight     = sum(weight, na.rm=TRUE)) %>% 
+  arrange(desc(weight)) %>% 
+  slice_head(n=n)
+
+nyears = dplyr::n_distinct(e$year)
+
+myGeneralColors           <- brewer.pal(12, "Paired")
+
+colourCount               <- nyears
+myBycatchColors           <- myGeneralColors[1:colourCount]
+names(myBycatchColors)    <- levels(as.factor(dplyr::pull(dplyr::distinct(e, year))))
+scales::show_col(myBycatchColors)
+
+mycolours <- c(brewer.pal(9, "Greys")[(9-nyears+2):9], "red")
+names(mycolours) <- pull(distinct(e, year))
+# scales::show_col(mycolours)
+
+mylinewidth <- c(rep(0.5, nyears-1), 1.5)
+myalpha     <- c(rep(1, nyears-1), 0.5)
+
+    
+```
+
+
+**FLYSHOOT overview presentation**
+
+For: Jaczon BV
+
+By: Martin Pastoors
+
+Report generated: `r format(Sys.time(), '%d/%m/%Y')`
+
+```{r triptable, echo=FALSE, message=FALSE, warning=FALSE, comment=NA, fig.asp=0.6}
+
+tab_nums(name    = "trips", level = 1, display = FALSE, caption = "Self-sampling overview")
+
+t <-
+  bind_cols(
+    h %>% 
+      filter(year %in% 2023:2024) %>% 
+      group_by(year, month) %>% 
+      summarise(
+        nvessels      = n_distinct(vessel),
+        ntrips        = n_distinct(paste(vessel, trip)),
+        ndays         = n_distinct(paste(vessel, trip, date)),
+        nhauls        = n_distinct(paste(vessel, trip, haul)),
+        nrects        = n_distinct(rect)
+      ),
+    k %>% 
+      filter(year %in%  2023:2024) %>% 
+      group_by(vessel, trip, haul, species, year, month) %>% 
+      summarise(
+        gewicht = sum(gewicht, na.rm=TRUE),
+        boxes   = n()
+      ) %>% 
+      group_by(year, month) %>% 
+      summarise(
+        nboxes        = sum(boxes),
+        nspecies      = n_distinct(species),
+        landedcatch   = sum(gewicht)
+      ) %>% 
+      ungroup() %>% 
+      dplyr::select(-year, -month),
+    # discard ratio (when observed)
+  )  %>% 
+  mutate(year=as.character(year), month=as.character(month)) 
+
+t %>% 
+  pander::pandoc.table(., 
+               style        = "simple",
+               split.tables = 200, 
+               justify      = "right",
+               missing      =" ",
+               big.mark     = ',', 
+               round        = c(0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0) )
+
+  
+
+
+```
+
+
+\newpage
+
+Aanvoer per soort, per jaar en per week. Rode lijn is het lopende jaar. 
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, comment=NA, fig.asp=1.0}
+
+ee <- 
+  e %>%
+  filter(species %in% top$species) %>% 
+  mutate(vessel = ifelse(vessel %in% c("SCH99","Z99"), "SCH99/Z99", vessel)) %>% 
+  group_by(species, year, week) %>% 
+  summarise(landingweight = sum(weight, na.rm=TRUE)) %>% 
+  group_by(species, year) %>% 
+  mutate(meanweight = mean(landingweight, na.rm=TRUE)) %>% 
+  mutate(year = as.character(year)) %>% 
+  mutate(species = factor(species, levels=top$species))
+
+# plot total catch and landings
+ee %>% 
+  ggplot(aes(group=year)) +
+  theme_publication() +
+  # theme(legend.position = "none") +
+  geom_line(aes(x=week, y=landingweight, colour=year, linewidth=year, alpha=year)) +
+  scale_linewidth_manual("year", values = mylinewidth, guide = "none") +
+  scale_colour_manual("year", values = mycolours) +
+  scale_alpha_manual("year", values = myalpha, guide = "none") +
+  # geom_hline(aes(yintercept=meanweight, colour=species)) +
+  # geom_text(aes(x=1, y=meanweight, label=as.integer(meanweight)), hjust=0, vjust=0, nudge_y = 200) +
+  facet_wrap(~species, scales="free_y")
+  # facet_grid(rows=vars(year), cols=vars(species), scales="free_y")
+
+
+
+```
+
+\newpage
+
+Cumulatieve aanvoer per jaar en per week. Rode lijn is het lopende jaar. 
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, comment=NA, fig.asp=1.0}
+
+ee <- 
+  e %>%
+  group_by(year, week) %>% 
+  summarise(
+    nvessels      = n_distinct(vessel),
+    daysatsea     = n_distinct(vessel, date),
+    landingweight = sum(weight, na.rm=TRUE)) %>% 
+  group_by(year) %>% 
+  mutate(
+    cumweight    = cumsum(landingweight/1000),
+    cumdaysatsea = cumsum(daysatsea),
+    catchperday  = cumweight / cumdaysatsea) %>% 
+  mutate(year = as.character(year)) %>% 
+  dplyr::select(year, week, cumdaysatsea, cumweight, catchperday) %>% 
+  tidyr::pivot_longer(names_to = "variable", values_to = "data", cumdaysatsea:catchperday) %>% 
+  mutate(variable = factor(variable, levels=c("cumdaysatsea","cumweight","catchperday")))
+
+l <-
+  ee %>% 
+  group_by(year, variable) %>% 
+  slice_tail(n=1) %>% 
+  mutate(yr = substr(year,3,4))
+
+# plot total catch and landings
+ee %>% 
+  ggplot() +
+  theme_publication() +
+  geom_line(aes(x=week, y=data, colour=year, linewidth=year, alpha=year)) +
+  ggrepel::geom_text_repel(data=l, 
+                           aes(x=week, y=data, colour=year, label=yr), 
+                           nudge_x = 1, direction = "y", hjust = "left", min.segment.length=0, segment.colour="lightblue", show.legend = FALSE) +
+  scale_linewidth_manual("year", values = mylinewidth, guide = "none") +
+  scale_colour_manual("year", values = mycolours) +
+  scale_alpha_manual("year", values = myalpha, guide = "none") +
+  expand_limits(y=0) +
+  scale_x_continuous(breaks=seq(10,52,10), expand=expansion(add=c(1,5))) +
+  guides(colour = guide_legend(nrow = 1)) +
+  facet_wrap(~variable, scales = "free_y")
+
+
+```
+
+\newpage
+
+Cumulatieve aanvoer per soort, per jaar en per week. Rode lijn is het lopende jaar. 
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, comment=NA, fig.asp=1.0}
+
+ee <- 
+  e %>%
+  filter(species %in% top$species) %>% 
+  mutate(vessel = ifelse(vessel %in% c("SCH99","Z99"), "SCH99/Z99", vessel)) %>% 
+  group_by(species, year, week) %>% 
+  summarise(
+    daysatsea     = n_distinct(vessel, date),
+    landingweight = sum(weight, na.rm=TRUE)
+  ) %>% 
+  group_by(species, year) %>% 
+  mutate(
+    cumweight    = cumsum(landingweight/1000),
+    cumdaysatsea = cumsum(daysatsea),
+    catchperday  = cumweight / cumdaysatsea
+  ) %>% 
+  mutate(year = as.character(year)) %>% 
+  dplyr::select(species, year, week, cumdaysatsea, cumweight, catchperday) %>% 
+  mutate(species = factor(species, levels=top$species))
+
+l <-
+  ee %>% 
+  group_by(species, year) %>% 
+  slice_tail(n=1) %>% 
+  mutate(yr = substr(year,3,4))
+
+# plot total days at sea
+ee %>% 
+  ggplot() +
+  theme_publication() +
+  # theme(legend.position = "none") +
+  geom_line(aes(x=week, y=cumdaysatsea, colour=year, linewidth=year, alpha=year)) +
+  # ggrepel::geom_text_repel(data=l, 
+  #                          aes(x=week, y=cumdaysatsea, colour=year, label=yr), 
+  #                          nudge_x = 1, direction = "y", hjust = "left", min.segment.length=5, show.legend = FALSE) +
+  
+  scale_linewidth_manual("year", values = mylinewidth, guide = "none") +
+  scale_colour_manual("year", values = mycolours) +
+  scale_alpha_manual("year", values = myalpha, guide = "none") +
+  guides(colour = guide_legend(nrow = 1)) +
+  facet_wrap(~species)
+
+# plot total landings
+ee %>% 
+  ggplot() +
+  theme_publication() +
+  # theme(legend.position = "none") +
+  geom_line(aes(x=week, y=cumweight, colour=year, linewidth=year, alpha=year)) +
+  scale_linewidth_manual("year", values = mylinewidth, guide = "none") +
+  scale_colour_manual("year", values = mycolours) +
+  scale_alpha_manual("year", values = myalpha, guide = "none") +
+  guides(colour = guide_legend(nrow = 1)) +
+  labs(y="cumulative landings (ton)") +
+  facet_wrap(~species, scales="free_y")
+
+# plot catch rate
+ee %>% 
+  ggplot() +
+  theme_publication() +
+  # theme(legend.position = "none") +
+  geom_line(aes(x=week, y=1000*catchperday, colour=year, linewidth=year, alpha=year)) +
+  # ggrepel::geom_text_repel(data=l, 
+  #                          aes(x=week, y=catchperday, colour=year, label=yr), 
+  #                          nudge_x = 1, direction = "y", hjust = "left", min.segment.length=5, show.legend = FALSE) +
+  scale_linewidth_manual("year", values = mylinewidth, guide = "none") +
+  scale_colour_manual("year", values = mycolours) +
+  scale_alpha_manual("year", values = myalpha, guide = "none") +
+  guides(colour = guide_legend(nrow = 1)) +
+  labs(y="catch/day (kg)") +
+  facet_wrap(~species, scales="free_y")
+
+
+```
+
+
+
+```{r aanvoerendiscards, echo=FALSE, fig.align="center", fig.asp=0.8, message=FALSE, warning=FALSE}
+
+print_option <- FALSE
+
+# create list of catch by species by haul. From hm, or sph or else species = "oth"
+if (nrow(k) > 0 & sum(!is.na(h$catchweight))>0) {
+
+  print_option <- TRUE
+
+  fig_nums(
+    name    = "aanvoerentotalevangst", level   = 1, display = FALSE,
+    caption = "Vergelijking van aanvoer (Marelec weegschaal) en totale vangst (marelec meetpen). Het percentage is het berekende percentage discards per trek")
+
+  t1 <-
+    h %>%
+    filter(catchweight>0, vessel=="SCH99", date >= dmy("23/10/2023")) %>% 
+    group_by(vessel, trip, haul) %>%
+    summarise(data = sum(catchweight, na.rm=TRUE)) %>%
+    mutate(variable = "totaal")
+
+  t2 <-
+    k %>%
+    filter(paste(vessel, trip, haul) %in% paste(t1$vessel, t1$trip, t1$haul)) %>%
+    group_by(vessel, trip, haul) %>%
+    summarise(data = sum(gewicht, na.rm=TRUE)) %>%
+    mutate(variable = "aanvoer")
+
+  tt <-
+    bind_rows(t1, t2) %>% 
+    arrange(vessel, trip, haul) %>% 
+    tidyr::pivot_wider(names_from = variable, values_from = data) %>% 
+    drop_na(totaal) %>% 
+    mutate(aanvoer = ifelse(is.na(aanvoer),0,aanvoer)) %>% 
+    mutate(perc_discards = round((totaal - aanvoer) / totaal, digits=2)) %>% 
+    # mutate(perc_discards = scales::percent(perc_discards, accuracy=1)) %>% 
+    left_join(dplyr::select(h,
+                            vessel, trip, haul, year, week, date),
+              by = c("vessel","trip","haul"))
+
+  tt2 <-
+    tt %>% 
+    group_by(vessel, year, week, date) %>% 
+    summarise(
+      aanvoer = sum(aanvoer, na.rm=TRUE),
+      totaal  = sum(totaal, na.rm=TRUE)
+    ) %>% 
+    mutate(aanvoer = ifelse(is.na(aanvoer),0,aanvoer)) %>% 
+    mutate(perc_discards = round((totaal - aanvoer) / totaal, digits=2)) %>% 
+    mutate(week2 = year + week/52)
+    
+  tt2 %>%
+    ggplot(aes(x=date, y=perc_discards)) +
+    theme_publication() +
+    theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+    geom_point() +
+    geom_smooth() +
+    scale_x_date(date_breaks = "month") +
+    scale_y_continuous(labels = scales::percent) +
+    labs(x="", y="%discards / day") + 
+    labs(title="Percentage discards SCH99 Aravis")
+  
+
+
+
+}
+
+my_caption   <- ifelse(print_option, paste0("_", fig_nums("aanvoerentotalevangst"),"_"), "")
+print_option <- FALSE
+
+```
+
+
+<!-- ########################################################################################## -->
+<!-- Figure: Landings per Species and per Haul (map)                                            -->
+<!-- ########################################################################################## -->
+
+```{r echo=FALSE, fig.align="center", fig.asp=1.0, message=FALSE, warning=FALSE}
+
+# calculate the scaling of plots
+xmin <- floor(2 * (min(k$lon, na.rm=TRUE)-0.5))/2;
+xmax <- ceiling(2 * (max(k$lon, na.rm=TRUE)+0.5))/2;
+ymin <- 49
+ymax <- ceiling(2* (max(k$lat, na.rm=TRUE)+0.5))/2
+
+xlim <- c(xmin, xmax); ylim <- c(ymin, ymax)
+
+# create list of catch by species by haul. From hm, or sph or else species = "oth"
+myspecies <- "MAC"
+
+for (myspecies in top$species) {
+  p <-
+    k %>%
+    filter(species %in% myspecies) %>% 
+    group_by(species, vessel, year, month, rect, lat, lon) %>%
+    summarise(gewicht = sum(gewicht, na.rm=TRUE)) %>%
+  
+    ggplot() +
+  
+    theme_publication() +
+    theme(
+      # panel.grid.major = element_blank(),
+      # panel.grid.minor = element_blank(),
+      text             = element_text(size=12),
+      plot.margin      = unit(c(0,0,0,0), "cm"),
+      # panel.background = element_rect(fill = "lightskyblue1")
+    ) +
+  
+    coord_quickmap(xlim=xlim , ylim=ylim) +
+  
+    # geom_text(data=rect_df, aes(x=lon, y=lat, label=rect),
+    #           hjust=0, vjust=0, nudge_x=0.05, nudge_y=0.025, colour="white") +
+  
+    geom_polygon(data=world_mr_df, aes(x=long, y=lat, group=group), fill = "grey75") +
+  
+    # geom_point(data=slice(tt, c(1,nrow(tt))),
+    #           aes(x=lon, y=lat),
+    #           colour="red", size=5) +
+  
+    geom_point(data=h,
+               aes(x=lon, y=lat),
+               colour="gray50", shape=3, size=0.5) +
+    geom_point(aes(x=lon, y=lat, size = gewicht, colour = as.character(year)),
+                alpha = 0.4) +
+    scale_size(range = c(0.5, 5)) +
+  
+    # scale_x_continuous(breaks = seq(floor(xmin), ceiling(xmax), 1)) +
+    # scale_y_continuous(breaks = seq(floor(2*ymin)/2, ceiling(2*ymax)/2, 0.5)) +
+    labs(x = NULL, y = NULL, size = "kg aanvoer/trek", colour="",
+         title=paste(myspecies,"Landings by haul")) +
+    guides(size = guide_legend(nrow = 1)) + 
+    facet_wrap(~month, ncol=3)
+
+  png(filename=file.path(onedrive, "report", "FLYSHOOT trips overview", 
+                         paste0(myspecies," landings by haul.png")),
+       width=7, height=9.8, units="in", res=300)
+
+  print(p)
+  
+  dev.off()
+
+}
+```
+
+```{r, echo=FALSE, fig.align="left", message=FALSE, warning=FALSE, cache=FALSE}
+knitr::include_graphics(file.path(onedrive, "report", "FLYSHOOT trips overview", 
+                         paste0("MAC"," landings by haul.png")))
+```
+
+```{r, echo=FALSE, fig.align="left", message=FALSE, warning=FALSE, cache=FALSE}
+knitr::include_graphics(file.path(onedrive, "report", "FLYSHOOT trips overview", 
+                         paste0("SQR"," landings by haul.png")))
+```
+
+```{r, echo=FALSE, fig.align="left", message=FALSE, warning=FALSE, cache=FALSE}
+knitr::include_graphics(file.path(onedrive, "report", "FLYSHOOT trips overview", 
+                         paste0("CTC"," landings by haul.png")))
+```
+
+```{r, echo=FALSE, fig.align="left", message=FALSE, warning=FALSE, cache=FALSE}
+knitr::include_graphics(file.path(onedrive, "report", "FLYSHOOT trips overview", 
+                         paste0("MUR"," landings by haul.png")))
+```
+
+```{r, echo=FALSE, fig.align="left", message=FALSE, warning=FALSE, cache=FALSE}
+knitr::include_graphics(file.path(onedrive, "report", "FLYSHOOT trips overview", 
+                         paste0("WHG"," landings by haul.png")))
+```
+
+```{r, echo=FALSE, fig.align="left", message=FALSE, warning=FALSE, cache=FALSE}
+knitr::include_graphics(file.path(onedrive, "report", "FLYSHOOT trips overview", 
+                         paste0("HOM"," landings by haul.png")))
+```
+

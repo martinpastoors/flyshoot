@@ -99,6 +99,8 @@ pefa_list <- list.files(
   pattern="elog pefa",
   full.names = TRUE)
 
+try(if(length(pefa_list)+length(pefa_trek_list)==0) stop("Error: no files in folder"))
+
 my_files <-
   data.frame(stringsAsFactors = FALSE) %>% 
   

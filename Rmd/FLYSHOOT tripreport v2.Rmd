@@ -105,11 +105,11 @@ load(file.path(onedrive, "elog_trek.RData"))
 # Select vessel and trip
 # ------------------------------------------------------------
 
-setvessel<-"SL9"
 # setvessel<-"SCH135"
 # setvessel<-"SCH65"
+setvessel<-"SL9"
 
-startdate<-dmy("24/4/2024"); enddate <- dmy("1/5/2024") ;
+startdate<-dmy("8/10/2024"); enddate <- dmy("17/10/2024") ;
 
 settrip  <- 
   elog %>% 

@@ -278,7 +278,7 @@ get_haul_kisten <- function(my_vessel, my_trip, my_file, my_kisten) {
     arrange(datetime) %>% 
     mutate(time_diff = as.numeric(datetime - lag(datetime))/60) %>% 
     
-    mutate(counter = ifelse(time_diff > 20, 1, 0)) %>% 
+    mutate(counter = ifelse(time_diff > 28, 1, 0)) %>% 
     mutate(counter = ifelse(row_number() == 1, 1, counter)) %>% 
     mutate(haul = as.integer(cumsum(counter))) %>% 
     
@@ -515,7 +515,7 @@ get_haul_kisten_pefa <- function(my_vessel, my_trip, my_kisten, my_pefa) {
     arrange(datetime) %>% 
     mutate(time_diff = as.numeric(datetime - lag(datetime))/60) %>% 
     
-    mutate(counter = ifelse(time_diff > 20, 1, 0)) %>% 
+    mutate(counter = ifelse(time_diff > 28, 1, 0)) %>% 
     mutate(counter = ifelse(row_number() == 1, 1, counter)) %>% 
     mutate(haul = as.integer(cumsum(counter))) %>% 
     
@@ -749,11 +749,15 @@ get_kisten <- function(my_vessel, my_trip2, my_file, h) {
     mutate(time_diff = as.numeric(datetime - lag(datetime))/60) %>% 
     left_join(soorten, by="soorten")  
   
+  # hist(m$time_diff)
+  
+  # If haul is included in kisten, then take it from there
   if(any(grepl("haul", names(m)))) {
     m <-
       m %>% 
       mutate(haul = as.numeric(haul))
-    
+  
+  # otherwise, calculate haul number for time differences
   } else {
     
     # if haul not (manually added) to kisten, assign haul numbers
@@ -762,18 +766,23 @@ get_kisten <- function(my_vessel, my_trip2, my_file, h) {
       mutate(haul = ifelse(time_diff > 20 | is.na(time_diff), 1, 0)) %>% 
       mutate(haul = cumsum(haul)) %>% 
       dplyr::select(-datum, -tijd)  
+
+    # check for equal number of hauls in m and h    
+    try(if(max(h$haul, na.rm=TRUE) != max(m$haul, na.rm=TRUE)) stop(paste("Number of hauls in h",max(h$haul, na.rm=TRUE), "not equal to m",max(m$haul, na.rm=TRUE))))
     
+    # look up haul information from h
     tmp <-
       # sqldf::sqldf("select m.vessel, m.trip, m.lotnummer, m.soorten, m.maat, m.gewicht,
       #                      m.datetime, m.haul2, h.haul from m
-      sqldf::sqldf("select m.vessel, m.trip, m.lotnummer, m.soorten, m.maat, m.gewicht,
-                         m.datetime, h.haul, h.haultime, h.nexthaultime from m
+      sqldf::sqldf("select m.vessel, m.trip, m.lotnummer, m.soorten, m.maat, m.gewicht,m.datetime, 
+                           h.haul, h.haultime, h.nexthaultime from m
           join h on m.vessel   == h.vessel and
                     m.trip     == h.trip and
                     m.datetime >= h.haultime and
                     m.datetime <  h.nexthaultime") %>%
       as_tibble()
 
+    # replace calculated haul numbers by haul numbers from lookup
     m <- left_join(dplyr::select(m,
                                  -haul),
                    dplyr::select(tmp,

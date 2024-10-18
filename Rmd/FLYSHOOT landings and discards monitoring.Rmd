@@ -1,0 +1,292 @@
+---
+output:
+  word_document:
+    reference_docx: ../MPFF report template v1.1.dotx
+---
+
+
+```{r setup, include=FALSE}
+
+# ==========================================================================================================
+#  FLYSHOOT landings and discards monitoring
+# 
+# 15/08/2024
+# ==========================================================================================================
+
+knitr::opts_chunk$set(echo = FALSE,	message = FALSE,	warning = FALSE,	comment = "",	crop = TRUE )
+knitr::opts_chunk$set(fig.width=10) 
+
+options(dplyr.summarise.inform = FALSE)
+
+# Reset lists
+rm(list=ls())
+
+# Libraries
+library(rmarkdown)                   # note: requires knitr 1.21
+
+require(tidyverse, quietly=TRUE)     # combined package of dplyr, tidyr, ggplot, readr, purrr and tibble
+require(lubridate, quietly=TRUE)     # data handling
+require(reshape2, quietly=TRUE)      # reshaping data; e.g. cast
+require(RColorBrewer)                # colour schemes
+library(viridis)
+library(pander)
+
+library(captioner)                   # for captions
+tab_nums <- captioner::captioner(prefix = "Table " , levels=1, type=c("n"), infix=".")
+fig_nums <- captioner::captioner(prefix = "Figure ", levels=1, type=c("n"), infix=".")
+
+# Source all the utils
+source("../R/FLYSHOOT utils.r")
+
+# ===============================================================================
+#  Load and filter the trip data
+# ===============================================================================
+
+# set onedrive directory
+onedrive <- get_onedrive(team="Martin Pastoors", site="FLYSHOOT - General")
+
+# load datasets
+haul   <- loadRData(file.path(onedrive, "rdata/haul.RData"))
+kisten <- loadRData(file.path(onedrive, "rdata/kisten.RData")) 
+elog   <- loadRData(file.path(onedrive, "rdata/elog.RData")) %>% 
+  mutate(species = toupper(species)) %>% 
+  mutate(species = ifelse(species=="JAX","HOM",species))
+
+# making the data selections
+h <- 
+  haul %>%
+  ungroup() %>% 
+  filter(., vessel %in% "SCH99") %>% 
+  filter(date >= ymd("2023-10-15")) %>%  
+  ungroup()
+
+k <- 
+  kisten %>%
+  mutate(
+    date = as.Date(datetime),
+    year  = lubridate::year(datetime),
+    month = lubridate::month(datetime),
+    week = lubridate::week(datetime)
+  ) %>% 
+  ungroup() %>% 
+  filter(., vessel %in% "SCH99") %>% 
+  filter(date >= ymd("2023-10-15")) %>%  
+  mutate(haul = ifelse(is.na(haul), haul2, haul)) %>% 
+  dplyr::select(-haul2) %>% 
+  left_join(dplyr::select(h, 
+                          vessel, trip, haul, division, lat, lon, rect),
+            by=c("vessel","trip","haul"))
+
+
+```
+
+
+**FLYSHOOT landings and discards monitoring on SCH99**
+
+For: Jaczon BV
+
+By: Martin Pastoors
+
+Report generated: `r format(Sys.time(), '%d/%m/%Y')`
+
+
+Totale aanvoer en discards per schip en per week
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, comment=NA, fig.asp=0.6}
+
+fig_nums(
+  name    = "d", 
+  level = 1, display = FALSE,
+  caption = "Totale aanvoer per schip")
+
+hh <- 
+  h %>%
+  group_by(vessel, year, week) %>% 
+  summarise(
+    catch = sum(catchweight, na.rm=TRUE)
+  ) 
+
+kk <- 
+  k %>%
+  group_by(vessel, year, week) %>% 
+  summarise(
+    landings = sum(gewicht, na.rm=TRUE)
+  ) 
+
+t <- 
+  left_join(hh, kk, by=c("vessel", "year", "week")) %>% 
+  mutate(discards = catch - landings) %>% 
+  tidyr::pivot_longer(names_to = "variable", values_to="data", c("landings","discards","catch"))
+
+
+
+# k %>% mutate(week=lubridate::week(datetime)) %>% filter(week==5, vessel=="SCH135") %>% View()  
+# k %>% filter(grepl("_", trip)) %>% distinct(trip) 
+# k %>% filter(grepl("085", trip)) %>% distinct(trip) 
+
+# plot total catch and landings
+t %>% 
+  filter(variable %in% c("landings","discards")) %>% 
+  
+  ggplot(aes(group=vessel)) +
+  theme_publication() +
+  geom_bar(aes(x=week, y=data, fill=variable), stat="identity") +
+  facet_grid(year~vessel)
+
+t %>% 
+  filter(variable %in% c("landings","discards")) %>% 
+  group_by(vessel, year, week) %>% 
+  mutate(perc = data / sum(data, na.rm=TRUE)) %>% 
+  
+  ggplot(aes(group=vessel)) +
+  theme_publication() +
+  geom_bar(aes(x=week, y=perc, fill=variable), stat="identity") +
+  facet_grid(year~vessel)
+
+```
+
+\newpage
+
+Histogram of total catch
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, comment=NA, fig.asp=0.6}
+
+
+  t1 <-
+    h %>%
+    filter(catchweight>0, vessel=="SCH99", date >= dmy("23/10/2023")) %>% 
+    group_by(vessel, trip, haul) %>%
+    summarise(catchweight = sum(catchweight, na.rm=TRUE)) 
+
+  t1 %>%
+    ggplot(aes(x=catchweight)) +
+    theme_publication() +
+    geom_histogram(binwidth=100)
+  
+```
+
+Percentage discards per dag
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, comment=NA, fig.asp=0.6}
+
+
+  t1 <-
+    h %>%
+    filter(catchweight>0, vessel=="SCH99", date >= dmy("23/10/2023")) %>% 
+    group_by(vessel, trip, haul) %>%
+    summarise(data = sum(catchweight, na.rm=TRUE)) %>%
+    mutate(variable = "totaal")
+
+  t2 <-
+    k %>%
+    filter(paste(vessel, trip, haul) %in% paste(t1$vessel, t1$trip, t1$haul)) %>%
+    group_by(vessel, trip, haul) %>%
+    summarise(data = sum(gewicht, na.rm=TRUE)) %>%
+    mutate(variable = "aanvoer")
+
+  tt <-
+    bind_rows(t1, t2) %>% 
+    arrange(vessel, trip, haul) %>% 
+    tidyr::pivot_wider(names_from = variable, values_from = data) %>% 
+    drop_na(totaal) %>% 
+    mutate(aanvoer = ifelse(is.na(aanvoer),0,aanvoer)) %>% 
+    mutate(perc_discards = round((totaal - aanvoer) / totaal, digits=2)) %>% 
+    # mutate(perc_discards = scales::percent(perc_discards, accuracy=1)) %>% 
+    left_join(dplyr::select(h,
+                            vessel, trip, haul, year, week, date),
+              by = c("vessel","trip","haul"))
+
+  tt2 <-
+    tt %>% 
+    group_by(vessel, year, week, date) %>% 
+    summarise(
+      aanvoer = sum(aanvoer, na.rm=TRUE),
+      totaal  = sum(totaal, na.rm=TRUE)
+    ) %>% 
+    mutate(aanvoer = ifelse(is.na(aanvoer),0,aanvoer)) %>% 
+    mutate(perc_discards = round((totaal - aanvoer) / totaal, digits=2)) %>% 
+    mutate(week2 = year + week/52)
+    
+  tt2 %>%
+    ggplot(aes(x=date, y=perc_discards)) +
+    theme_publication() +
+    theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+    geom_point() +
+    geom_smooth() +
+    tidyquant::geom_ma(n=5) + 
+    scale_y_continuous(labels = scales::percent) +
+    scale_x_date(date_breaks = "1 month", date_labels = "%B %Y") +
+    labs(title="Percentage discards per day SCH99 Aravis")
+
+```
+
+
+Percentage discards per trek
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, comment=NA, fig.asp=0.6}
+
+
+  t1 <-
+    h %>%
+    filter(catchweight>0, vessel=="SCH99", date >= dmy("23/10/2023")) %>% 
+    group_by(vessel, trip, haul) %>%
+    summarise(data = sum(catchweight, na.rm=TRUE)) %>%
+    mutate(variable = "totaal")
+
+  t2 <-
+    k %>%
+    filter(paste(vessel, trip, haul) %in% paste(t1$vessel, t1$trip, t1$haul)) %>%
+    group_by(vessel, trip, haul) %>%
+    summarise(data = sum(gewicht, na.rm=TRUE)) %>%
+    mutate(variable = "aanvoer")
+
+  tt <-
+    bind_rows(t1, t2) %>% 
+    arrange(vessel, trip, haul) %>% 
+    tidyr::pivot_wider(names_from = variable, values_from = data) %>% 
+    drop_na(totaal) %>% 
+    mutate(aanvoer = ifelse(is.na(aanvoer),0,aanvoer)) %>% 
+    mutate(perc_discards = round((totaal - aanvoer) / totaal, digits=2)) %>% 
+    # mutate(perc_discards = scales::percent(perc_discards, accuracy=1)) %>% 
+    left_join(dplyr::select(h,
+                            vessel, trip, haul, year, week, date, shoottime),
+              by = c("vessel","trip","haul"))
+
+  tt %>%
+    filter(perc_discards >= 0) %>% 
+    
+    ggplot(aes(x=shoottime, y=perc_discards)) +
+    theme_publication() +
+    theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+    geom_point() +
+    geom_smooth() +
+    geom_text(aes(label=paste("nhauls =",
+                              tt %>% filter(perc_discards >= 0) %>% ungroup() %>% summarise(nrow = dplyr::n()) %>% as.integer())), x = -Inf, y = Inf, hjust = 0, vjust = 1, inherit.aes = FALSE)+
+    # tidyquant::geom_ma(n=5) + 
+    scale_y_continuous(labels = scales::percent) +
+    scale_x_datetime(date_breaks = "1 month", date_labels = "%B %Y") +
+    labs(title="Percentage discards per haul SCH99 Aravis (negative discards removed)")
+
+```
+
+Negative percentage discards per haul
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, comment=NA, fig.asp=0.6}
+
+
+  tt %>%
+    filter(perc_discards < 0) %>% 
+    
+    ggplot(aes(x=shoottime, y=perc_discards)) +
+    theme_publication() +
+    theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+    geom_point() +
+    geom_smooth() +
+    # tidyquant::geom_ma(n=5) + 
+    geom_text(aes(label=paste("nhauls =",
+                              tt %>% filter(perc_discards < 0) %>% ungroup() %>% summarise(nrow = dplyr::n()) %>% as.integer())), x = -Inf, y = Inf, hjust = 0, vjust = 1, inherit.aes = FALSE)+
+    scale_y_continuous(labels = scales::percent) +
+    scale_x_datetime(date_breaks = "1 month", date_labels = "%B %Y") +
+    labs(title="Negative percentage discards per haul SCH99 Aravis (postive discards removed)")
+
+```
