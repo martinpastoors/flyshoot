@@ -11,6 +11,7 @@
 # 05/11/2019 added an, ac
 # 27/01/2020 added excel_timezone_to_utc
 # 05/03/2020 added count for Inf and for non_finite (=NA, NaN, Inf, -Inf)
+# 23/10/2024 added spatial functions
 # --------------------------------------------------------------------------------
 #
 # an                : as.numeric (now also deals with factors)
@@ -47,6 +48,10 @@
 # plotallvars       : plot histogram of all numerical variables in data frame
 # integer_breaks    : integer breaks for plots axis
 # calc_boxplot_stat 
+# create_sf
+# create_spatial
+# create_spatial_df
+# create_spatial_df_from_sp
 
 # --------------------------------------------------------------------------------
 
@@ -1427,5 +1432,47 @@ calc_boxplot_stat <- function(x) {
     stats[c(1, 5)] <- range(c(stats[2:4], x[!outliers]), na.rm = TRUE)
   }
   return(stats)
+}
+
+create_sf <- function(path, folder, layer, simplify=NA) {
+  sf <-
+    sf::st_read(dsn   = file.path(path, folder), layer = layer) %>% 
+    sf::st_transform(crs = 4326) %>%
+    sf::st_make_valid() %>% 
+    { if(is.numeric(simplify)) {rmapshaper::ms_simplify(., keep = simplify, keep_shapes = TRUE) } else {.}}
+  
+  return(sf)
+}
+
+create_spatial <- function(path, folder, layer, simplify=NA) {
+  sp  <-
+    rgdal::readOGR(dsn=file.path(path, folder), layer=layer) %>%
+    sp::spTransform(sp::CRS("+init=epsg:4326")) %>%  
+    { if(is.numeric(simplify)) {rmapshaper::ms_simplify(., keep = simplify, keep_shapes = TRUE) } else {.}}
+  
+  return(sp)
+}
+
+create_spatial_df <- function(path, folder, layer, simplify=NA) {
+  
+  sp         <- create_spatial(path=path, folder=folder, layer=layer, simplify=simplify) 
+  sp@data$id <- rownames(sp@data)
+  sp.points  <- broom::tidy(sp)
+  
+  df  <- left_join(sp.points, sp@data, by="id")
+  
+  return(df)
+}
+
+create_spatial_df_from_sp <- function(sp) {
+  
+  if(class(sp) != "SpatialPolygonsDataFrame") stop("sp must be a SpatialPolygonsDataFrame")
+  
+  sp@data$id <- rownames(sp@data)
+  sp.points  <- broom::tidy(sp)
+  
+  df  <- left_join(sp.points, sp@data, by="id")
+  
+  return(df)
 }
 

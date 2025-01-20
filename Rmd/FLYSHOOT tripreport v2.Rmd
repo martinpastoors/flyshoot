@@ -101,15 +101,21 @@ load(file.path(onedrive, "elog_trek.RData"))
 
 # elog %>% filter(vessel=="SL9", year==2023) %>% distinct(trip) %>% View()
 
-# ------------------------------------------------------------
+
+# ===============================================================================
+# ===============================================================================
 # Select vessel and trip
-# ------------------------------------------------------------
+# ===============================================================================
+# ===============================================================================
 
 # setvessel<-"SCH135"
-# setvessel<-"SCH65"
-setvessel<-"SL9"
+setvessel<-"SCH65"
+# setvessel<-"SL9"
 
-startdate<-dmy("8/10/2024"); enddate <- dmy("17/10/2024") ;
+startdate<-dmy("13/1/2025"); enddate <- dmy("16/1/2025") ;
+
+# ===============================================================================
+# ===============================================================================
 
 settrip  <- 
   elog %>% 
@@ -389,6 +395,7 @@ t1 %>%
 
 ```
 
+\newpage
 
 **Aanvoer per soort en dag (elog)**
 
@@ -700,9 +707,9 @@ ee %>%
   theme_publication() +
   # theme(legend.position = "none") +
   geom_line(aes(x=week, y=cumweight, colour=year, linewidth=year, alpha=year)) +
-  scale_linewidth_manual("year", values = c("2020"=.5,       "2021"=.5,       "2022"=.5,       "2023"=0.5,      "2024"=1.5), guide = "none") +
-  scale_colour_manual   ("year", values = c("2020"="gray80", "2021"="gray60", "2022"="gray40", "2023"="blue", "2024"="red")) +
-  scale_alpha_manual("year", values = c(1, 1, 1, 1, 0.5), guide = "none") +
+  scale_linewidth_manual("year", values = c("2020"=.5,       "2021"=.5,       "2022"=.5,       "2023"=0.5,      "2024"=0.5,    "2025"=1.5), guide = "none") +
+  scale_colour_manual   ("year", values = c("2020"="gray80", "2021"="gray60", "2022"="gray40", "2023"="gray40", "2024"="blue", "2025"="red")) +
+  scale_alpha_manual("year", values = c(1, 1, 1, 1, 1, 0.5), guide = "none") +
   # geom_hline(aes(yintercept=meanweight, colour=species)) +
   # geom_text(aes(x=1, y=meanweight, label=as.integer(meanweight)), hjust=0, vjust=0, nudge_y = 200) +
   labs(title=paste(unique(ee$vessel), "cumulatieve aanvoer per soort, week en jaar"), y="aanvoer (kg, cumulatief)") +

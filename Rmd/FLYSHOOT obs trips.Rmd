@@ -1,0 +1,615 @@
+---
+output:
+  word_document:
+    reference_docx: ../report_template.dotx
+---
+
+
+```{r setup, include=FALSE}
+
+# ==========================================================================================================
+# FLYSHOOT observer trips
+# 
+# 09/12/2024 first coding
+# ==========================================================================================================
+
+# Reset lists
+rm(list=ls())
+
+# ------------------------------------------------------------
+# Select vessel and trip
+# ------------------------------------------------------------
+
+setvessel<-c("Z99", "SCH99")   ;settrip<- c( "2024190","2024191","2024192") ; comparisons <- FALSE
+
+knitr::opts_chunk$set(echo = FALSE,	message = FALSE,	warning = FALSE,	comment = "",	crop = TRUE )
+knitr::opts_chunk$set(fig.width=10) 
+
+options(dplyr.summarise.inform = FALSE)
+
+# Libraries
+library(rmarkdown)                   # note: requires knitr 1.21
+
+require(tidyverse, quietly=TRUE)     # combined package of dplyr, tidyr, ggplot, readr, purrr and tibble
+require(lubridate, quietly=TRUE)     # data handling
+require(reshape2, quietly=TRUE)      # reshaping data; e.g. cast
+require(RColorBrewer)                # colour schemes
+library(viridis)
+library(pander)
+
+library(captioner)                   # for captions
+tab_nums <- captioner::captioner(prefix = "Table " , levels=1, type=c("n"), infix=".")
+fig_nums <- captioner::captioner(prefix = "Figure ", levels=1, type=c("n"), infix=".")
+
+# Source all the utils
+source("../../prf/R/my utils.r")
+
+# source("../R/gfw.r")
+
+get_onedrive <- function (team="Martin Pastoors", site="FLYSHOOT - General") {
+  
+  if (Sys.info()['sysname'] == 'Windows') {
+    
+    # set onedrive directory
+    if(dir.exists(file.path(Sys.getenv('USERPROFILE'), team, site))) {
+      onedrive <- file.path(Sys.getenv('USERPROFILE'), team, site)   
+    } else if(dir.exists(file.path('C:/DATA/PFA', team, site))) {
+      onedrive <- file.path('C:/DATA/PFA', team, site)
+    } else if(dir.exists(file.path('D:/DATA/PFA', team, site))) {
+      onedrive <- file.path('D:/DATA/PFA', team, site)
+    } else {
+      stop("Onedrive directory not found")
+    }
+  }
+  
+  return(onedrive)
+}
+
+spatialdir <- "C:/DATA/RDATA"
+
+# spatial data files
+
+load(file.path(spatialdir, "world_lr_sf.RData"))
+load(file.path(spatialdir, "world_mr_sf.RData"))
+# load(file.path(onedrive, "eez.df.RData"))
+# load(file.path(onedrive, "fao.df.RData"))
+# load(file.path(onedrive, "depth200.df.RData"))
+# load(file.path(onedrive, "icesrectangles.df.RData"))
+
+load(file.path(spatialdir, "world_lr_df.RData"))
+load(file.path(spatialdir, "world_mr_df.RData"))
+
+rect_df <-
+  loadRData(file.path(spatialdir, "rect_df.RData")) %>% 
+  rename(rect=ICESNAME) %>% 
+  group_by(rect) %>% 
+  filter(row_number() ==1) %>% 
+  dplyr::select(rect, lon=long, lat)
+
+asfis <-
+  loadRData(file.path(spatialdir, "asfis.RData")) %>% 
+  lowcase()
+
+
+# ===============================================================================
+#  Load and filter the trip data
+# ===============================================================================
+
+# set onedrive directory
+onedrive <- get_onedrive(team="Martin Pastoors", site="FLYSHOOT - General/rdata")
+datadir  <- get_onedrive(team="Martin Pastoors", site="FLYSHOOT - General/tripdata/SCH99")
+
+# load datasets
+load(file.path(onedrive, "haul.RData"))
+
+load(file.path(onedrive, "kisten.RData"))
+load(file.path(onedrive, "elog.RData"))
+load(file.path(onedrive, "elog_trek.RData"))
+load(file.path(onedrive, "trip.RData"))
+
+load(file.path(onedrive, "gfw.RData"))
+
+
+# making the data selections
+h <- 
+  haul %>%
+  ungroup() %>% 
+  filter(vessel  %in% setvessel,
+         trip    %in% settrip) %>%  
+  
+  # TEMP FIX
+  # mutate(lon = ifelse(lon>2 & lat < 51, -1*lon, lon)) %>% 
+
+  ungroup()
+
+ 
+m <-
+  kisten %>% 
+  filter(vessel  %in% setvessel,
+         trip    %in% settrip) %>% 
+  mutate(soorten = tolower(soorten)) %>% 
+  distinct()
+
+if (nrow(h) == 0 & nrow(m) == 0) {stop(paste("No hauls in the selected trip(s):", setvessel, settrip))}
+
+e <-
+  elog %>% 
+  filter(vessel  %in% setvessel,
+         trip    %in% settrip) 
+
+et <-
+  elog_trek %>% 
+  filter(vessel  %in% setvessel,
+         trip    %in% settrip) 
+
+tt <-
+  trip %>% 
+  filter(vessel  %in% setvessel,
+         trip    %in% settrip) %>% 
+  
+  # TEMP FIX
+  # mutate(lon = ifelse(lon>2 & lat <51, -1*lon, lon)) %>% 
+
+  left_join(dplyr::select(h,
+                          vessel, trip, haul, catchweight, landingweight),
+            by=c("vessel","trip","haul"))
+
+if(nrow(tt) == 0) stop("error in trip data")
+
+trip2 <-
+  bind_rows(
+    distinct(h, 
+             vessel, trip, haul, haultime) %>% mutate(source="trek"),
+    distinct(m,
+             vessel, trip, haul, haultime=datetime) %>% mutate(source="marelec"),
+    distinct(e, 
+             vessel, trip, haul, haultime=catchdate) %>% mutate(source="elog"),
+  ) %>% 
+  group_by(vessel, trip, source) %>% 
+  summarise(
+    nhaul = n_distinct(haul),
+    startdate = min(haultime, na.rm=TRUE),
+    enddate   = max(haultime, na.rm=TRUE)
+  )
+
+g <-
+  gfw %>% 
+  filter(vessel  %in% setvessel) %>% 
+  filter(date >= min(h$date), date <= max(h$date))
+
+# calculate the scaling of plots
+# h %>% filter(lat==max(lat, na.rm=TRUE)) %>% View()
+
+xmin <- floor(min(h$lon, tt$lon, na.rm=TRUE))
+xmax <- ceiling(max(h$lon, tt$lon, na.rm=TRUE))
+ymin <- floor(2*min(h$lat, tt$lat, na.rm=TRUE))/2
+ymax <- ceiling(2*max(h$lat, tt$lat, na.rm=TRUE))/2
+
+# xmin <- floor(min(tt$lon, e$lon, na.rm=TRUE))
+# xmax <- ceiling(max(tt$lon, e$lon, na.rm=TRUE))
+# ymin <- floor(2*min(tt$lat, e$lat, na.rm=TRUE))/2
+# ymax <- ceiling(2*max(tt$lat, e$lat, na.rm=TRUE))/2
+
+# xmin <- floor(2 * (min(h$lon, na.rm=TRUE)-0.5))/2;
+# xmax <- ceiling(2 * (max(h$lon, na.rm=TRUE)+0.5))/2;
+# ymin <- floor(2 * (min(h$lat, na.rm=TRUE)-0.5))/2;
+# ymax <- ceiling(2* (max(h$lat, na.rm=TRUE)+0.5))/2
+
+# xdistance <- geosphere::distGeo(matrix(c(xmin, ymin), ncol=2, byrow=FALSE),
+#                                 matrix(c(xmax, ymin) , ncol=2, byrow=FALSE) )/1000
+# ydistance <- geosphere::distGeo(matrix(c(xmin, ymin), ncol=2, byrow=FALSE),
+#                                 matrix(c(xmin, ymax) , ncol=2, byrow=FALSE) )/1000
+ 
+xdistance <- geo::arcdist(lat=ymin, lon=xmin, lat1 = ymin, lon1 = xmax, scale = "km")
+ydistance <- geo::arcdist(lat=ymin, lon=xmin, lat1 = ymax, lon1 = xmin, scale = "km")
+aspect    <- ydistance/xdistance
+
+
+# Read observer data
+odfiles  <-
+  list.files(
+    path=file.path(datadir),
+    pattern="Dutch_Flyshoot",
+    recursive=TRUE,
+    full.names = TRUE)
+
+od <- disc <- lf <- data.frame(stringsAsFactors = FALSE)
+
+for (fn in odfiles) {
+  od <-
+    bind_rows(
+      od,
+      readxl::read_excel(
+        fn,
+        sheet = "1_Operation_details",
+        col_names = TRUE,
+        col_types = "text"
+      ) %>% 
+        lowcase() %>% 
+        mutate(across (c("vesseltotalcatchkg", "observertotalcatchkg", 
+                         "vesseltotalcatch-landedkg", "observertotaldiscardedkg",
+                         "totallandedcatchkg"),
+                       as.numeric)) %>% 
+        rename(vesseldiscardedkg = "vesseltotalcatch-landedkg") %>% 
+        mutate(
+          triphaul = paste(trip, stringr::str_pad(haul, pad="0",width=2), sep="_"),
+          observercalctotalcatchkg = ifelse(is.na(observertotaldiscardedkg), NA, totallandedcatchkg + observertotaldiscardedkg)
+        )
+    )
+} 
+
+for (fn in odfiles) {
+  disc <-
+    bind_rows(
+      disc,
+      readxl::read_excel(
+        fn,
+        sheet = "2_Discard_Sample_Weights",
+        col_names = TRUE,
+        col_types = "text",
+        range="A2:E200"
+      ) %>% 
+        lowcase() %>% 
+        mutate(across (c("totalweightkg"), as.numeric)) %>% 
+        mutate(trip = paste0("2024",trip))
+    )
+} 
+
+disc2 <-
+  disc %>% 
+  drop_na(vessel) %>% 
+  group_by(vessel, trip, haul) %>% 
+  mutate(prop = totalweightkg/sum(totalweightkg)) %>% 
+  # mutate(trip = paste0("2024",trip)) %>%
+  mutate(haul = as.integer(haul)) %>% 
+  left_join(dplyr::select(h,
+                          vessel, trip, haul, catchweight), 
+            by=c("vessel","trip","haul")) %>% 
+  left_join(m %>% group_by(vessel, trip, haul) %>% summarise(landingweight=sum(gewicht,na.rm=TRUE)),
+            by=c("vessel","trip","haul")) %>% 
+  mutate(discardweight = catchweight - landingweight) %>% 
+  mutate(discardweightperspecies = prop * discardweight) %>% 
+  mutate(triphaul = paste(trip, stringr::str_pad(haul, pad="0",width=2), sep="_"))
+
+
+fn <- odfiles[1]
+
+lf <- data.frame(stringsAsFactors = FALSE)
+
+for (fn in odfiles) {
+  print(fn)
+  mysheets   <- readxl::excel_sheets(fn)
+  mylfsheets <- mysheets[grepl("LF_", mysheets)]
+  mytrip     <- paste0("2024", 189 + as.integer(substr(basename(fn),25,26)))
+  
+  ms         <- mylfsheets[1]
+  for(ms in mylfsheets) {
+    print(ms)
+    t1 <- readxl::read_excel(fn, sheet=ms, range="B2:M2", col_names = FALSE) %>% tidyr::pivot_longer(names_to = "test", values_to = "haul", c("...1":"...12")) %>% 
+      drop_na(haul) %>% 
+      dplyr::select(-test)
+  
+    myvar     <- as.character(readxl::read_excel(fn, sheet=ms, range="A5", col_names = FALSE))     
+    myspecies <- substr(ms,4,6)
+    mylengths <- readxl::read_excel(fn,sheet=ms,range="A6:A200", col_names = FALSE) %>% setNames("length") %>% filter(!is.na(length) & length != "Average") %>% 
+      mutate(length = as.integer(length))
+  
+    for(counter in 1:nrow(t1)) {
+      myh <- as.integer(t1[counter,1])
+      print(myh) 
+      t2 <- readxl::read_excel(fn,sheet=ms,range=cellranger::cell_limits(c(6, 2), c(6+nrow(mylengths)-1, 2)), col_names = FALSE) %>% 
+        setNames("count") %>% 
+        mutate(count = as.integer(count)) %>% 
+        bind_cols(trip = mytrip) %>% 
+        bind_cols(haul = myh) %>% 
+        bind_cols(species = myspecies) %>% 
+        bind_cols(variable = myvar) %>% 
+        bind_cols(mylengths) %>% 
+        drop_na(count) %>% 
+        relocate(count, .after=length)
+      
+      lf <-
+        bind_rows(lf, t2)
+    }
+  }  
+} 
+  
+
+```
+
+
+# Results of observer trips on `r unique(trip2$vessel)`, trips: `r paste(as.character(unique(trip2$trip)), collapse=", ")`
+
+### Trip start: `r format(min(trip2$startdate), '%d/%m/%Y')`, end: `r format(max(trip2$enddate), '%d/%m/%Y')`
+
+Report generated: `r format(Sys.time(), '%d/%m/%Y')`
+
+&nbsp;
+
+**Testing the total catch estimates**
+
+Here comparing the total catch estimate from the skipper (based on Marelec) with the sum of the observer-weighed discards and the landed catch of that haul. Colours indicate the three different trips. Haul 7 of 3rd trip (i.e. 192) has the highest deviation in total catch. 
+
+```{r, echo=FALSE, fig.asp=0.8, fig.align="center", message=FALSE, warning=FALSE}
+
+# od %>% filter(!is.na(observertotaldiscardedkg)) %>% View()
+
+od %>% 
+  ggplot(aes(x=vesseltotalcatchkg, y=observercalctotalcatchkg)) +
+  theme_publication() +
+  geom_point(aes(colour=trip, size=vesseltotalcatchkg), shape=21) +
+  geom_text(aes(colour=trip, label=triphaul), hjust=0, nudge_x = 5) +
+  geom_abline(slope=1) +
+  expand_limits(x=0, y=0) +
+  scale_size_continuous(range=c(0.5,5)) +
+  scale_x_continuous(expand = c(0, 100))
+
+  
+
+```
+
+Discard rates from observer data
+
+```{r, echo=FALSE, fig.asp=0.8, fig.align="center", message=FALSE, warning=FALSE}
+
+# od %>% filter(!is.na(observertotaldiscardedkg)) %>% View()
+
+od %>% 
+  drop_na(observertotaldiscardedkg) %>% 
+  ungroup() %>% 
+  dplyr::select(vessel, trip, haul, observertotaldiscardedkg, totallandedcatchkg, observercalctotalcatchkg) %>% 
+  # summarise(
+  #   observertotaldiscardedkg = sum(observertotaldiscardedkg),
+  #   totallandedcatchkg       = sum(totallandedcatchkg),
+  #   observercalctotalcatchkg = sum(observercalctotalcatchkg)
+  # ) %>% 
+  mutate(
+    discardrate             = observertotaldiscardedkg/observercalctotalcatchkg
+  ) %>% 
+  tidyr::pivot_longer(names_to = "variable", values_to = "data", observertotaldiscardedkg:discardrate) %>% 
+  reshape2::dcast(vessel+trip+haul~variable, value.var = "data", mean, margins="trip") %>% 
+  mutate(discardrate = scales::percent(discardrate, accuracy=1)) %>% 
+  relocate(observercalctotalcatchkg, .after=totallandedcatchkg) %>% 
+  relocate(discardrate,              .after=observercalctotalcatchkg) %>% 
+  pandoc.table(.,
+           style = "simple",
+           split.tables=400, 
+           justify = c("right"),
+           missing=".",
+           round=c(0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0))
+
+
+```
+
+Discard rates from vessel records
+
+```{r, echo=FALSE, fig.asp=0.8, fig.align="center", message=FALSE, warning=FALSE}
+
+# od %>% filter(!is.na(observertotaldiscardedkg)) %>% View()
+
+
+od %>% 
+  drop_na(observertotaldiscardedkg) %>% 
+  ungroup() %>% 
+  dplyr::select(vessel, trip, haul, 
+                totallandedcatchkg, 
+                vesseltotalcatchkg) %>% 
+  mutate(
+    vesselcalculateddiscardskg = vesseltotalcatchkg - totallandedcatchkg,
+    discardrate = vesselcalculateddiscardskg/vesseltotalcatchkg
+  ) %>% 
+  tidyr::pivot_longer(names_to = "variable", values_to = "data", 
+                      totallandedcatchkg:discardrate) %>% 
+  reshape2::dcast(vessel+trip+haul~variable, value.var = "data", mean, margins="trip") %>% 
+  mutate(discardrate = scales::percent(discardrate, accuracy=1)) %>% 
+  relocate(vesseltotalcatchkg, .after=totallandedcatchkg) %>% 
+  relocate(discardrate,        .after=vesseltotalcatchkg) %>% 
+  pandoc.table(.,
+           style = "simple",
+           split.tables=400, 
+           justify = c("right"),
+           missing=".",
+           round=c(0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0))
+
+```
+
+
+Here comparing the discards as calculated from the total catch estimate of the skipper minus the landed catch of that haul ("vesseldiscardedkg") with observer-weighed discards. Colours indicate the three different trips. Again, haul 7 of 3rd trip (i.e. 192) has the highest deviation in total discards (overestimated based on the Marelec readings)
+
+```{r, echo=FALSE, fig.asp=0.8, fig.align="center", message=FALSE, warning=FALSE}
+
+# od %>% filter(!is.na(observertotaldiscardedkg)) %>% View()
+
+od %>% 
+  ggplot(aes(x=vesseldiscardedkg, y=observertotaldiscardedkg)) +
+  theme_publication() +
+  geom_point(aes(colour=trip, size=vesseltotalcatchkg), shape=21) +
+  geom_text(aes(colour=trip, label=triphaul), hjust=0, nudge_x = 5) +
+  geom_abline(slope=1) +
+  expand_limits(x=0, y=0) +
+  scale_size_continuous(range=c(0.5,5)) +
+  scale_x_continuous(expand = c(0, 100))
+
+
+```
+
+\newpage
+
+**Species composition of discards**
+
+```{r, echo=FALSE, fig.asp=1.0, fig.align="center", message=FALSE, warning=FALSE}
+
+tmp <-
+  disc2 %>% 
+  group_by(trip, species) %>% 
+  summarise(discardweightperspecies = sum(discardweightperspecies, na.rm=TRUE)) %>% 
+  group_by(species) %>% 
+  mutate(totaldiscardweightperspecies = sum(discardweightperspecies, na.rm=TRUE)) %>% 
+  mutate(species  = ifelse(totaldiscardweightperspecies<20, "ZZZ",species)) %>% 
+  group_by(trip, species) %>% 
+  summarise(discardweightperspecies = sum(discardweightperspecies, na.rm=TRUE)) %>% 
+  left_join(dplyr::select(asfis, species, englishname), 
+            by=c("species")) %>% 
+  mutate(
+    englishname = ifelse(species=="ZZZ", "Other species",englishname),
+    longname    = paste(species, englishname))
+
+tmpher <-
+  tmp %>% 
+  mutate(species = ifelse(species=="HER",species, "ZZZ")) %>% 
+  group_by(species) %>% 
+  summarise(discardweightperspecies = sum(discardweightperspecies, na.rm=TRUE)) %>% 
+  mutate(prop = discardweightperspecies/sum(discardweightperspecies))
+
+tt <-
+  tmp %>% 
+  group_by(species, englishname, longname) %>% 
+  summarise(discardweightperspecies = sum(discardweightperspecies, na.rm=TRUE)) %>% 
+  arrange((discardweightperspecies)) 
+
+tmp %>%   
+  ggplot(aes(x=factor(longname, levels=tt$longname), y=discardweightperspecies)) +
+  theme_publication() +
+  theme(legend.position="none") +
+  # theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  # theme(axis.text.x=element_blank()) +
+  geom_bar(aes(fill=trip), stat="identity") +
+  coord_flip() +
+  labs(x="") +
+  facet_wrap(~trip, nrow=1)
+
+  
+
+```
+
+
+An overview of the discards weight per species and per haul. Raising based on discard proportions in the observer samples applied to the estimated discards from the vessel records (total catch weight - landings weight).   
+
+```{r, echo=FALSE, fig.asp=1.0, fig.align="center", message=FALSE, warning=FALSE}
+
+disc2 %>% 
+  ggplot(aes(x=triphaul, y=discardweightperspecies)) +
+  theme_publication() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  theme(axis.text.x=element_blank()) +
+  geom_bar(aes(fill=trip), stat="identity") +
+  facet_wrap(~species)
+
+  
+
+```
+
+\newpage
+
+**Length compositions**
+
+An overview of the average length compositions by species sample
+
+```{r, echo=FALSE, fig.asp=1.0, fig.align="center", message=FALSE, warning=FALSE}
+
+lf %>% 
+  mutate(triphaul = paste(trip, haul)) %>% 
+  group_by(triphaul, species, length) %>% 
+  summarise(count = sum(count, na.rm=TRUE)) %>% 
+  group_by(species, length) %>% 
+  summarise(
+    count = sum(count, na.rm=TRUE),
+    nobs = n_distinct(triphaul)) %>% 
+  group_by(species) %>% 
+  mutate(prop = count/sum(count)) %>% 
+  # View()
+
+  ggplot(aes(x=length, y=prop)) +
+  theme_publication() +
+  geom_bar(stat="identity") +
+  expand_limits(x=0) +
+  facet_wrap(~species)
+
+  
+
+```
+
+
+```{r catchperhaul, echo=FALSE, fig.align="center", fig.asp=1.0, message=FALSE, warning=FALSE}
+
+fig_nums(
+  name    = "totalcatchperhaul", level   = 1, display = FALSE,
+  caption = "Totale aanvoer per trek (berekend vanuit Marelec).")
+
+xlim <- c(-1,2); ylim <- c(49,51)
+
+t1 <- 
+  disc2 %>% 
+  group_by(vessel, trip, haul) %>% 
+  summarise(discardsweight = sum( discardweightperspecies, na.rm=TRUE)) %>% 
+  left_join(dplyr::select(h,
+                          vessel, trip, haul, lat, lon), 
+            by=c("vessel","trip","haul")) %>% 
+  left_join(m %>% group_by(vessel, trip, haul) %>% summarise(landingweight=sum(gewicht,na.rm=TRUE)),
+            by=c("vessel","trip","haul")) 
+
+t2 <- 
+  disc2 %>% 
+  filter(species == "HER") %>% 
+  group_by(vessel, trip, haul, species) %>% 
+  summarise(discardsweight = sum( discardweightperspecies, na.rm=TRUE)) %>% 
+  left_join(dplyr::select(h,
+                          vessel, trip, haul, lat, lon), 
+            by=c("vessel","trip","haul")) 
+
+t1 %>%
+  ggplot(aes(x=lon, y=lat)) +
+
+  theme_publication() +
+
+  coord_quickmap(xlim=xlim , ylim=ylim) +
+
+  geom_text(data=rect_df, aes(x=lon, y=lat, label=rect),
+            hjust=0, vjust=0, nudge_x=0.05, nudge_y=0.025, colour="white") +
+
+  geom_polygon(data=world_mr_df, aes(x=long, y=lat, group=group), fill = "grey75") +
+
+  # geom_point(aes(size=landingweight), colour="black", alpha=0.4) +
+  geom_point(aes(size=discardsweight), colour="red", alpha=0.4) +
+  geom_point(data=t2,
+             aes(size=discardsweight), colour="green", alpha=0.8) +
+
+  scale_size(range = c(1,10)) +
+
+  scale_x_continuous(breaks = seq(floor(xmin), ceiling(xmax), 1)) +
+  scale_y_continuous(breaks = seq(floor(2*ymin)/2, ceiling(2*ymax)/2, 0.5)) +
+  guides(size = guide_legend(nrow = 1))
+  # + facet_wrap(~source)
+
+
+
+```
+
+
+```{r, echo=FALSE, fig.asp=0.8, fig.align="center", message=FALSE, warning=FALSE}
+
+disc %>% 
+  filter(paste(trip, haul, species) %in% paste(lf$trip, lf$haul, lf$species)) %>% 
+  pandoc.table(.,
+           style = "simple",
+           split.tables=400, 
+           justify = c("right"),
+           missing=".",
+           round=c(0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0))
+
+
+```
+
+```{r, echo=FALSE, fig.asp=0.8, fig.align="center", message=FALSE, warning=FALSE}
+
+lf %>% 
+  pandoc.table(.,
+           style = "simple",
+           split.tables=400, 
+           justify = c("right"),
+           missing=".",
+           round=c(0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0))
+
+
+```
+

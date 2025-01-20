@@ -165,7 +165,7 @@ get_haul_treklijst <- function(my_vessel, my_trip2, my_file) {
       year       = lubridate::year(date),
       quarter    = lubridate::quarter(date),
       month      = lubridate::month(date),
-      week       = lubridate::week(date),
+      week       = lubridate::isoweek(date),
       yday       = lubridate::yday(date)) %>%
     dplyr::select(-timezone) %>%
     
@@ -400,7 +400,7 @@ get_pefa <- function(my_file) {
       year       = lubridate::year(date),
       quarter    = lubridate::quarter(date),
       month      = lubridate::month(date),
-      week       = lubridate::week(date),
+      week       = lubridate::isoweek(date),
       yday       = lubridate::yday(date)) %>% 
     
     left_join(rect_df, by="rect") %>%
@@ -486,7 +486,7 @@ get_raw_from_pefa_trek <- function(my_file) {
       year       = lubridate::year(date),
       quarter    = lubridate::quarter(date),
       month      = lubridate::month(date),
-      week       = lubridate::week(date),
+      week       = lubridate::isoweek(date),
       yday       = lubridate::yday(date)) %>% 
     
     ungroup()
@@ -775,7 +775,7 @@ get_elog_from_pefa <- function(my_file) {
       year       = lubridate::year(date),
       quarter    = lubridate::quarter(date),
       month      = lubridate::month(date),
-      week       = lubridate::week(date),
+      week       = lubridate::isoweek(date),
       yday       = lubridate::yday(date)) %>% 
     
     mutate(source="pefa") %>% 

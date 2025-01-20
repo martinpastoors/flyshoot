@@ -167,7 +167,7 @@ get_haul_treklijst <- function(my_vessel, my_trip2, my_file) {
       year       = lubridate::year(date),
       quarter    = lubridate::quarter(date),
       month      = lubridate::month(date),
-      week       = lubridate::week(date),
+      week       = lubridate::isoweek(date),
       yday       = lubridate::yday(date)) %>%
     dplyr::select(-timezone) %>%
     
@@ -402,7 +402,7 @@ get_haul_kisten <- function(my_vessel, my_trip, my_file, my_kisten) {
       year       = lubridate::year(date),
       quarter    = lubridate::quarter(date),
       month      = lubridate::month(date),
-      week       = lubridate::week(date),
+      week       = lubridate::isoweek(date),
       yday       = lubridate::yday(date)) %>%
     dplyr::select(-timezone) %>%
     
@@ -570,7 +570,7 @@ get_haul_kisten_pefa <- function(my_vessel, my_trip, my_kisten, my_pefa) {
       year       = lubridate::year(date),
       quarter    = lubridate::quarter(date),
       month      = lubridate::month(date),
-      week       = lubridate::week(date),
+      week       = lubridate::isoweek(date),
       yday       = lubridate::yday(date)) %>% 
     
     left_join(rect_df, by="rect") %>%
@@ -737,10 +737,11 @@ get_kisten <- function(my_vessel, my_trip2, my_file, h) {
     
     mutate(vessel = my_vessel) %>% 
     mutate(trip   = my_trip2) %>% 
-    
-    mutate(datetime = lubridate::dmy_hms(paste(datum, tijd))) %>% 
+
+    mutate(datetime = as.POSIXct((as.numeric(datum) + as.numeric(tijd))*60*60*24, origin = "1899-12-30", tz="UTC")) %>% 
+    # mutate(datetime = lubridate::dmy_hms(paste(datum, tijd))) %>% 
     arrange(datetime) %>% 
-    mutate(lotnummer = row_number()) %>% 
+    mutate(lotnummer = as.integer(lotnummer)) %>% 
     mutate(gewicht = as.numeric(gewicht)) %>% 
     
     # assign haul; could be done with sqldf instead, but time registration is 
@@ -755,7 +756,8 @@ get_kisten <- function(my_vessel, my_trip2, my_file, h) {
   if(any(grepl("haul", names(m)))) {
     m <-
       m %>% 
-      mutate(haul = as.numeric(haul))
+      mutate(haul = as.numeric(haul)) %>% 
+      dplyr::select(-datum, -tijd, -diff, -trigger, -time_diff)
   
   # otherwise, calculate haul number for time differences
   } else {
@@ -763,12 +765,12 @@ get_kisten <- function(my_vessel, my_trip2, my_file, h) {
     # if haul not (manually added) to kisten, assign haul numbers
     m <- 
       m %>% 
-      mutate(haul = ifelse(time_diff > 20 | is.na(time_diff), 1, 0)) %>% 
+      mutate(haul = ifelse(time_diff > 15 | is.na(time_diff), 1, 0)) %>% 
       mutate(haul = cumsum(haul)) %>% 
       dplyr::select(-datum, -tijd)  
 
     # check for equal number of hauls in m and h    
-    try(if(max(h$haul, na.rm=TRUE) != max(m$haul, na.rm=TRUE)) stop(paste("Number of hauls in h",max(h$haul, na.rm=TRUE), "not equal to m",max(m$haul, na.rm=TRUE))))
+    try(if(max(h$haul, na.rm=TRUE) != max(m$haul, na.rm=TRUE)) stop(paste("Number of hauls in h",max(h$haul, na.rm=TRUE), "not equal to hauls from m",max(m$haul, na.rm=TRUE))))
     
     # look up haul information from h
     tmp <-
@@ -833,7 +835,7 @@ get_pefa <- function(my_vessel, my_trip, my_file) {
       year       = lubridate::year(date),
       quarter    = lubridate::quarter(date),
       month      = lubridate::month(date),
-      week       = lubridate::week(date),
+      week       = lubridate::isoweek(date),
       yday       = lubridate::yday(date)) %>% 
     
     left_join(rect_df, by="rect") %>%
@@ -896,7 +898,7 @@ get_pefa_trek <- function(my_vessel, my_trip, my_file) {
       year       = lubridate::year(date),
       quarter    = lubridate::quarter(date),
       month      = lubridate::month(date),
-      week       = lubridate::week(date),
+      week       = lubridate::isoweek(date),
       yday       = lubridate::yday(date)) %>% 
     
     mutate(vessel = my_vessel) %>% 
@@ -962,7 +964,7 @@ get_haul_from_pefa_trek <- function(my_vessel, my_trip, my_file) {
       year       = lubridate::year(date),
       quarter    = lubridate::quarter(date),
       month      = lubridate::month(date),
-      week       = lubridate::week(date),
+      week       = lubridate::isoweek(date),
       yday       = lubridate::yday(date)) %>% 
     
     group_by(vessel, trip, haul) %>% 
@@ -1098,7 +1100,7 @@ get_raw_from_pefa_trek <- function(my_file) {
       year       = lubridate::year(date),
       quarter    = lubridate::quarter(date),
       month      = lubridate::month(date),
-      week       = lubridate::week(date),
+      week       = lubridate::isoweek(date),
       yday       = lubridate::yday(date)) %>% 
     
     ungroup()

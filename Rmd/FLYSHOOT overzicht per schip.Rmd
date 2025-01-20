@@ -138,12 +138,12 @@ regulated  <-
 
 # skimr::skim(price)
 
-yrs       <- 2013:2023
+yrs       <- 2014:2024
 mnths     <- NA
-vessels   <- "SL9"
+# vessels   <- "SL9"
 # vessels   <- "SCH65"
 # vessels   <- "SCH135"
-# vessels   <- c("SCH99_Z99")
+vessels   <- c("SCH99_Z99")
 
 # divisions <- NA
 # divisions <- c("27.7.d", "27.7.e") # fix error in division 4.a
@@ -383,7 +383,7 @@ myTargetColors          <- c(myTopColors, myAddedColors)
 # year colours
 t1                      <- target_byweek %>% ungroup() %>% distinct(year) %>% arrange(year) 
 colourCount             <- nrow(t1)
-getPalette              <- colorRampPalette(brewer.pal(9, "Greys"))
+getPalette              <- colorRampPalette(brewer.pal(9, "Greys")[3:9])
 myYearColors            <- getPalette(colourCount)
 myYearColors[colourCount] <- "red"
 names(myYearColors)     <- c(t1$year)
@@ -396,8 +396,6 @@ names(myYearColors)     <- c(t1$year)
 
 
 # FLYSHOOT fishery analysis for `r vessels`: `r min(e$year, na.rm=TRUE)`-`r max(e$year, na.rm=TRUE)`
-
-**Note: 2023 has been processed up to Date: `r format(max(e$date), '%d/%m/%Y')`**
 
 Analysis based on electronic logbook data
 
@@ -425,14 +423,11 @@ Date: `r format(Sys.time(), '%d/%m/%Y')`
 
 **Introduction**
 
-The objective of this work is to analyse the electronic logbook data of the `r vessels` for trends in spatial and temporal dynamics for the different target species. The electronic logbook data contains total landings by day, by species and by ICES rectangle. For the current analysis, data for divisions `r paste(sort(unique(catch_byweek$division)), collapse=(", "))` have been used. 
+The objective of this work is to analyse the electronic logbook data of the `r vessels` for trends in spatial and temporal dynamics for the different target species. The electronic logbook data contains total landings by day, by species and by ICES rectangle. For the current analysis, data for divisions `r paste(sort(unique(catch_byweek$division)), collapse=(", "))` and years  `r paste(c(min(yrs), max(yrs)), collapse="-")` have been used. 
 
 Electronic logbook data is a requirement from fisheries authorities to document the composition of the landings. While this information is officially reported to the respective government, the information is also kept on the fishing vessels and stored in the electronic logbook systems. Electronic logbook data was initially stored in the OLRAC software, later into versions 2.0 and 3.3 of E-Catch and from 2018 onwards in the PEFA and M-Catch software. The old data, prior to 2018, has been retrieved from backups held on the vessels and were converted into usable formats using dedicated R-codes (https://github.com/martinpastoors/flyshoot/R/read_olrac.r and https://github.com/martinpastoors/flyshoot/R/read_ecatch.r ). The data from 2018 onwards could be exported from the current electronic logbook systems and have been added to the internal database.  
 
-Average price information per species was available from all landings of Jaczon flyshoot vessels during the years `r yrs[1]`-`r yrs[length(yrs)]`. We derived the top species for the flyshoot fishery (in the Channel and the North Sea) by calculating the value of the catch per species over the whole period from the multiplication of catch by year with the average price per year. We then selected the 15 species with the highest overall value.  
-
-Electronic logbook data for the vessel `r vessels` was available for the years  `r paste(c(min(yrs), max(yrs)), collapse="-")`.   
-
+Average price information per species was available from all landings of Jaczon flyshoot vessels during the years `r yrs[1]`-`r yrs[length(yrs)]`. We derived the top species for the flyshoot fishery (in the Channel and the North Sea) by calculating the value of the catch per species over the whole period from the multiplication of catch by year with the average price per year (from the participating flyshoot vessels). We then selected the 15 species with the highest overall value.  
 
 **Fishing effort (days) by division and year**
 
@@ -739,15 +734,18 @@ ee <-
   mutate(year = as.character(year)) %>% 
   mutate(species = factor(species, levels=top$species))
 
-nyrs <- length(yrs)
+nyrs <- length(unique(ee$year))
 
 # plot total catch and landings
 ee %>% 
+  # filter(year == 2022) %>% 
+  
   ggplot() +
   theme_publication() +
   # theme(legend.position = "none") +
   geom_line(aes(x=week, y=cumweight, colour=year, linewidth=year)) +
-  scale_linewidth_manual("year", values = c(seq(1,nyrs-1,1)/20, 1.0), guide = "none") +
+  scale_linewidth_manual("year", values = c(rep(0.5,nyrs-1), 1.0), guide = "none") +
+  # scale_linewidth_manual("year", values = c(seq(1,nyrs-1,1)/10, 1.0), guide = "none") +
   scale_colour_manual(values=myYearColors) +
   guides(colour = guide_legend(nrow = 1)) +
   facet_wrap(~species, scales="free_y")
@@ -948,7 +946,7 @@ _`r fig_nums("catch3b")`_
 
 **Percentage of weeks targeting certain species**
 
-For each year, the proportion of weeks targeting a certain species was calculated. The target species of a vessel-year-week combination was derived by determining the species with the highest revenue for each vessel-year-week combination. Then the number of vessel-year-week-target combinations were counted and expresses as percentages per year and species. Surmullet (MUR) and European Squid (SQR) have been the main target species during the period considered. The number of Tub gurnard targeted weeks has declined over time. Since 2018 the contribution of targeted trips on Common Cuttlefish (CTC) has strongly increased. 
+For each year, the proportion of weeks targeting a certain species was calculated. The target species of a vessel-year-week combination was derived by determining the species with the highest revenue for each vessel-year-week combination. Then the number of vessel-year-week-target combinations were counted and expressed as percentages per year and species.  
 
 
 ```{r catch5, echo=FALSE, message=FALSE, warning=FALSE, comment=NA, fig.asp=0.6}

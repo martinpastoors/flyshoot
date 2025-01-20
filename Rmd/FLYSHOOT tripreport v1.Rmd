@@ -27,7 +27,7 @@ rm(list=ls())
 # setvessel<-"SL9"   ;settrip<-c("2023081600041", "2023082100042") ; comparisons <- FALSE
 # setvessel<-c("Z99", "SCH99")   ;settrip<- c( "2024174","2024175","2024176") ; comparisons <- FALSE
 
-setvessel<-c("Z99", "SCH99")   ;settrip<- c( "2024174":"2024176") ; comparisons <- FALSE
+setvessel<-c("Z99", "SCH99")   ;settrip<- c( "2025198","2025199") ; comparisons <- FALSE
 
 # ------------------------------------------------------------
 
@@ -126,7 +126,7 @@ h <-
          trip    %in% settrip) %>%  
   
   # TEMP FIX
-  mutate(lon = ifelse(lon>2 & lat < 51, -1*lon, lon)) %>% 
+  # mutate(lon = ifelse(lon>2 & lat < 51, -1*lon, lon)) %>% 
 
   ungroup()
 
@@ -156,7 +156,7 @@ tt <-
          trip    %in% settrip) %>% 
   
   # TEMP FIX
-  mutate(lon = ifelse(lon>2 & lat <51, -1*lon, lon)) %>% 
+  # mutate(lon = ifelse(lon>2 & lat <51, -1*lon, lon)) %>% 
 
   left_join(dplyr::select(h,
                           vessel, trip, haul, catchweight, landingweight),
@@ -287,7 +287,7 @@ c1 <-
     nhauls            = n(),
     startdate         = min(date, na.rm=TRUE),
     enddate           = max(date, na.rm=TRUE),
-    weeks             = paste(unique(lubridate::week(h$date)), collapse=", "),
+    weeks             = paste(unique(lubridate::isoweek(h$date)), collapse=", "),
     months            = paste(unique(month), collapse=", "),
     divisions         = paste(unique(division), collapse="; "),
     rects             = paste(unique(rect), collapse="; "),
@@ -861,7 +861,10 @@ if (nrow(m) > 0 & sum(!is.na(h$catchweight))>0) {
     tidyr::pivot_wider(names_from = variable, values_from = data) %>% 
     drop_na(totaal) %>% 
     mutate(aanvoer = ifelse(is.na(aanvoer),0,aanvoer)) %>% 
-    mutate(perc_discards = round((totaal - aanvoer) / totaal, digits=2)) %>% 
+    mutate(
+      discards = totaal - aanvoer, 
+      perc_discards = round((discards) / totaal, digits=2)
+    ) %>% 
     # mutate(perc_discards = scales::percent(perc_discards, accuracy=1)) %>% 
     left_join(dplyr::select(haul,
                             vessel, trip, haul, year, week, date),
@@ -876,6 +879,7 @@ if (nrow(m) > 0 & sum(!is.na(h$catchweight))>0) {
     group_by(vessel, trip, year, week, date) %>% 
     summarise(
       aanvoer = sum(aanvoer, na.rm=TRUE),
+      discards = sum(discards, na.rm=TRUE),
       totaal  = sum(totaal, na.rm=TRUE)
     ) %>% 
     mutate(aanvoer = ifelse(is.na(aanvoer),0,aanvoer)) %>% 
@@ -889,12 +893,18 @@ if (nrow(m) > 0 & sum(!is.na(h$catchweight))>0) {
     ggplot(aes(x=date, y=perc_discards)) +
     theme_publication() +
     theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
-    geom_point() +
+    geom_point(aes(size=totaal)) +
     geom_smooth() +
     tidyquant::geom_ma(n=5) + 
+    scale_size(
+      range=c(0.5,5),
+      limits =  c(100,1000*ceiling(max(tt2$totaal)/1000)),
+      breaks =  seq(100,1000*ceiling(max(tt2$totaal)/1000),length.out=6)
+    ) +
     scale_x_date(date_breaks = "month") +
     scale_y_continuous(labels = scales::percent) +
-    labs(x="", y="%discards / day") + 
+    guides(size = guide_legend(nrow = 1)) +
+    labs(x="", y="%discards / day", size= "Totale vangst (kg)") + 
     labs(title="Percentage discards per dag SCH99 Aravis")
   
 
