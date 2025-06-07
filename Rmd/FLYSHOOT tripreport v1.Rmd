@@ -27,7 +27,7 @@ rm(list=ls())
 # setvessel<-"SL9"   ;settrip<-c("2023081600041", "2023082100042") ; comparisons <- FALSE
 # setvessel<-c("Z99", "SCH99")   ;settrip<- c( "2024174","2024175","2024176") ; comparisons <- FALSE
 
-setvessel<-c("Z99", "SCH99")   ;settrip<- c( "2025198","2025199") ; comparisons <- FALSE
+setvessel<-c("Z99", "SCH99")   ;settrip<- c("2025219","2025220") ; comparisons <- FALSE
 
 # ------------------------------------------------------------
 
@@ -838,7 +838,7 @@ if (nrow(m) > 0 & sum(!is.na(h$catchweight))>0) {
 
   fig_nums(
     name    = "percdiscards", level   = 1, display = FALSE,
-    caption = "Herekende percentage discards per dag")
+    caption = "Berekende percentage discards per dag")
 
   t1 <-
     haul %>%
@@ -884,11 +884,13 @@ if (nrow(m) > 0 & sum(!is.na(h$catchweight))>0) {
     ) %>% 
     mutate(aanvoer = ifelse(is.na(aanvoer),0,aanvoer)) %>% 
     mutate(perc_discards = round((totaal - aanvoer) / totaal, digits=2)) %>% 
-    mutate(week2 = year + week/52)
+    mutate(week2 = year + week/52) %>% 
+    mutate(yday = lubridate::yday(date))
     
   # tt2 %>% filter(perc_discards > 0.3) %>% View()
   # tt2 %>% ggplot(aes(x=totaal, y=perc_discards)) + geom_point()
   
+  # plot as one timeseries
   tt2 %>%
     ggplot(aes(x=date, y=perc_discards)) +
     theme_publication() +
@@ -907,6 +909,29 @@ if (nrow(m) > 0 & sum(!is.na(h$catchweight))>0) {
     labs(x="", y="%discards / day", size= "Totale vangst (kg)") + 
     labs(title="Percentage discards per dag SCH99 Aravis")
   
+
+  # plot by year
+  tt2 %>%
+    mutate(year = as.character(year)) %>% 
+    ggplot(aes(x=week, y=perc_discards, group=year)) +
+    theme_publication() +
+    # theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+    
+    geom_point(aes(size=totaal, colour=year)) +
+    # geom_smooth(aes(colour=year, fill=year), span=0.9) +
+    geom_smooth(aes(colour=year, fill=year), method = "lm", formula = y ~ poly(x, 3)) +
+    # stat_smooth(method = "lm", formula = y ~ x + I(x^2), size = 1)
+    # tidyquant::geom_ma(n=5) + 
+    scale_size(
+      range=c(0.5,5),
+      limits =  c(100,1000*ceiling(max(tt2$totaal)/1000)),
+      breaks =  seq(100,1000*ceiling(max(tt2$totaal)/1000),length.out=6)
+    ) +
+    # scale_x_date(date_breaks = "month") +
+    scale_y_continuous(labels = scales::percent) +
+    guides(size = guide_legend(nrow = 1)) +
+    labs(x="week", y="%discards / day", size= "Totale vangst (kg)") + 
+    labs(title="Percentage discards per dag SCH99 Aravis")
 
 
 
@@ -963,9 +988,9 @@ ee %>%
   theme_publication() +
   # theme(legend.position = "none") +
   geom_line(aes(x=week, y=cumweight, colour=year, linewidth=year, alpha=year)) +
-  scale_linewidth_manual("year", values = c("2020"=.5,       "2021"=.5,       "2022"=.5,       "2023"=0.5,      "2024"=1.5), guide = "none") +
-  scale_colour_manual   ("year", values = c("2020"="gray80", "2021"="gray60", "2022"="gray40", "2023"="blue", "2024"="red")) +
-  scale_alpha_manual("year", values = c(1, 1, 1, 1, 0.5), guide = "none") +
+  scale_linewidth_manual("year", values = c("2020"=.5,       "2021"=.5,       "2022"=.5,       "2023"=0.5,      "2024"=0.5,    "2025"=1.5), guide = "none") +
+  scale_colour_manual   ("year", values = c("2020"="gray80", "2021"="gray60", "2022"="gray40", "2023"="gray40", "2024"="blue", "2025"="red")) +
+  scale_alpha_manual("year", values = c(1, 1, 1, 1, 1, 0.5), guide = "none") +
   # geom_hline(aes(yintercept=meanweight, colour=species)) +
   # geom_text(aes(x=1, y=meanweight, label=as.integer(meanweight)), hjust=0, vjust=0, nudge_y = 200) +
   labs(title=paste(unique(ee$vessel), "cumulatieve aanvoer per soort, week en jaar"), y="aanvoer (kg, cumulatief)") +

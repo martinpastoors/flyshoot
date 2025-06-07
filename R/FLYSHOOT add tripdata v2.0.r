@@ -199,7 +199,7 @@ for (i in 1:nrow(my_trips)) {
     
   } else {
     
-    stop(paste("no PEFA haul information available for trip"), paste(my_vessel, my_trip))
+    cat(paste("Note: no PEFA haul information available for trip"), paste(my_vessel, my_trip))
   
   }
 
@@ -231,7 +231,7 @@ for (i in 1:nrow(my_trips)) {
     
   } else {
     
-    stop(paste("no PEFA haul information available for trip"), paste(my_vessel, my_trip))
+    stop(paste("no PEFA elog information available for trip"), paste(my_vessel, my_trip))
     
   }
   

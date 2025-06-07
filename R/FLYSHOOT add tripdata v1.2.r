@@ -305,7 +305,7 @@ for (i in 1:nrow(my_trips)) {
 
     if (move_data) {
       file.copy(my_file, file.path(tripdir,my_vessel), overwrite = TRUE)
-      file.remove(my_file)
+      file.remove(my_file, showWarnings=TRUE)
     }
   
   } # end of Kisten 

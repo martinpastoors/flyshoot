@@ -68,7 +68,8 @@ spatialdir <- "C:/DATA/RDATA"
 
 load(file.path(spatialdir, "world_lr_sf.RData"))
 load(file.path(spatialdir, "world_mr_sf.RData"))
-# load(file.path(onedrive, "eez.df.RData"))
+load(file.path(spatialdir, "eez.df.RData"))
+
 # load(file.path(onedrive, "fao.df.RData"))
 # load(file.path(onedrive, "depth200.df.RData"))
 # load(file.path(onedrive, "icesrectangles.df.RData"))
@@ -109,10 +110,10 @@ load(file.path(onedrive, "elog_trek.RData"))
 # ===============================================================================
 
 # setvessel<-"SCH135"
-setvessel<-"SCH65"
-# setvessel<-"SL9"
+# setvessel<-"SCH65"
+setvessel<-"SL9"
 
-startdate<-dmy("13/1/2025"); enddate <- dmy("16/1/2025") ;
+startdate<-dmy("28/5/2025"); enddate <- dmy("4/6/2025") ;
 
 # ===============================================================================
 # ===============================================================================
@@ -134,10 +135,17 @@ et <-
   filter(vessel  %in% setvessel,
          trip    %in% settrip) 
 
-xmin <- floor(min(et$lon, na.rm=TRUE))
-xmax <- ceiling(max(et$lon, na.rm=TRUE))
-ymin <- floor(2*min(et$lat, na.rm=TRUE))/2
-ymax <- ceiling(2*max(et$lat, na.rm=TRUE))/2
+if(nrow(et) > 0) {
+  xmin <- floor(min(et$lon, na.rm=TRUE))
+  xmax <- ceiling(max(et$lon, na.rm=TRUE))
+  ymin <- floor(2*min(et$lat, na.rm=TRUE))/2
+  ymax <- ceiling(2*max(et$lat, na.rm=TRUE))/2
+} else {
+  xmin <- floor(min(e$lon, na.rm=TRUE))
+  xmax <- ceiling(max(e$lon, na.rm=TRUE))+1
+  ymin <- floor(2*min(e$lat, na.rm=TRUE))/2
+  ymax <- ceiling(2*max(e$lat, na.rm=TRUE))/2 + 0.5
+}
 
 # xmin <- floor(2 * (min(h$lon, na.rm=TRUE)-0.5))/2;
 # xmax <- ceiling(2 * (max(h$lon, na.rm=TRUE)+0.5))/2;
@@ -153,14 +161,22 @@ xdistance <- geo::arcdist(lat=ymin, lon=xmin, lat1 = ymin, lon1 = xmax, scale = 
 ydistance <- geo::arcdist(lat=ymin, lon=xmin, lat1 = ymax, lon1 = xmin, scale = "km")
 aspect    <- ydistance/xdistance
 
-
+if(aspect > 3) {
+  xmin = xmin -2; xmax = xmax +2
+} else if (aspect >2) {
+  xmin = xmin -1; xmax = xmax +1
+} else if (aspect < 0.5) {
+  ymin = ymin -0.5; ymax = ymax + 0.5
+} else if (aspect >0.3) {
+  ymin = ymin -0.5; ymax = ymax + 0.5
+}
 
 ```
 
 
-# Vessel tripreport `r unique(et$vessel)`, trip `r as.character(unique(et$trip))`
+# Vessel tripreport `r unique(e$vessel)`, trip `r as.character(unique(e$trip))`
 
-### Trip start: `r format(min(et$date), '%d/%m/%Y')`, end: `r format(max(et$date), '%d/%m/%Y')`
+### Trip start: `r format(min(e$date), '%d/%m/%Y')`, end: `r format(max(e$date), '%d/%m/%Y')`
 
 Report generated: `r format(Sys.time(), '%d/%m/%Y')`
 
@@ -178,22 +194,51 @@ tab_nums(
   caption = "Samenvatting van de reis")
 
 # summarize the haul information
-c1 <- 
-  et %>%
-  group_by(vessel,trip) %>%
-  summarise(
-    nhauls            = n_distinct(haul),
-    startdate         = min(date, na.rm=TRUE),
-    enddate           = max(date, na.rm=TRUE),
-    weeks             = paste(unique(week), collapse=", "),
-    months            = paste(unique(month), collapse=", "),
-    divisions         = paste(unique(na.omit(faozone)), collapse="; "),
-    rects             = paste(unique(na.omit(rect)), collapse="; "),
-  ) %>% 
-  mutate (
-    ndays             = as.numeric(difftime(enddate, startdate, units="days")) + 1,
-    haulsperday       = nhauls/ndays
-  ) 
+if (sum(!is.na(et$weight)) >0 ) {
+  
+  c1 <- 
+    et %>%
+    group_by(vessel,trip) %>%
+    summarise(
+      nhauls            = n_distinct(haul),
+      startdate         = min(date, na.rm=TRUE),
+      enddate           = max(date, na.rm=TRUE),
+      weeks             = paste(unique(week), collapse=", "),
+      months            = paste(unique(month), collapse=", "),
+      divisions         = paste(unique(na.omit(faozone)), collapse="; "),
+      rects             = paste(unique(na.omit(rect)), collapse="; "),
+    ) %>% 
+    mutate (
+      ndays             = as.numeric(difftime(enddate, startdate, units="days")) + 1,
+      haulsperday       = nhauls/ndays
+    ) 
+  
+} else if (sum(!is.na(e$weight)) >0 ) {
+  
+  cat("Note: No scale/haul information available")
+  
+  c1 <- 
+    e %>%
+    group_by(vessel,trip) %>%
+    summarise(
+      startdate         = min(date, na.rm=TRUE),
+      enddate           = max(date, na.rm=TRUE),
+      weeks             = paste(unique(week), collapse=", "),
+      months            = paste(unique(month), collapse=", "),
+      divisions         = paste(unique(na.omit(faozone)), collapse="; "),
+      rects             = paste(unique(na.omit(rect)), collapse="; "),
+    ) %>% 
+    mutate (
+      ndays             = as.numeric(difftime(enddate, startdate, units="days")) + 1,
+      nhauls            = as.character(NA)
+    ) 
+  
+} else {
+
+    cat("No elog information available")
+  
+}
+
 
 # summarize the catch data from elog and elog by trek data
 c2 <- 
@@ -271,57 +316,66 @@ c4 <-
   ) %>% 
   mutate(species = factor(species, levels=c(s$species,"OTHER","TOTAL")))
 
+if(nrow(c1) > 0) {
+  c1 %>% 
+    t() %>% 
+    no.emphasis.table() %>% 
+    pandoc.table(.,
+               style = "simple",
+               split.tables=400, 
+               justify = "left",
+               missing=".",
+               round=c(0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0))
+}
 
-c1 %>% 
-  t() %>% 
-  no.emphasis.table() %>% 
-  pandoc.table(.,
-             style = "simple",
-             split.tables=400, 
-             justify = "left",
-             missing=".",
-             round=c(0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0))
+if(nrow(c2) > 0) {
+  c2 %>% 
+    ungroup() %>% 
+    dplyr::select(-vessel) %>% 
+    reshape2::dcast(trip ~ source, value.var = "aanvoer", sum, margins="trip") %>% 
+    # mutate(vangst = "aanvoer") %>% 
+    # pivot_wider(names_from = source, values_from = aanvoer) %>% 
+    pandoc.table(.,
+               style = "simple",
+               split.tables=400, 
+               justify = c("left",rep("right",length(unique(c2$source)))),
+               missing=".",
+               round=c(0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0))
+}
 
-c2 %>% 
-  ungroup() %>% 
-  dplyr::select(-vessel) %>% 
-  reshape2::dcast(trip ~ source, value.var = "aanvoer", sum, margins="trip") %>% 
-  # mutate(vangst = "aanvoer") %>% 
-  # pivot_wider(names_from = source, values_from = aanvoer) %>% 
-  pandoc.table(.,
-             style = "simple",
-             split.tables=400, 
-             justify = c("left",rep("right",length(unique(c2$source)))),
-             missing=".",
-             round=c(0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0))
-
-cat("Aanvoer (elog)")
-
-c3 %>% 
-  ungroup() %>% 
-  # mutate(vangst = "aanvoer (elog)") %>% 
-#   pivot_wider(names_from = species, values_from = gewicht) %>% 
-  reshape2::dcast(trip ~ species, value.var = "gewicht", sum, margins="trip") %>% 
-  pandoc.table(.,
-             style = "simple",
-             split.tables=400, 
-             justify = "left",
-             missing=".",
-             round=c(0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0))
+if(nrow(c3) > 0) {
+  cat("Aanvoer (elog)")
   
-cat("Aanvoer (elog per trek")
+  c3 %>% 
+    ungroup() %>% 
+    # mutate(vangst = "aanvoer (elog)") %>% 
+  #   pivot_wider(names_from = species, values_from = gewicht) %>% 
+    reshape2::dcast(trip ~ species, value.var = "gewicht", sum, margins="trip") %>% 
+    pandoc.table(.,
+               style = "simple",
+               split.tables=400, 
+               justify = "left",
+               missing=".",
+               round=c(0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0))
+  
+}
 
-c4 %>% 
-  ungroup() %>% 
-  # mutate(vangst = "aanvoer (elog per trek)") %>% 
-  # pivot_wider(names_from = species, values_from = gewicht) %>% 
-  reshape2::dcast(trip ~ species, value.var = "gewicht", sum, margins="trip") %>% 
-  pandoc.table(.,
-             style = "simple",
-             split.tables=400, 
-             justify = "left",
-             missing=".",
-             round=c(0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0))
+if (nrow(c4) > 0 ) {
+  cat("Aanvoer (elog per trek")
+  
+  c4 %>% 
+    ungroup() %>% 
+    # mutate(vangst = "aanvoer (elog per trek)") %>% 
+    # pivot_wider(names_from = species, values_from = gewicht) %>% 
+    reshape2::dcast(trip ~ species, value.var = "gewicht", sum, margins="trip") %>% 
+    pandoc.table(.,
+               style = "simple",
+               split.tables=400, 
+               justify = "left",
+               missing=".",
+               round=c(0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0))
+  
+}  
 
 ```
 
@@ -428,7 +482,7 @@ _`r tab_nums("vangstpersoortendag")`_
 \newpage
 
 <!-- ########################################################################################## -->
-<!-- Figure: Total Landings per Haul (map)                                                         -->
+<!-- Figure: Total Landings per Haul or rectangle(map)                                                         -->
 <!-- ########################################################################################## -->
 
 ```{r catchperhaul, echo=FALSE, fig.asp=1.0, fig.align="center", message=FALSE, warning=FALSE}
@@ -463,6 +517,7 @@ if (sum(!is.na(et$weight)) >0 ) {
               hjust=0, vjust=0, nudge_x=0.05, nudge_y=0.025, colour="white") +
 
     geom_polygon(data=world_mr_df, aes(x=long, y=lat, group=group), fill = "grey75") +
+    geom_polygon(data=eez.df, aes(x=long, y=lat, group=group), fill = NA, colour="gray30") +
 
     geom_path(aes(x=lon, y=lat, colour=trip)) +
     # geom_point(data=slice(tt, c(1,nrow(tt))),
@@ -479,6 +534,50 @@ if (sum(!is.na(et$weight)) >0 ) {
     guides(size = guide_legend(nrow = 1))
     # + facet_wrap(~source)
 
+} else if (sum(!is.na(e$weight)) >0 ) {
+  
+  e %>%
+    group_by(vessel, trip, haul, lat, lon, date) %>%
+    summarise(gewicht = sum(weight, na.rm=TRUE)) %>%
+    mutate(
+      lon = lon + 0.5,
+      lat = lat + 0.25
+    ) %>% 
+
+    ggplot() +
+
+    theme_publication() +
+    theme(
+      # panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank(),
+      text             = element_text(size=12),
+      plot.margin      = unit(c(0,0,0,0), "cm"),
+      panel.background = element_rect(fill = "lightskyblue1")
+    ) +
+
+    coord_quickmap(xlim=xlim , ylim=ylim) +
+    # coord_quickmap(xlim=c(0,5) , ylim=c(52,55)) +
+
+    geom_text(data=rect_df, aes(x=lon, y=lat, label=rect),
+              hjust=0, vjust=0, nudge_x=0.05, nudge_y=0.025, colour="white") +
+
+    geom_polygon(data=world_mr_df, aes(x=long, y=lat, group=group), fill = "grey75") +
+    geom_polygon(data=eez.df, aes(x=long, y=lat, group=group), fill = NA, colour="gray30") +
+
+    geom_jitter(aes(x=lon, y=lat, size = gewicht, colour = as.character(trip)),
+                width=0.1, height=0.05, alpha = 0.5) +
+    scale_size(range = c(1,10)) +
+
+    scale_x_continuous(breaks = seq(floor(xmin), ceiling(xmax), 1)) +
+    scale_y_continuous(breaks = seq(floor(2*ymin)/2, ceiling(2*ymax)/2, 0.5)) +
+    labs(x = NULL, y = NULL, size = "kg aanvoer/dag/ICES vak", colour="") +
+    guides(size = guide_legend(nrow = 1))
+    # + facet_wrap(~source)
+  
+} else {
+  
+  cat("No lat - lon information available")
+  
 }
 
   
@@ -500,52 +599,105 @@ xlim <- c(xmin,xmax); ylim <- c(ymin,ymax)
 
 nspecies=10
 
-# create list of catch by species by haul. From hm, or sph or else species = "oth"
-myspecies <-
-  et %>% 
-  group_by(species) %>% 
-  summarise(gewicht = sum(weight, na.rm=TRUE)) %>% 
-  arrange (desc(gewicht)) %>% 
-  slice_head(n=nspecies)
 
+if (sum(!is.na(et$weight)) >0 ) {
+  
+  # create list of catch by species by haul. From hm, or sph or else species = "oth"
+  myspecies <-
+    et %>% 
+    group_by(species) %>% 
+    summarise(gewicht = sum(weight, na.rm=TRUE)) %>% 
+    arrange (desc(gewicht)) %>% 
+    slice_head(n=nspecies)
 
-et %>%
-  filter(species %in% myspecies$species) %>% 
-  group_by(vessel, trip, haul, lat, lon, species) %>%
-  summarise(gewicht = sum(weight, na.rm=TRUE)) %>%
+  et %>%
+    filter(species %in% myspecies$species) %>% 
+    group_by(vessel, trip, haul, lat, lon, species) %>%
+    summarise(gewicht = sum(weight, na.rm=TRUE)) %>%
+  
+    ggplot() +
+  
+    theme_publication() +
+    theme(
+      # panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank(),
+      text             = element_text(size=12),
+      plot.margin      = unit(c(0,0,0,0), "cm"),
+      panel.background = element_rect(fill = "lightskyblue1")
+    ) +
+  
+    coord_quickmap(xlim=xlim , ylim=ylim) +
+  
+    # geom_text(data=rect_df, aes(x=lon, y=lat, label=rect),
+    #           hjust=0, vjust=0, nudge_x=0.05, nudge_y=0.025, colour="white") +
+  
+    geom_polygon(data=world_mr_df, aes(x=long, y=lat, group=group), fill = "grey75") +
+  
+    geom_path(aes(x=lon, y=lat, colour=trip)) +
+    # geom_point(data=slice(tt, c(1,nrow(tt))),
+    #           aes(x=lon, y=lat),
+    #           colour="red", size=5) +
+  
+    geom_point(aes(x=lon, y=lat, size = gewicht, colour = as.character(trip)),
+                alpha = 0.5) +
+    scale_size(range = c(1,10)) +
+  
+    scale_x_continuous(breaks = seq(floor(xmin), ceiling(xmax), 1)) +
+    scale_y_continuous(breaks = seq(floor(2*ymin)/2, ceiling(2*ymax)/2, 0.5)) +
+    labs(x = NULL, y = NULL, size = "kg aanvoer/trek", colour="") +
+    guides(size = guide_legend(nrow = 1)) + 
+    facet_wrap(~species, ncol=3)
+  
+} else if (sum(!is.na(e$weight)) >0 ) {
+  
+  # create list of catch by species by haul. From hm, or sph or else species = "oth"
+  myspecies <-
+    e %>% 
+    group_by(species) %>% 
+    summarise(gewicht = sum(weight, na.rm=TRUE)) %>% 
+    arrange (desc(gewicht)) %>% 
+    slice_head(n=nspecies)
+  
+  e %>%
+    filter(species %in% myspecies$species) %>% 
+    group_by(vessel, trip, haul, lat, lon, species) %>%
+    summarise(gewicht = sum(weight, na.rm=TRUE)) %>%
+    mutate(
+      lon = lon + 0.5,
+      lat = lat + 0.25
+    ) %>% 
+  
+    ggplot() +
+  
+    theme_publication() +
+    theme(
+      # panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank(),
+      text             = element_text(size=12),
+      plot.margin      = unit(c(0,0,0,0), "cm"),
+      panel.background = element_rect(fill = "lightskyblue1")
+    ) +
+  
+    coord_quickmap(xlim=xlim , ylim=ylim) +
+  
+    geom_polygon(data=world_mr_df, aes(x=long, y=lat, group=group), fill = "grey75") +
+  
+    geom_jitter(aes(x=lon, y=lat, size = gewicht, colour = as.character(trip)),
+                width=0.1, height=0.05, alpha = 0.5) +
+    scale_size(range = c(1,10)) +
+  
+    scale_x_continuous(breaks = seq(floor(xmin), ceiling(xmax), 1)) +
+    scale_y_continuous(breaks = seq(floor(2*ymin)/2, ceiling(2*ymax)/2, 0.5)) +
+    labs(x = NULL, y = NULL, size = "kg aanvoer/trek", colour="") +
+    guides(size = guide_legend(nrow = 1)) + 
+    facet_wrap(~species, ncol=3)
+  
+} else {
 
-  ggplot() +
+    cat("No lat - lon information available")
+  
+}
 
-  theme_publication() +
-  theme(
-    # panel.grid.major = element_blank(),
-    panel.grid.minor = element_blank(),
-    text             = element_text(size=12),
-    plot.margin      = unit(c(0,0,0,0), "cm"),
-    panel.background = element_rect(fill = "lightskyblue1")
-  ) +
-
-  coord_quickmap(xlim=xlim , ylim=ylim) +
-
-  # geom_text(data=rect_df, aes(x=lon, y=lat, label=rect),
-  #           hjust=0, vjust=0, nudge_x=0.05, nudge_y=0.025, colour="white") +
-
-  geom_polygon(data=world_mr_df, aes(x=long, y=lat, group=group), fill = "grey75") +
-
-  geom_path(aes(x=lon, y=lat, colour=trip)) +
-  # geom_point(data=slice(tt, c(1,nrow(tt))),
-  #           aes(x=lon, y=lat),
-  #           colour="red", size=5) +
-
-  geom_point(aes(x=lon, y=lat, size = gewicht, colour = as.character(trip)),
-              alpha = 0.5) +
-  scale_size(range = c(1,10)) +
-
-  scale_x_continuous(breaks = seq(floor(xmin), ceiling(xmax), 1)) +
-  scale_y_continuous(breaks = seq(floor(2*ymin)/2, ceiling(2*ymax)/2, 0.5)) +
-  labs(x = NULL, y = NULL, size = "kg aanvoer/trek", colour="") +
-  guides(size = guide_legend(nrow = 1)) + 
-  facet_wrap(~species, ncol=3)
 
 
   
@@ -563,32 +715,78 @@ fig_nums(
   name    = "totalcatchperspecies", level   = 1, display = FALSE,
   caption = paste0("Totale vangst per trek en soort (",nspecies," soorten met hoogste vangst)"))
 
-
-t <-
-  et %>% 
-  filter(species %in% myspecies$species) %>% 
-  group_by(vessel, trip, haul, species) %>% 
-  summarise(gewicht=sum(weight))
-
-s <-
-  t %>% 
-  group_by(vessel, trip, species) %>% 
-  summarise(totaal=sum(gewicht))  %>% 
-  ungroup() %>% 
-  arrange(desc(totaal)) %>% 
-  dplyr::select(species) %>% 
-  unlist()
-
-t %>% 
-  ggplot(aes(x=haul, y=gewicht)) +
-  theme_publication() +
-  geom_bar(aes(fill=species), stat="identity") +
-  coord_flip() +
-  scale_x_reverse(breaks=seq(1, max(t$haul), 1)) +
-  scale_y_continuous(breaks=scales::pretty_breaks(n=3)) +
-  labs(y="aanvoer (kg)", title="aanvoer per soort en trek") +
-  facet_wrap(.~trip, scales="free_x")
+if (sum(!is.na(et$weight)) >0 ) {
   
+  t <-
+    et %>%
+    filter(species %in% myspecies$species) %>% 
+    group_by(vessel, trip, haul, species) %>% 
+    summarise(gewicht=sum(weight))
+  
+  s <-
+    t %>% 
+    group_by(vessel, trip, species) %>% 
+    summarise(totaal=sum(gewicht))  %>% 
+    ungroup() %>% 
+    arrange(desc(totaal)) %>% 
+    dplyr::select(species) %>% 
+    unlist()
+  
+  t %>% 
+    ggplot(aes(x=haul, y=gewicht)) +
+    theme_publication() +
+    geom_bar(aes(fill=species), stat="identity") +
+    coord_flip() +
+    scale_x_reverse(breaks=seq(1, max(t$haul), 1)) +
+    scale_y_continuous(breaks=scales::pretty_breaks(n=3)) +
+    labs(y="aanvoer (kg)", title="aanvoer per soort en trek") +
+    facet_wrap(.~trip, scales="free_x")
+  
+
+} else if (sum(!is.na(e$weight)) >0 ) {
+  
+  # function to reverse date axis: https://github.com/tidyverse/ggplot2/issues/4014 
+  reverse2_trans <- function() {
+    scales::trans_new(
+      "reverse2",
+      function(x) -1 * as.numeric(x), # Force values to be numeric for Date objects
+      function(x) -1 * as.numeric(x)
+    )
+  }
+  
+  t <-
+    e %>%
+    filter(species %in% myspecies$species) %>% 
+    group_by(vessel, date, species) %>% 
+    summarise(gewicht=sum(weight))
+  
+  s <-
+    t %>% 
+    group_by(vessel, species) %>% 
+    summarise(totaal=sum(gewicht))  %>% 
+    ungroup() %>% 
+    arrange(desc(totaal)) %>% 
+    dplyr::select(species) %>% 
+    unlist()
+  
+  t %>% 
+    ggplot(aes(x=date, y=gewicht)) +
+    theme_publication() +
+    geom_bar(aes(fill=species), stat="identity") +
+    coord_flip() +
+    # scale_x_reverse() +
+    scale_y_continuous(breaks=scales::pretty_breaks(n=3)) +
+    scale_x_continuous(trans=c("date", "reverse2"), breaks=scales::pretty_breaks(n=length(unique(t$date)))) +
+    # scale_x_date(date_breaks = "1 day", trans="reverse") +
+    labs(y="aanvoer (kg)", title="aanvoer per soort en dag") 
+
+} else {
+
+    cat("No catch per species information available")
+  
+}
+
+
 
 ```
 
