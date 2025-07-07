@@ -190,6 +190,94 @@ By: Martin Pastoors
 
 Report generated: `r format(Sys.time(), '%d/%m/%Y')`
 
+
+```{r triptable, echo=FALSE, message=FALSE, warning=FALSE, comment=NA, fig.asp=0.6}
+
+tab_nums(name    = "trips", level = 1, display = FALSE, caption = "Self-sampling overview")
+
+t <-
+  bind_cols(
+    h %>% 
+      filter(year %in% yrs) %>% 
+      group_by(year, month) %>% 
+      summarise(
+        nvessels      = n_distinct(vessel),
+        ntrips        = n_distinct(paste(vessel, trip)),
+        ndays         = n_distinct(paste(vessel, trip, date)),
+        nhauls        = n_distinct(paste(vessel, trip, haul)),
+        nrects        = n_distinct(rect),
+        # nlandedweight  = sum(!is.na(landingweight)),
+        ntotalcatch   = sum(!is.na(catchweight))
+      ),
+    k %>% 
+      filter(year %in% yrs) %>% 
+      group_by(vessel, trip, haul, year, month) %>% 
+      summarise(gewicht = sum(gewicht, na.rm=TRUE)) %>% 
+      group_by(year, month) %>% 
+      summarise(
+        nlandedcatch  = sum(!is.na(gewicht)),
+        landedcatch   = sum(gewicht)
+      ) %>% 
+      ungroup() %>% 
+      dplyr::select(-year, -month)
+    
+  )  %>% 
+  
+  # discard ratio (for Aravis only)
+  left_join(
+    k %>% 
+      filter(vessel %in% c("SCH99","Z99"), as.Date(datetime) >= lubridate::dmy("1/11/2023")) %>% 
+      group_by(vessel, trip, haul, year, month) %>% 
+      summarise(gewicht = sum(gewicht, na.rm=TRUE)) %>% 
+      left_join(h, by=c("vessel","trip","haul", "year", "month")) %>% 
+      filter(!is.na(catchweight)) %>% 
+    
+      group_by(year, month) %>% 
+      summarise(
+        landedcatch   = sum(gewicht, na.rm=TRUE),
+        totalcatch    = sum(catchweight, na.rm=TRUE)
+      ) %>% 
+      mutate(discardperc = scales::percent(1-(landedcatch/totalcatch))) %>% 
+      ungroup() %>% 
+      dplyr::select(-landedcatch, -totalcatch),
+    by = c("year","month")
+
+  ) %>% 
+  
+  mutate(year=as.character(year), month=as.character(month)) 
+
+t2 <-
+  t %>% 
+  ungroup() %>% 
+  summarise(
+    ndays = sum(ndays),
+    nhauls = sum(nhauls),
+    ntotalcatch = sum(ntotalcatch),
+    nlandedcatch = sum(nlandedcatch),
+    landedcatch = sum(landedcatch)
+  ) %>% 
+  mutate(year = as.character(myyear)) %>% 
+  mutate(month = "all")
+
+bind_rows(t, t2) %>% 
+  pander::pandoc.table(., 
+               style        = "simple",
+               split.tables = 200, 
+               split.cells  = c(rep(7,10)),
+               justify      = "right",
+               missing      =" ",
+               big.mark     = ',', 
+               round        = c(0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0) )
+
+  
+
+
+```
+
+_`r tab_nums("trips")`_
+
+\newpage
+
 ```{r eval=FALSE, fig.asp=0.6, message=FALSE, warning=FALSE, comment=NA, include=FALSE}
 
 # NOT USED
@@ -912,8 +1000,12 @@ for (myspecies in top$species) {
     k %>%
     filter(species %in% myspecies) %>% 
     filter(year %in% 2023:2025) %>% 
+    filter(!(lat==0 & lon == 0)) %>% 
     mutate(date = lubridate::as_date(datetime)) %>% 
-    group_by(species, vessel, year, month, date, rect, haul, lat, lon) %>%
+    mutate(quarter = lubridate::quarter(date)) %>% 
+    # mutate(quarter = paste0("q",quarter)) %>% 
+    # group_by(species, vessel, year, month, date, rect, haul, lat, lon) %>%
+    group_by(species, vessel, year, quarter, rect, date, haul, lat, lon) %>%
     summarise(gewicht = sum(gewicht, na.rm=TRUE)) %>% 
     filter(gewicht >= 20)
   
@@ -955,7 +1047,7 @@ for (myspecies in top$species) {
     labs(x = NULL, y = NULL, size = "kg aanvoer/trek", colour="",
          title=paste(myspecies,"Landings by haul")) +
     guides(size = guide_legend(nrow = 1)) + 
-    facet_wrap(~month, ncol=3)
+    facet_grid(quarter~year)
 
   png(filename=file.path(onedrive, "report", "FLYSHOOT trips overview", 
                          paste0(myspecies," landings by haul.png")),

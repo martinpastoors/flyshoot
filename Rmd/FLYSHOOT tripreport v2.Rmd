@@ -113,7 +113,7 @@ load(file.path(onedrive, "elog_trek.RData"))
 # setvessel<-"SCH65"
 setvessel<-"SL9"
 
-startdate<-dmy("28/5/2025"); enddate <- dmy("4/6/2025") ;
+startdate<-dmy("16/6/2025"); enddate <- dmy("24/6/2025") ;
 
 # ===============================================================================
 # ===============================================================================
@@ -170,6 +170,14 @@ if(aspect > 3) {
 } else if (aspect >0.3) {
   ymin = ymin -0.5; ymax = ymax + 0.5
 }
+
+# elog %>% 
+#   filter(vessel == "SL9", week == 22, year==2025, date==lubridate::dmy("1/6/2025")) %>% 
+#   # group_by(date, species) %>% 
+#   # mutate(ntrips = n_distinct(trip)) %>% 
+#   # group_by(trip, date) %>%
+#   # summarise(catch = sum(weight, na.rm=TRUE)) %>%
+#   View()
 
 ```
 
