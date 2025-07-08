@@ -553,7 +553,14 @@ get_haul_from_raw <- function(raw) {
     
     group_by(vessel, trip) %>% 
     mutate(across (c("rect","division","economiczone"),    ~zoo::na.locf(., na.rm=FALSE))) %>% 
-
+    
+    # deal with zero lat and lon
+    mutate(rect = ifelse(lat==0 & lon ==0, as.character(NA), rect)) %>% 
+    mutate(division = ifelse(lat==0 & lon ==0, as.character(NA), division)) %>% 
+    mutate(economiczone = ifelse(lat==0 & lon ==0, as.character(NA), economiczone)) %>% 
+    mutate(lon = ifelse(lat==0 & lon ==0, as.integer(NA), lon)) %>% 
+    mutate(lat = ifelse(lat==0 & is.na(lon), as.integer(NA), lat)) %>% 
+    
     group_by(vessel, trip, skipper, departuredate, departureport, arrivaldate, arrivalport, haul,
              shoottime, shoottime2, haultime,
              date, year, quarter, month, week, yday, lat, lon, rect, rect_calc, division, division_calc, economiczone, economiczone_calc, gear, meshsize) %>%

@@ -110,10 +110,10 @@ load(file.path(onedrive, "elog_trek.RData"))
 # ===============================================================================
 
 # setvessel<-"SCH135"
-# setvessel<-"SCH65"
-setvessel<-"SL9"
+setvessel<-"SCH65"
+# setvessel<-"SL9"
 
-startdate<-dmy("16/6/2025"); enddate <- dmy("24/6/2025") ;
+startdate<-dmy("30/6/2025"); enddate <- dmy("3/7/2025") ;
 
 # ===============================================================================
 # ===============================================================================
@@ -133,7 +133,12 @@ e <-
 et <-
   elog_trek %>% 
   filter(vessel  %in% setvessel,
-         trip    %in% settrip) 
+         trip    %in% settrip) %>% 
+  
+  # fix both lon and lat are zero
+  mutate(lon = ifelse(lon==0 & lat==0, NA, lon)) %>% 
+  mutate(lat = ifelse(is.na(lon) & lat==0, NA, lat)) 
+
 
 if(nrow(et) > 0) {
   xmin <- floor(min(et$lon, na.rm=TRUE))
@@ -505,6 +510,7 @@ xlim <- c(xmin,xmax); ylim <- c(ymin,ymax)
 if (sum(!is.na(et$weight)) >0 ) {
 
   et %>%
+    
     group_by(vessel, trip, haul, lat, lon, date) %>%
     summarise(gewicht = sum(weight, na.rm=TRUE)) %>%
 
