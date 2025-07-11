@@ -27,7 +27,7 @@ move_data  = TRUE
 
 onedrive   = "C:/Users/MartinPastoors/Martin Pastoors/FLYSHOOT - General/rdata"
 tripdir    = "C:/Users/MartinPastoors/Martin Pastoors/FLYSHOOT - General/tripdata"
-spatialdir = "C:/DATA/RDATA"
+spatialdir = "C:/Users/MartinPastoors/OneDrive - Martin Pastoors/DATA/RDATA"
   
 
 # Open relevant packages 

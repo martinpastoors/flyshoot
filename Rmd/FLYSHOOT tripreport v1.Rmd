@@ -46,6 +46,7 @@ require(RColorBrewer)                # colour schemes
 library(viridis)
 library(pander)
 
+# devtools::install_github("adletaw/captioner")
 library(captioner)                   # for captions
 tab_nums <- captioner::captioner(prefix = "Table " , levels=1, type=c("n"), infix=".")
 fig_nums <- captioner::captioner(prefix = "Figure ", levels=1, type=c("n"), infix=".")
@@ -74,7 +75,7 @@ get_onedrive <- function (team="Martin Pastoors", site="FLYSHOOT - General") {
   return(onedrive)
 }
 
-spatialdir <- "C:/DATA/RDATA"
+spatialdir = "C:/Users/MartinPastoors/OneDrive - Martin Pastoors/DATA/RDATA"
 
 # spatial data files
 
@@ -208,9 +209,21 @@ ymax <- ceiling(2*max(h$lat, tt$lat, na.rm=TRUE))/2
 # ydistance <- geosphere::distGeo(matrix(c(xmin, ymin), ncol=2, byrow=FALSE),
 #                                 matrix(c(xmin, ymax) , ncol=2, byrow=FALSE) )/1000
  
-xdistance <- geo::arcdist(lat=ymin, lon=xmin, lat1 = ymin, lon1 = xmax, scale = "km")
-ydistance <- geo::arcdist(lat=ymin, lon=xmin, lat1 = ymax, lon1 = xmin, scale = "km")
+xdistance <- icosa::arcdist(p1=c(xmin,ymin), p2=c(xmax,ymin))
+ydistance <- icosa::arcdist(p1=c(xmin,ymin), p2=c(xmin,ymax))
+# xdistance <- icosa::arcdist(lat=ymin, lon=xmin, lat1 = ymin, lon1 = xmax, scale = "km")
+# ydistance <- icosa::arcdist(lat=ymin, lon=xmin, lat1 = ymax, lon1 = xmin, scale = "km")
 aspect    <- ydistance/xdistance
+
+if(aspect > 3) {
+  xmin = xmin -2; xmax = xmax +2
+} else if (aspect >2) {
+  xmin = xmin -1; xmax = xmax +1
+} else if (aspect < 0.5) {
+  ymin = ymin -0.5; ymax = ymax + 0.5
+} else if (aspect >0.3) {
+  ymin = ymin -0.5; ymax = ymax + 0.5
+}
 
 # if (aspect < 1.4) {
 # 
@@ -927,8 +940,8 @@ if (nrow(m) > 0 & sum(!is.na(h$catchweight))>0) {
     # theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
     
     geom_point(aes(size=totaal, colour=year)) +
-    # geom_smooth(aes(colour=year, fill=year), span=0.9) +
-    geom_smooth(aes(colour=year, fill=year), method = "lm", formula = y ~ poly(x, 3)) +
+    geom_smooth(aes(colour=year, fill=year), span=0.4) +
+    # geom_smooth(aes(colour=year, fill=year), method = "lm", formula = y ~ poly(x, 3)) +
     # stat_smooth(method = "lm", formula = y ~ x + I(x^2), size = 1)
     # tidyquant::geom_ma(n=5) + 
     scale_size(

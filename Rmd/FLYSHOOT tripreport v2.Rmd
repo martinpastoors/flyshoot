@@ -62,7 +62,7 @@ get_onedrive <- function (team="Martin Pastoors", site="FLYSHOOT - General") {
   return(onedrive)
 }
 
-spatialdir <- "C:/DATA/RDATA"
+spatialdir = "C:/Users/MartinPastoors/OneDrive - Martin Pastoors/DATA/RDATA"
 
 # spatial data files
 
@@ -110,10 +110,10 @@ load(file.path(onedrive, "elog_trek.RData"))
 # ===============================================================================
 
 # setvessel<-"SCH135"
-setvessel<-"SCH65"
-# setvessel<-"SL9"
+# setvessel<-"SCH65"
+setvessel<-"SL9"
 
-startdate<-dmy("30/6/2025"); enddate <- dmy("3/7/2025") ;
+startdate<-dmy("30/6/2025"); enddate <- dmy("8/7/2025") ;
 
 # ===============================================================================
 # ===============================================================================
@@ -162,8 +162,10 @@ if(nrow(et) > 0) {
 # ydistance <- geosphere::distGeo(matrix(c(xmin, ymin), ncol=2, byrow=FALSE),
 #                                 matrix(c(xmin, ymax) , ncol=2, byrow=FALSE) )/1000
  
-xdistance <- geo::arcdist(lat=ymin, lon=xmin, lat1 = ymin, lon1 = xmax, scale = "km")
-ydistance <- geo::arcdist(lat=ymin, lon=xmin, lat1 = ymax, lon1 = xmin, scale = "km")
+xdistance <- icosa::arcdist(p1=c(xmin,ymin), p2=c(xmax,ymin))
+ydistance <- icosa::arcdist(p1=c(xmin,ymin), p2=c(xmin,ymax))
+# xdistance <- geo::arcdist(lat=ymin, lon=xmin, lat1 = ymin, lon1 = xmax, scale = "km")
+# ydistance <- geo::arcdist(lat=ymin, lon=xmin, lat1 = ymax, lon1 = xmin, scale = "km")
 aspect    <- ydistance/xdistance
 
 if(aspect > 3) {
