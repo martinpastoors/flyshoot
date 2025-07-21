@@ -27,7 +27,7 @@ rm(list=ls())
 # setvessel<-"SL9"   ;settrip<-c("2023081600041", "2023082100042") ; comparisons <- FALSE
 # setvessel<-c("Z99", "SCH99")   ;settrip<- c( "2024174","2024175","2024176") ; comparisons <- FALSE
 
-setvessel<-c("Z99", "SCH99")   ;settrip<- c("2025227","2025228") ; comparisons <- FALSE
+setvessel<-c("Z99", "SCH99")   ;settrip<- c("2025231","2025232") ; comparisons <- FALSE
 
 # ------------------------------------------------------------
 
@@ -45,6 +45,7 @@ require(reshape2, quietly=TRUE)      # reshaping data; e.g. cast
 require(RColorBrewer)                # colour schemes
 library(viridis)
 library(pander)
+library(patchwork)
 
 # devtools::install_github("adletaw/captioner")
 library(captioner)                   # for captions
@@ -52,28 +53,7 @@ tab_nums <- captioner::captioner(prefix = "Table " , levels=1, type=c("n"), infi
 fig_nums <- captioner::captioner(prefix = "Figure ", levels=1, type=c("n"), infix=".")
 
 # Source all the utils
-source("../../prf/R/my utils.r")
-
-# source("../R/gfw.r")
-
-get_onedrive <- function (team="Martin Pastoors", site="FLYSHOOT - General") {
-  
-  if (Sys.info()['sysname'] == 'Windows') {
-    
-    # set onedrive directory
-    if(dir.exists(file.path(Sys.getenv('USERPROFILE'), team, site))) {
-      onedrive <- file.path(Sys.getenv('USERPROFILE'), team, site)   
-    } else if(dir.exists(file.path('C:/DATA/PFA', team, site))) {
-      onedrive <- file.path('C:/DATA/PFA', team, site)
-    } else if(dir.exists(file.path('D:/DATA/PFA', team, site))) {
-      onedrive <- file.path('D:/DATA/PFA', team, site)
-    } else {
-      stop("Onedrive directory not found")
-    }
-  }
-  
-  return(onedrive)
-}
+source("../r/FLYSHOOT utils.R")
 
 spatialdir = "C:/Users/MartinPastoors/OneDrive - Martin Pastoors/DATA/RDATA"
 
@@ -966,9 +946,64 @@ print_option <- FALSE
 
 _`r fig_nums("percdiscards")`_
 
+\newpage
+
 <!-- ########################################################################################## -->
 <!-- Figure: Compare haul list with PEFA by haul                                                         -->
 <!-- ########################################################################################## -->
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, comment=NA, fig.asp=0.4}
+
+
+fig_nums(
+  name    = "aanvoerperweekenjaartotaal", level   = 1, display = FALSE,
+  caption = "Cumulatieve aanvoer, week en jaar")
+
+ee <- 
+  elog %>%
+  filter(vessel %in% setvessel, year >= year(max(e$date))-3, date <= max(e$date)) %>% 
+  mutate(vessel = ifelse(vessel %in% c("SCH99","Z99"), "SCH99/Z99", vessel)) %>% 
+  group_by(vessel, year, week) %>% 
+  summarise(landingweight = sum(weight, na.rm=TRUE)) %>% 
+  group_by(vessel, year) %>% 
+  mutate(cumweight = cumsum(landingweight)) %>% 
+  mutate(year = as.character(year)) 
+
+# plot catch and landings by week
+p1 <-
+  ee %>% 
+  ggplot() +
+  theme_publication() +
+  # theme(legend.position = "none") +
+  geom_line(aes(x=week, y=landingweight, colour=year, linewidth=year, alpha=year)) +
+  scale_linewidth_manual("year", values = c("2020"=.5,       "2021"=.5,       "2022"=.5,       "2023"=0.5,      "2024"=0.5,    "2025"=1.5), guide = "none") +
+  scale_colour_manual   ("year", values = c("2020"="gray80", "2021"="gray60", "2022"="gray40", "2023"="gray40", "2024"="blue", "2025"="red")) +
+  scale_alpha_manual("year", values = c(1, 1, 1, 1, 1, 0.5), guide = "none") +
+  # geom_hline(aes(yintercept=meanweight, colour=species)) +
+  # geom_text(aes(x=1, y=meanweight, label=as.integer(meanweight)), hjust=0, vjust=0, nudge_y = 200) +
+  labs(title=paste(unique(ee$vessel), "Aanvoer week en jaar"), y="aanvoer (kg)")  
+  # facet_grid(rows=vars(year), cols=vars(species), scales="free_y")
+
+# plot cumulative catch and landings
+p2 <-
+  ee %>% 
+  ggplot() +
+  theme_publication() +
+  # theme(legend.position = "none") +
+  geom_line(aes(x=week, y=cumweight, colour=year, linewidth=year, alpha=year)) +
+  scale_linewidth_manual("year", values = c("2020"=.5,       "2021"=.5,       "2022"=.5,       "2023"=0.5,      "2024"=0.5,    "2025"=1.5), guide = "none") +
+  scale_colour_manual   ("year", values = c("2020"="gray80", "2021"="gray60", "2022"="gray40", "2023"="gray40", "2024"="blue", "2025"="red")) +
+  scale_alpha_manual("year", values = c(1, 1, 1, 1, 1, 0.5), guide = "none") +
+  # geom_hline(aes(yintercept=meanweight, colour=species)) +
+  # geom_text(aes(x=1, y=meanweight, label=as.integer(meanweight)), hjust=0, vjust=0, nudge_y = 200) +
+  labs(title=paste(unique(ee$vessel), "cumulatieve aanvoer week en jaar"), y="aanvoer (kg, cumulatief)")  
+  # facet_grid(rows=vars(year), cols=vars(species), scales="free_y")
+
+print(p1 + p2   + plot_layout(guides="collect", nrow = 1, heights = unit(c(14, 8, 4), c('null'))) & theme(legend.position = 'bottom',
+        legend.direction = 'horizontal'))  
+
+```
+
 
 ```{r echo=FALSE, message=FALSE, warning=FALSE, comment=NA, fig.asp=1.0}
 
