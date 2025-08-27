@@ -27,7 +27,7 @@ rm(list=ls())
 # setvessel<-"SL9"   ;settrip<-c("2023081600041", "2023082100042") ; comparisons <- FALSE
 # setvessel<-c("Z99", "SCH99")   ;settrip<- c( "2024174","2024175","2024176") ; comparisons <- FALSE
 
-setvessel<-c("Z99", "SCH99")   ;settrip<- c("2025231","2025232") ; comparisons <- FALSE
+setvessel<-c("Z99", "SCH99")   ;settrip<- c("2025233","2025234") ; comparisons <- FALSE
 
 # ------------------------------------------------------------
 
@@ -258,7 +258,7 @@ if(aspect > 3) {
 
 ### Trip start: `r format(min(trip2$startdate), '%d/%m/%Y')`, end: `r format(max(trip2$enddate), '%d/%m/%Y')`
 
-Report generated: `r format(Sys.time(), '%d/%m/%Y')`
+Report generated: `r format(Sys.time(), '%d/%m/%Y')` `r ifelse(grepl("simplified",unique(h$source)),"(from simplified haullist)","")`
 
 &nbsp;
 
@@ -888,52 +888,89 @@ if (nrow(m) > 0 & sum(!is.na(h$catchweight))>0) {
     mutate(perc_discards = round((totaal - aanvoer) / totaal, digits=2)) %>% 
     mutate(week2 = year + week/52) %>% 
     mutate(yday = lubridate::yday(date))
-    
+
+      
   # tt2 %>% filter(perc_discards > 0.3) %>% View()
   # tt2 %>% ggplot(aes(x=totaal, y=perc_discards)) + geom_point()
   
+  tt3 <-
+    tt2 %>% 
+    group_by(vessel, year, week) %>% 
+    summarise(
+      date = min(date), 
+      perc_discards = mean(perc_discards, na.rm=TRUE)
+    ) %>% 
+    mutate(week2 = year + week/52) %>% 
+    mutate(year = as.character(year)) %>% 
+    group_by(vessel) %>% 
+    mutate(ma5=zoo::rollapply(perc_discards,5,mean,align='right',fill=NA))
+
   # plot as one timeseries
-  tt2 %>%
-    ggplot(aes(x=date, y=perc_discards)) +
-    theme_publication() +
-    theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
-    geom_point(aes(size=totaal)) +
-    geom_smooth() +
-    tidyquant::geom_ma(n=5) + 
-    scale_size(
-      range=c(0.5,5),
-      limits =  c(100,1000*ceiling(max(tt2$totaal)/1000)),
-      breaks =  seq(100,1000*ceiling(max(tt2$totaal)/1000),length.out=6)
-    ) +
-    scale_x_date(date_breaks = "month") +
-    scale_y_continuous(labels = scales::percent) +
-    guides(size = guide_legend(nrow = 1)) +
-    labs(x="", y="%discards / day", size= "Totale vangst (kg)") + 
-    labs(title="Percentage discards per dag SCH99 Aravis")
+  # tt2 %>%
+  #   ggplot(aes(x=date, y=perc_discards)) +
+  #   theme_publication() +
+  #   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  #   geom_point(aes(size=totaal)) +
+  #   geom_smooth() +
+  #   tidyquant::geom_ma(n=5) + 
+  #   scale_size(
+  #     range=c(0.5,5),
+  #     limits =  c(100,1000*ceiling(max(tt2$totaal)/1000)),
+  #     breaks =  seq(100,1000*ceiling(max(tt2$totaal)/1000),length.out=6)
+  #   ) +
+  #   scale_x_date(date_breaks = "month") +
+  #   scale_y_continuous(labels = scales::percent) +
+  #   guides(size = guide_legend(nrow = 1)) +
+  #   labs(x="", y="%discards / day", size= "Totale vangst (kg)") + 
+  #   labs(title="Percentage discards per dag SCH99 Aravis")
   
 
-  # plot by year
   tt2 %>%
     mutate(year = as.character(year)) %>% 
-    ggplot(aes(x=week, y=perc_discards, group=year)) +
+    ggplot(aes(x=week, y=perc_discards)) +
     theme_publication() +
     # theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
     
-    geom_point(aes(size=totaal, colour=year)) +
-    geom_smooth(aes(colour=year, fill=year), span=0.4) +
+    geom_point(aes(size=totaal, colour=year), alpha=0.4) +
+    # geom_smooth(aes(colour=year, fill=year), span=0.9) +
     # geom_smooth(aes(colour=year, fill=year), method = "lm", formula = y ~ poly(x, 3)) +
     # stat_smooth(method = "lm", formula = y ~ x + I(x^2), size = 1)
-    # tidyquant::geom_ma(n=5) + 
+    # geom_smooth(aes(colour=year)) +
+    # tidyquant::geom_ma(data=tt3, n=5, aes(colour=year), linetype="solid", size=2) + 
+    geom_line(data=tt3, aes(y=ma5, colour=year), size=1) +
     scale_size(
       range=c(0.5,5),
       limits =  c(100,1000*ceiling(max(tt2$totaal)/1000)),
       breaks =  seq(100,1000*ceiling(max(tt2$totaal)/1000),length.out=6)
     ) +
     # scale_x_date(date_breaks = "month") +
-    scale_y_continuous(labels = scales::percent) +
+    scale_y_continuous(labels = scales::percent, limits=c(-0.1, 0.5)) +
     guides(size = guide_legend(nrow = 1)) +
-    labs(x="week", y="%discards / day", size= "Totale vangst (kg)") + 
-    labs(title="Percentage discards per dag SCH99 Aravis")
+    labs(x="week", y="%discards / day-week", size= "Totale vangst (kg)") + 
+    labs(title="Percentage discards per dag/week SCH99 Aravis")
+
+  # plot by year
+  # tt2 %>%
+  #   mutate(year = as.character(year)) %>% 
+  #   ggplot(aes(x=week, y=perc_discards, group=year)) +
+  #   theme_publication() +
+  #   # theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  #   
+  #   geom_point(aes(size=totaal, colour=year)) +
+  #   geom_smooth(aes(colour=year, fill=year), span=0.4) +
+  #   # geom_smooth(aes(colour=year, fill=year), method = "lm", formula = y ~ poly(x, 3)) +
+  #   # stat_smooth(method = "lm", formula = y ~ x + I(x^2), size = 1)
+  #   # tidyquant::geom_ma(n=5) + 
+  #   scale_size(
+  #     range=c(0.5,5),
+  #     limits =  c(100,1000*ceiling(max(tt2$totaal)/1000)),
+  #     breaks =  seq(100,1000*ceiling(max(tt2$totaal)/1000),length.out=6)
+  #   ) +
+  #   # scale_x_date(date_breaks = "month") +
+  #   scale_y_continuous(labels = scales::percent) +
+  #   guides(size = guide_legend(nrow = 1)) +
+  #   labs(x="week", y="%discards / day", size= "Totale vangst (kg)") + 
+  #   labs(title="Percentage discards per dag SCH99 Aravis")
 
 
 

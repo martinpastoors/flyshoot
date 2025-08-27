@@ -19,6 +19,7 @@
 # theme_publication : set up the publication theme 
 # excel_timezone_to_utc : read excel datetime with timezone and convert to UTC
 # calculate_time    : Convert Excel time to R time object (ignores timezone)
+# excel_numeric_date_time_to_datetime : calculate datetime from numeric date and time
 # map_aspect        : calculate aspect ratio of plots
 # count_na          : count number of na in dataset
 # count_not_na      : count number of not-na in dataset
@@ -127,6 +128,39 @@ excel_timezone_to_utc <- function(t,timezone) {
   return(x3)
 }
 # excel_timezone_to_utc(t=35451.45, timezone="Europe/Amsterdam")
+
+# -----------------------------------------------------------------------------------
+
+# Convert Excel datetime with timezone to UTC datetime,  updated: 20200127
+
+excel_numeric_date_time_to_datetime <- 
+  function(excel_date, excel_time, tz = "UTC", origin = "1899-12-30") {
+  
+    # Input validation
+  if (!is.numeric(excel_date) || !is.numeric(excel_time)) {
+    stop("Both excel_date and excel_time must be numeric vectors")
+  }
+  
+  # Length matching
+  if (length(excel_date) != length(excel_time)) {
+    stop("excel_date and excel_time must have the same length")
+  }
+  
+  # Range validation (reasonable Excel date range)
+  if (any(excel_date < 1 | excel_date > 100000, na.rm = TRUE)) {
+    warning("Some excel_date values appear to be outside reasonable range")
+  }
+  
+  if (any(excel_time < 0 | excel_time >= 1, na.rm = TRUE)) {
+    warning("Some excel_time values appear to be outside range [0,1)")
+  }
+  
+  # Combine and convert
+  combined_datetime <- excel_date + excel_time
+  result <- as.POSIXct(combined_datetime * 86400, origin = origin, tz = tz)
+  
+  return(result)
+}
 
 # -----------------------------------------------------------------------------------
 

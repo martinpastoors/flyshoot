@@ -216,13 +216,6 @@ for (i in 1:nrow(my_trips)) {
     
     } else if (!is_empty(my_treklijst) & grepl("simplified", my_treklijst)) {
     
-    # my_file <- filter(my_files,
-    #                   vessel == my_vessel, trip== my_trip, source=="treklijst")$file
-    # my_kisten <- filter(my_files, 
-    #                     vessel == my_vessel, trip== my_trip, source=="kisten")$file
-    
-    # h <- get_haul_from_pefa_trek(my_vessel, my_trip2, my_file)
-    # t <- get_trip_from_haul(h, my_vessel, my_trip2) 
     h <- get_haul_kisten(my_vessel, my_trip2, my_treklijst, my_kisten)
     t <- get_trip_from_haul(h, my_vessel, my_trip2) 
     

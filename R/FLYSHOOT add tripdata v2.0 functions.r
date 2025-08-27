@@ -697,7 +697,7 @@ get_elog_from_raw <- function(raw) {
     # group_by(vessel, trip, haul, date, species, economiczone, rect, division=faozone, lon, lat, geartype, meshsize, departuredate, departureport, arrivaldate, arrivalport,
     #          auctiondate, auctionport, captain, tripstatus, year, quarter, month, week, yday) %>%
     group_by(vessel, trip, date, species, economiczone, rect, division=faozone, geartype, meshsize, departuredate, departureport, arrivaldate, arrivalport,
-             auctiondate, auctionport, captain, tripstatus, year, quarter, month, week, yday) %>%
+             auctiondate, auctionport, captain, tripstatus, discardreason, year, quarter, month, week, yday) %>%
     summarise(
       weight = sum(weight, na.rm=TRUE),
       lat    = mean(lat, na.rm=TRUE),

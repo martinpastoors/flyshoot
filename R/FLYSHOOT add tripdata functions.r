@@ -238,6 +238,9 @@ get_haul_treklijst <- function(my_vessel, my_trip2, my_file) {
 # get_haul_kisten (simplified treklijst)
 # ------------------------------------------------------------------------------
 
+# my_trip <- my_trip2
+# my_file <- my_treklijst
+
 get_haul_kisten <- function(my_vessel, my_trip, my_file, my_kisten) {
   
   print(paste(".. getting hauls from simplified treklijst & kisten", my_vessel, my_trip))
@@ -271,19 +274,10 @@ get_haul_kisten <- function(my_vessel, my_trip, my_file, my_kisten) {
     mutate(vessel = my_vessel) %>% 
     mutate(trip   = my_trip) %>% 
     
-    mutate(datetime = lubridate::dmy_hms(paste(datum, tijd))) %>% 
+    mutate(datetime = excel_numeric_date_time_to_datetime(as.numeric(datum), as.numeric(tijd))) %>% 
     arrange(datetime) %>% 
-    mutate(lotnummer = row_number()) %>% 
-    
-    arrange(datetime) %>% 
-    mutate(time_diff = as.numeric(datetime - lag(datetime))/60) %>% 
-    
-    mutate(counter = ifelse(time_diff > 28, 1, 0)) %>% 
-    mutate(counter = ifelse(row_number() == 1, 1, counter)) %>% 
-    mutate(haul = as.integer(cumsum(counter))) %>% 
-    
-    # filter(time_diff > 20 | row_number()==1) %>% 
-    # mutate(haul = row_number()) %>% 
+    mutate(lotnummer = as.integer(lotnummer)) %>% 
+    mutate(haul = as.integer(haul)) %>% 
     mutate(gewicht=as.numeric(gewicht)) %>% 
     
     group_by(vessel, trip, haul, datum) %>% 
@@ -295,15 +289,16 @@ get_haul_kisten <- function(my_vessel, my_trip, my_file, my_kisten) {
     mutate(shoottime = haultime - lubridate::hm("1:20")) %>% 
     mutate(shoottime2 = shoottime + (haultime - shoottime)/2) %>% 
     rename(date=datum) %>%
-    mutate(date=dmy(date)) %>% 
+    # mutate(date=dmy(date)) %>% 
+    mutate(date=as.Date(as.integer(date), origin="1899-12-30")) %>% 
     
     # calculate haul duration: haul_time-shoot_time*24 
     mutate(duration   = as.numeric(as.duration(shoottime %--% haultime))/3600 ) %>% 
     
     # add next haul time  
     group_by(vessel, trip) %>% 
-    mutate(nexthaultime = lead(haultime)) %>% 
-    mutate(nexthaultime = ifelse(is.na(nexthaultime), lubridate::dmy_hm("31/12/2023 23:59"), nexthaultime)) %>% 
+    mutate(nexthaultime = ifelse(is.na(haultime), NA, lead(haultime))) %>% 
+    # mutate(nexthaultime = ifelse(is.na(nexthaultime), lubridate::dmy_hm("31/12/2023 23:59"), nexthaultime)) %>% 
     mutate(nexthaultime = as_datetime(nexthaultime)) 
   
   # check in trip number
@@ -460,7 +455,7 @@ get_haul_kisten <- function(my_vessel, my_trip, my_file, my_kisten) {
   h <- 
     left_join(h, h_fao,  by=c("vessel","trip","haul")) %>% 
     left_join(., h_rect, by=c("vessel","trip","haul")) %>% 
-    mutate(source="treklijst") %>% 
+    mutate(source="treklijst simplified") %>% 
     mutate(file=basename(my_file)) %>% 
     ungroup()
   
@@ -1291,7 +1286,7 @@ get_elog_from_raw <- function(raw) {
     # group_by(vessel, trip, haul, date, species, economiczone, rect, division=faozone, lon, lat, geartype, meshsize, departuredate, departureport, arrivaldate, arrivalport,
     #          auctiondate, auctionport, captain, tripstatus, year, quarter, month, week, yday) %>%
     group_by(vessel, trip, date, species, economiczone, rect, division=faozone, geartype, meshsize, departuredate, departureport, arrivaldate, arrivalport,
-             auctiondate, auctionport, captain, tripstatus, year, quarter, month, week, yday) %>%
+             auctiondate, auctionport, captain, tripstatus, discardreason, year, quarter, month, week, yday) %>%
     summarise(
       weight = sum(weight, na.rm=TRUE),
       lat    = mean(lat, na.rm=TRUE),
