@@ -27,7 +27,7 @@ rm(list=ls())
 # setvessel<-"SL9"   ;settrip<-c("2023081600041", "2023082100042") ; comparisons <- FALSE
 # setvessel<-c("Z99", "SCH99")   ;settrip<- c( "2024174","2024175","2024176") ; comparisons <- FALSE
 
-setvessel<-c("Z99", "SCH99")   ;settrip<- c("2025233","2025234") ; comparisons <- FALSE
+setvessel<-c("Z99", "SCH99")   ;settrip<- c("2025242") ; comparisons <- FALSE
 
 # ------------------------------------------------------------
 
@@ -249,6 +249,11 @@ if(aspect > 3) {
 #              missing=".",
 #              round=c(0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0))
   
+wn <- 
+  readxl::read_excel(
+    "C:/Users/MartinPastoors/Martin Pastoors/FLYSHOOT - General/tripdata/SCH99/SCH99 2025_229 waarnemer vangst.xlsx",
+    col_names=TRUE, 
+    .name_repair =  ~make.names(., unique = TRUE)) 
 
 
 ```
@@ -1260,3 +1265,53 @@ bind_rows(t1, t2) %>%
 
 ```
 
+
+```{r eval=FALSE, fig.align="center", fig.asp=1.2, message=FALSE, warning=FALSE, include=FALSE}
+
+# vergelijking met waarnemersreis 229
+
+  t1 <-
+    h %>%
+    filter(catchweight>0) %>% 
+    group_by(vessel, trip, haul) %>%
+    summarise(data = sum(catchweight, na.rm=TRUE)) %>%
+    mutate(variable = "totaal")
+
+  t2 <-
+    m %>%
+    filter(haul %in% t1$haul) %>%
+    group_by(vessel, trip, haul) %>%
+    summarise(data = sum(gewicht, na.rm=TRUE)) %>%
+    mutate(variable = "aanvoer")
+
+  tt <-
+    bind_rows(t1, t2) %>% 
+    arrange(vessel, trip, haul) %>% 
+    tidyr::pivot_wider(names_from = variable, values_from = data) %>% 
+    mutate(aanvoer = ifelse(is.na(aanvoer),0,aanvoer)) %>% 
+    mutate(discards = totaal - aanvoer) %>% 
+    mutate(perc_discards = round((totaal - aanvoer) / totaal, digits=2)) %>% 
+    mutate(perc_discards = scales::percent(perc_discards, accuracy=1))
+
+  tt2 <-
+    bind_rows(tt %>% mutate(source="schipper"), 
+              wn %>% mutate(source="waarnemer")) 
+  
+  #aanvoer
+  tt2 %>%
+    ggplot(aes(x=haul, y=aanvoer, fill=source)) +
+    theme_publication() +
+    geom_bar(stat="identity", alpha=0.5, width=0.5, just=0.8,
+             position=position_dodge2(preserve="single")) +
+    labs(title="aanvoer")
+  
+  #discards
+  tt2 %>%
+    ggplot(aes(x=haul, y=discards, fill=source)) +
+    theme_publication() +
+    geom_bar(stat="identity", alpha=0.5, width=0.5, just=0.8, 
+             position=position_dodge2(preserve="single")) +
+    labs(title="discards")
+
+
+```

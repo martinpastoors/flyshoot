@@ -242,7 +242,7 @@ t2 <-
     ntrips = sum(ntrips),
     ndays = sum(ndays),
     nhauls = sum(nhauls),
-    nrects = sum(nrects),
+    nrects = mean(nrects),
     ntotalcatch = sum(ntotalcatch),
     nlandedcatch = sum(nlandedcatch),
     landedcatch = sum(landedcatch),
@@ -253,6 +253,7 @@ t2 <-
     month = "all")
 
 bind_rows(t, t2) %>% 
+  # View()
   mutate(discardperc = scales::label_percent(accuracy = 1L)(discardperc)) %>% 
   mutate(discardperc = ifelse(is.na(discardperc), "-", discardperc)) %>% 
   pander::pandoc.table(., 
@@ -272,98 +273,6 @@ bind_rows(t, t2) %>%
 _`r tab_nums("trips")`_
 
 \newpage
-
-```{r eval=FALSE, fig.asp=0.6, message=FALSE, warning=FALSE, comment=NA, include=FALSE}
-
-# NOT USED
-fig_nums(
-  name    = "c", 
-  level = 1, display = FALSE,
-  caption = "Combined look at different data sources by vessel and trip")
-
-hh <- 
-  h %>%
-  group_by(vessel,trip) %>%
-  summarise(
-    nhauls            = n(),
-    startdate         = min(date, na.rm=TRUE),
-    enddate           = max(date, na.rm=TRUE),
-    weeks             = paste(unique(week), collapse=","),
-    months            = paste(unique(month), collapse=","),
-    divisions         = paste(unique(division), collapse=";"),
-    rects             = paste(unique(rect), collapse=";"),
-  ) %>% 
-  mutate (
-    ndays             = as.numeric(difftime(enddate, startdate, units="days")) + 1,
-    haulsperday       = nhauls/ndays
-  ) 
-
-kk <- 
-  k %>%
-  group_by(vessel,trip) %>%
-  summarise(
-    nkisten           = n(),
-    nsoorten          = n_distinct(soorten),
-    startdate         = as.Date(min(datetime, na.rm=TRUE)),
-    enddate           = as.Date(max(datetime, na.rm=TRUE)),
-    weeks             = paste(unique(week(datetime)), collapse=","),
-    months            = paste(unique(month(datetime)), collapse=","),
-    gewicht           = sum(gewicht, na.rm=TRUE)
-  ) %>% 
-  mutate (
-    ndays             = as.numeric(difftime(enddate, startdate, units="days")) + 1
-  ) 
-
-ee <- 
-  e %>%
-  filter(year %in% myyear) %>% 
-  group_by(vessel,trip) %>%
-  summarise(
-    startdate         = min(date, na.rm=TRUE),
-    enddate           = max(date, na.rm=TRUE),
-    weeks             = paste(unique(week), collapse=","),
-    months            = paste(unique(month), collapse=","),
-    divisions         = paste(unique(faozone), collapse=";"),
-    rects             = paste(unique(rect), collapse=";"),
-    nsoorten          = n_distinct(species),
-    gewicht           = sum(weight, na.rm=TRUE)
-  ) %>% 
-  mutate (
-    ndays             = as.numeric(difftime(enddate, startdate, units="days")) + 1
-  ) 
-
-isEven <- function(x) {
-    ## traditional modulo check
-    x %% 2 == 0
-}
-
-# summarize the trip informatie
-comb <-
-  bind_rows(
-    hh %>% mutate(source="haul"),
-    kk %>% mutate(source="marelec"),
-    ee %>% mutate(source="elog")
-  ) %>% 
-  mutate(vessel = ifelse(vessel %in% c("SCH99","Z99"), "SCH99/Z99", vessel)) %>% 
-  dplyr::select(vessel, trip, startdate, enddate, source) %>% 
-  mutate(source = factor(source, levels=c("haul", "marelec", "elog"))) %>% 
-  mutate(trip = gsub("^2023|^2024","", trip)) %>% 
-  mutate(vjust=ifelse(isEven(row_number()), 1, -1))
-
-comb %>% 
-  ggplot() +
-  theme_publication() +
-  ggalt::geom_dumbbell(aes(x = startdate, xend = enddate, y=source, group=1, colour=source),
-                       size=3, size_x = 0, size_xend = 0, alpha=0.4) +
-  # geom_text(data=comb %>% filter(source=="haul"),
-  #           aes(x = startdate, y=source, label=trip, vjust=vjust), hjust=0.5, size=3) +
-  facet_grid(vessel~.)
-
-# _`r fig_nums("c")`_
-
-```
-
-
 
 Totale aanvoer per schip en per week
 
@@ -524,46 +433,6 @@ ee %>%
 ```
 
 
-```{r eval=FALSE, fig.asp=1.0, message=FALSE, warning=FALSE, comment=NA, include=FALSE}
-
-# NOT SHOWN
-
-myspecies <- "SQR"
-
-ee <- 
-  e %>%
-  filter(species %in% myspecies) %>% 
-  mutate(vessel = ifelse(vessel %in% c("SCH99","Z99"), "SCH99/Z99", vessel)) %>% 
-  group_by(species, vessel, year, week) %>% 
-  summarise(landingweight = sum(weight, na.rm=TRUE)) %>% 
-  group_by(species, vessel, year) %>% 
-  mutate(meanweight = mean(landingweight, na.rm=TRUE)) %>% 
-  mutate(year = as.character(year)) 
-
-eee <- 
-  ee %>%
-  filter(year %in% yrs[-length(yrs)]) %>% 
-  group_by(species, week) %>% 
-  summarise(
-    meanweightperweek = mean(landingweight, na.rm=TRUE),
-    sd                = sd(landingweight,na.rm=TRUE),
-    sterr             = se(landingweight)
-  )
-
-# plot total catch and landings
-ee %>% 
-  ggplot() +
-  theme_publication() +
-  theme(legend.position = "none") +
-  # geom_bar(aes(x=week, y=landingweight, fill=vessel), stat="identity") +
-  geom_bar(aes(x=week, y=landingweight, fill=species), stat="identity") +
-  geom_step(data=eee, aes(x=week, y=meanweightperweek), fill=NA, colour="black") +
-  labs(title=myspecies) +
-  facet_grid(vessel~year)
-
-```
-
-\newpage
 
 Aanvoer per soort, per jaar en per week. Rode lijn is het lopende jaar. 
 
@@ -663,197 +532,8 @@ ee %>%
 ```
 
 
-```{r eval=FALSE, fig.asp=1.0, message=FALSE, warning=FALSE, comment=NA, include=FALSE}
-
-# NOT USED
-
-ee <- 
-  e %>%
-  filter(species %in% top$species) %>% 
-  filter(year == max(e$year, na.rm=TRUE)) %>% 
-  mutate(vessel = ifelse(vessel %in% c("SCH99","Z99"), "SCH99/Z99", vessel)) %>% 
-  group_by(species, vessel, week) %>% 
-  summarise(landingweight = sum(weight, na.rm=TRUE)) %>% 
-  group_by(species, vessel) %>% 
-  mutate(cumweight = cumsum(landingweight)) %>% 
-  mutate(species = factor(species, levels=top$species))
-
-# plot total catch and landings
-ee %>% 
-  ggplot() +
-  theme_publication() +
-  # theme(legend.position = "none") +
-  geom_line(aes(x=week, y=cumweight, colour=vessel)) +
-  facet_wrap(~species, scales="free_y")
-  # facet_grid(rows=vars(year), cols=vars(species), scales="free_y")
 
 
-
-```
-
-
-```{r eval=FALSE, fig.asp=1.0, message=FALSE, warning=FALSE, comment=NA, include=FALSE}
-
-# NOT USED 
-
-# Vergelijking Marelec wegingen en Elog 
-
-kk <- 
-  k %>%
-  filter(species %in% top$species) %>% 
-  mutate(vessel = ifelse(vessel %in% c("SCH99","Z99"), "SCH99/Z99", vessel)) %>% 
-  group_by(species, vessel, year, week) %>% 
-  summarise(marelec_weight = sum(gewicht, na.rm=TRUE))  
-
-ee <- 
-  e %>%
-  filter(year %in% kk$year) %>% 
-  filter(species %in% top$species) %>% 
-  mutate(vessel = ifelse(vessel %in% c("SCH99","Z99"), "SCH99/Z99", vessel)) %>% 
-  group_by(species, vessel, year, week) %>% 
-  summarise(elog_weight = sum(weight, na.rm=TRUE))  
-
-t <-
-  left_join(ee, kk, by=c("species","vessel", "year","week")) %>% 
-  drop_na(marelec_weight, elog_weight) %>% 
-  pivot_longer(names_to = "variable", values_to = "data", elog_weight:marelec_weight) %>% 
-  mutate(variable = gsub("_weight","", variable)) %>% 
-  arrange(variable, species, year, week) %>% 
-  group_by(variable, species, year, week) %>% 
-  summarise(data = sum(data)) %>% 
-  group_by(variable, species, year) %>% 
-  mutate(cumdata = cumsum(data))
-
-# plot total catch and landings
-  # mutate(year = as.character(year)) %>% 
-  # mutate(species = factor(species, levels=top$species)) 
-
-t %>%   
-  ggplot() +
-  theme_publication() +
-  geom_line(aes(x=week, y=cumdata, colour=variable)) +
-  # geom_hline(aes(yintercept=meanweight, colour=species)) +
-  # geom_text(aes(x=1, y=meanweight, label=as.integer(meanweight)), hjust=0, vjust=0, nudge_y = 200) +
-  facet_wrap(~species, scales="free_y")
-  # facet_grid(rows=vars(year), cols=vars(species), scales="free_y")
-
-
-
-```
-
-
-```{r eval=FALSE, fig.asp=0.6, message=FALSE, warning=FALSE, comment=NA, include=FALSE}
-
-# NOT SHOWN 
-# SCH99 discard percentage per trip
-
-hh <- 
-  h %>%
-  filter(vessel == "SCH99", !is.na(catchweight)) %>% 
-  dplyr::select(vessel, trip, haul, date, catchweight) 
-
-kk <- 
-  k %>%
-  filter(paste(vessel,trip,haul) %in% paste(hh$vessel, hh$trip, hh$haul)) %>% 
-  mutate(date=as.Date(datetime)) %>% 
-  group_by(vessel, trip, haul, date) %>% 
-  summarise(landingweight = sum(gewicht, na.rm=TRUE)) 
-
-comb <-
-  left_join(hh, kk, by=c("vessel","trip","haul", "date")) %>% 
-  drop_na(catchweight, landingweight) %>% 
-  mutate(discardweight = catchweight - landingweight) %>% 
-  mutate(discardperc = discardweight/catchweight) %>% 
-  group_by(vessel, trip) %>% 
-  mutate(trip2 = paste(min(date), max(date), sep="_"))
-
-# plot total catch and landings
-comb %>% 
-  dplyr::select(-discardweight, -discardperc) %>% 
-  pivot_longer(names_to = "variable", values_to = "data", catchweight:landingweight) %>% 
-  ggplot() +
-  theme_publication() +
-  geom_bar(aes(x=haul, y=data, fill=variable), stat="identity", position=position_dodge2(preserve="single", padding=-0.25, width=1)) +
-  facet_wrap(~trip)
-
-# plot total catch and landings, with cleaned up hauls
-comb %>% 
-  filter(!(trip=="2023003" & haul %in% c(10,11,12,13))) %>% 
-  filter(!(trip=="2023084" & haul %in% c(1,2,3,4))) %>% 
-  filter(!(trip=="2023085" & haul %in% c(19,20,26,27,28))) %>% 
-  filter(discardweight>0) %>% 
-  dplyr::select(-discardweight, -discardperc) %>% 
-  pivot_longer(names_to = "variable", values_to = "data", catchweight:landingweight) %>% 
-  # dplyr::select(-catchweight, -discardperc) %>% 
-  # pivot_longer(names_to = "variable", values_to = "data", landingweight:discardweight) %>% 
-  # View()
-
-  ggplot() +
-  theme_publication() +
-  geom_bar(aes(x=haul, y=data, fill=variable), stat="identity", position=position_dodge2(preserve="single")) +
-  facet_wrap(~trip2)
-
-# plot total catch and landings, with cleaned up hauls
-comb %>% 
-  filter(!(trip=="2023003" & haul %in% c(10,11,12,13))) %>% 
-  filter(!(trip=="2023084" & haul %in% c(1,2,3,4))) %>% 
-  filter(!(trip=="2023085" & haul %in% c(19,20,26,27,28))) %>% 
-  filter(discardweight>0) %>% 
-  dplyr::select(-discardweight, -landingweight, -catchweight) %>% 
-  pivot_longer(names_to = "variable", values_to = "data", discardperc) %>% 
-
-  ggplot() +
-  theme_publication() +
-  geom_bar(aes(x=haul, y=data, fill=variable), stat="identity", position=position_dodge2(preserve="single")) +
-  scale_y_continuous(labels=scales::percent) +
-  facet_wrap(~trip2)
-
-# average percentage discards
-comb %>% 
-  filter(!(trip=="2023003" & haul %in% c(10,11,12,13))) %>% 
-  filter(!(trip=="2023084" & haul %in% c(1,2,3,4))) %>% 
-  filter(!(trip=="2023085" & haul %in% c(19,20,26,27,28))) %>% 
-  filter(discardweight>0) %>% 
-  group_by(vessel, trip, trip2) %>% 
-  summarise(
-    catchweight = sum(catchweight),
-    discardweight = sum(discardweight)
-  ) %>% 
-  mutate(
-    discardperc = discardweight / catchweight
-  ) %>% 
-  pivot_longer(names_to = "variable", values_to = "data", discardperc) %>% 
-
-  ggplot() +
-  theme_publication() +
-  geom_bar(aes(x=trip2, y=data, fill=variable), stat="identity", position=position_dodge2(preserve="single")) +
-  coord_flip() +
-  scale_y_continuous(labels=scales::percent) 
-
-```
-
-
-```{r eval=FALSE, fig.asp=1.0, message=FALSE, warning=FALSE, comment=NA, include=FALSE}
-
-h %>% 
-  filter(year == 2023) %>% 
-  mutate(source="jaczon") %>% 
-  bind_rows(g %>% mutate(source="gfw")) %>% 
-  mutate(vessel = ifelse(vessel %in% c("SCH99","Z99"), "SCH99/Z99", vessel)) %>% 
-  mutate(quarter=paste0("Q", ceiling(month / 3))) %>% 
-  
-  ggplot(aes(x=lon, y=lat)) +
-  theme_publication() +
-  # coord_quickmap(xlim=c(-3,5) , ylim=c(49.5,53)) +
-  coord_quickmap(xlim=c(-4,6) , ylim=c(49.5,55)) +
-  geom_polygon(data=world_mr_df, aes(x=long, y=lat, group=group), fill = "grey75") +
-  geom_point(aes(colour=source), size=0.5, alpha=0.2) +
-  # geom_point(aes(colour=vesselname), size=0.5, alpha=0.5) +
-  # facet_wrap(~month, ncol=3)
-  # facet_wrap(~week, ncol=10)
-  facet_grid(vessel ~ quarter)
-
-```
 
 
 ```{r aanvoerendiscards, echo=FALSE, fig.align="center", fig.asp=0.9, message=FALSE, warning=FALSE}
@@ -993,7 +673,7 @@ print_option <- FALSE
 <!-- Figure: Landings per Species and per Haul (map)                                            -->
 <!-- ########################################################################################## -->
 
-```{r echo=FALSE, fig.align="center", fig.asp=1.0, message=FALSE, warning=FALSE}
+```{r generating_maps, echo=FALSE, fig.align="center", fig.asp=1.0, message=FALSE, warning=FALSE}
 
 # calculate the scaling of plots
 xmin <- floor(2 * (min(k$lon, na.rm=TRUE)-0.5))/2;
@@ -1101,6 +781,346 @@ knitr::include_graphics(file.path(onedrive, "report", "FLYSHOOT trips overview",
 knitr::include_graphics(file.path(onedrive, "report", "FLYSHOOT trips overview", 
                          paste0("HOM"," landings by haul.png")))
 ```
+
+
+
+
+
+
+
+
+
+
+
+<!-- ########################################################################################## -->
+<!-- NOT USED / NOT SHOWN                                                                       -->
+<!-- ########################################################################################## -->
+
+
+```{r eval=FALSE, fig.asp=0.6, message=FALSE, warning=FALSE, comment=NA, include=FALSE}
+
+# NOT USED
+fig_nums(
+  name    = "c", 
+  level = 1, display = FALSE,
+  caption = "Combined look at different data sources by vessel and trip")
+
+hh <- 
+  h %>%
+  group_by(vessel,trip) %>%
+  summarise(
+    nhauls            = n(),
+    startdate         = min(date, na.rm=TRUE),
+    enddate           = max(date, na.rm=TRUE),
+    weeks             = paste(unique(week), collapse=","),
+    months            = paste(unique(month), collapse=","),
+    divisions         = paste(unique(division), collapse=";"),
+    rects             = paste(unique(rect), collapse=";"),
+  ) %>% 
+  mutate (
+    ndays             = as.numeric(difftime(enddate, startdate, units="days")) + 1,
+    haulsperday       = nhauls/ndays
+  ) 
+
+kk <- 
+  k %>%
+  group_by(vessel,trip) %>%
+  summarise(
+    nkisten           = n(),
+    nsoorten          = n_distinct(soorten),
+    startdate         = as.Date(min(datetime, na.rm=TRUE)),
+    enddate           = as.Date(max(datetime, na.rm=TRUE)),
+    weeks             = paste(unique(week(datetime)), collapse=","),
+    months            = paste(unique(month(datetime)), collapse=","),
+    gewicht           = sum(gewicht, na.rm=TRUE)
+  ) %>% 
+  mutate (
+    ndays             = as.numeric(difftime(enddate, startdate, units="days")) + 1
+  ) 
+
+ee <- 
+  e %>%
+  filter(year %in% myyear) %>% 
+  group_by(vessel,trip) %>%
+  summarise(
+    startdate         = min(date, na.rm=TRUE),
+    enddate           = max(date, na.rm=TRUE),
+    weeks             = paste(unique(week), collapse=","),
+    months            = paste(unique(month), collapse=","),
+    divisions         = paste(unique(faozone), collapse=";"),
+    rects             = paste(unique(rect), collapse=";"),
+    nsoorten          = n_distinct(species),
+    gewicht           = sum(weight, na.rm=TRUE)
+  ) %>% 
+  mutate (
+    ndays             = as.numeric(difftime(enddate, startdate, units="days")) + 1
+  ) 
+
+isEven <- function(x) {
+    ## traditional modulo check
+    x %% 2 == 0
+}
+
+# summarize the trip informatie
+comb <-
+  bind_rows(
+    hh %>% mutate(source="haul"),
+    kk %>% mutate(source="marelec"),
+    ee %>% mutate(source="elog")
+  ) %>% 
+  mutate(vessel = ifelse(vessel %in% c("SCH99","Z99"), "SCH99/Z99", vessel)) %>% 
+  dplyr::select(vessel, trip, startdate, enddate, source) %>% 
+  mutate(source = factor(source, levels=c("haul", "marelec", "elog"))) %>% 
+  mutate(trip = gsub("^2023|^2024","", trip)) %>% 
+  mutate(vjust=ifelse(isEven(row_number()), 1, -1))
+
+comb %>% 
+  ggplot() +
+  theme_publication() +
+  ggalt::geom_dumbbell(aes(x = startdate, xend = enddate, y=source, group=1, colour=source),
+                       size=3, size_x = 0, size_xend = 0, alpha=0.4) +
+  # geom_text(data=comb %>% filter(source=="haul"),
+  #           aes(x = startdate, y=source, label=trip, vjust=vjust), hjust=0.5, size=3) +
+  facet_grid(vessel~.)
+
+# _`r fig_nums("c")`_
+
+```
+
+
+```{r eval=FALSE, fig.asp=1.0, message=FALSE, warning=FALSE, comment=NA, include=FALSE}
+
+# NOT USED
+
+ee <- 
+  e %>%
+  filter(species %in% top$species) %>% 
+  filter(year == max(e$year, na.rm=TRUE)) %>% 
+  mutate(vessel = ifelse(vessel %in% c("SCH99","Z99"), "SCH99/Z99", vessel)) %>% 
+  group_by(species, vessel, week) %>% 
+  summarise(landingweight = sum(weight, na.rm=TRUE)) %>% 
+  group_by(species, vessel) %>% 
+  mutate(cumweight = cumsum(landingweight)) %>% 
+  mutate(species = factor(species, levels=top$species))
+
+# plot total catch and landings
+ee %>% 
+  ggplot() +
+  theme_publication() +
+  # theme(legend.position = "none") +
+  geom_line(aes(x=week, y=cumweight, colour=vessel)) +
+  facet_wrap(~species, scales="free_y")
+  # facet_grid(rows=vars(year), cols=vars(species), scales="free_y")
+
+
+
+```
+
+
+```{r eval=FALSE, fig.asp=1.0, message=FALSE, warning=FALSE, comment=NA, include=FALSE}
+
+# NOT USED 
+
+# Vergelijking Marelec wegingen en Elog 
+
+kk <- 
+  k %>%
+  filter(species %in% top$species) %>% 
+  mutate(vessel = ifelse(vessel %in% c("SCH99","Z99"), "SCH99/Z99", vessel)) %>% 
+  group_by(species, vessel, year, week) %>% 
+  summarise(marelec_weight = sum(gewicht, na.rm=TRUE))  
+
+ee <- 
+  e %>%
+  filter(year %in% kk$year) %>% 
+  filter(species %in% top$species) %>% 
+  mutate(vessel = ifelse(vessel %in% c("SCH99","Z99"), "SCH99/Z99", vessel)) %>% 
+  group_by(species, vessel, year, week) %>% 
+  summarise(elog_weight = sum(weight, na.rm=TRUE))  
+
+t <-
+  left_join(ee, kk, by=c("species","vessel", "year","week")) %>% 
+  drop_na(marelec_weight, elog_weight) %>% 
+  pivot_longer(names_to = "variable", values_to = "data", elog_weight:marelec_weight) %>% 
+  mutate(variable = gsub("_weight","", variable)) %>% 
+  arrange(variable, species, year, week) %>% 
+  group_by(variable, species, year, week) %>% 
+  summarise(data = sum(data)) %>% 
+  group_by(variable, species, year) %>% 
+  mutate(cumdata = cumsum(data))
+
+# plot total catch and landings
+  # mutate(year = as.character(year)) %>% 
+  # mutate(species = factor(species, levels=top$species)) 
+
+t %>%   
+  ggplot() +
+  theme_publication() +
+  geom_line(aes(x=week, y=cumdata, colour=variable)) +
+  # geom_hline(aes(yintercept=meanweight, colour=species)) +
+  # geom_text(aes(x=1, y=meanweight, label=as.integer(meanweight)), hjust=0, vjust=0, nudge_y = 200) +
+  facet_wrap(~species, scales="free_y")
+  # facet_grid(rows=vars(year), cols=vars(species), scales="free_y")
+
+
+
+```
+
+
+```{r eval=FALSE, fig.asp=1.0, message=FALSE, warning=FALSE, comment=NA, include=FALSE}
+
+# NOT SHOWN
+
+myspecies <- "SQR"
+
+ee <- 
+  e %>%
+  filter(species %in% myspecies) %>% 
+  mutate(vessel = ifelse(vessel %in% c("SCH99","Z99"), "SCH99/Z99", vessel)) %>% 
+  group_by(species, vessel, year, week) %>% 
+  summarise(landingweight = sum(weight, na.rm=TRUE)) %>% 
+  group_by(species, vessel, year) %>% 
+  mutate(meanweight = mean(landingweight, na.rm=TRUE)) %>% 
+  mutate(year = as.character(year)) 
+
+eee <- 
+  ee %>%
+  filter(year %in% yrs[-length(yrs)]) %>% 
+  group_by(species, week) %>% 
+  summarise(
+    meanweightperweek = mean(landingweight, na.rm=TRUE),
+    sd                = sd(landingweight,na.rm=TRUE),
+    sterr             = se(landingweight)
+  )
+
+# plot total catch and landings
+ee %>% 
+  ggplot() +
+  theme_publication() +
+  theme(legend.position = "none") +
+  # geom_bar(aes(x=week, y=landingweight, fill=vessel), stat="identity") +
+  geom_bar(aes(x=week, y=landingweight, fill=species), stat="identity") +
+  geom_step(data=eee, aes(x=week, y=meanweightperweek), fill=NA, colour="black") +
+  labs(title=myspecies) +
+  facet_grid(vessel~year)
+
+```
+
+```{r eval=FALSE, fig.asp=0.6, message=FALSE, warning=FALSE, comment=NA, include=FALSE}
+
+# NOT SHOWN 
+# SCH99 discard percentage per trip
+
+hh <- 
+  h %>%
+  filter(vessel == "SCH99", !is.na(catchweight)) %>% 
+  dplyr::select(vessel, trip, haul, date, catchweight) 
+
+kk <- 
+  k %>%
+  filter(paste(vessel,trip,haul) %in% paste(hh$vessel, hh$trip, hh$haul)) %>% 
+  mutate(date=as.Date(datetime)) %>% 
+  group_by(vessel, trip, haul, date) %>% 
+  summarise(landingweight = sum(gewicht, na.rm=TRUE)) 
+
+comb <-
+  left_join(hh, kk, by=c("vessel","trip","haul", "date")) %>% 
+  drop_na(catchweight, landingweight) %>% 
+  mutate(discardweight = catchweight - landingweight) %>% 
+  mutate(discardperc = discardweight/catchweight) %>% 
+  group_by(vessel, trip) %>% 
+  mutate(trip2 = paste(min(date), max(date), sep="_"))
+
+# plot total catch and landings
+comb %>% 
+  dplyr::select(-discardweight, -discardperc) %>% 
+  pivot_longer(names_to = "variable", values_to = "data", catchweight:landingweight) %>% 
+  ggplot() +
+  theme_publication() +
+  geom_bar(aes(x=haul, y=data, fill=variable), stat="identity", position=position_dodge2(preserve="single", padding=-0.25, width=1)) +
+  facet_wrap(~trip)
+
+# plot total catch and landings, with cleaned up hauls
+comb %>% 
+  filter(!(trip=="2023003" & haul %in% c(10,11,12,13))) %>% 
+  filter(!(trip=="2023084" & haul %in% c(1,2,3,4))) %>% 
+  filter(!(trip=="2023085" & haul %in% c(19,20,26,27,28))) %>% 
+  filter(discardweight>0) %>% 
+  dplyr::select(-discardweight, -discardperc) %>% 
+  pivot_longer(names_to = "variable", values_to = "data", catchweight:landingweight) %>% 
+  # dplyr::select(-catchweight, -discardperc) %>% 
+  # pivot_longer(names_to = "variable", values_to = "data", landingweight:discardweight) %>% 
+  # View()
+
+  ggplot() +
+  theme_publication() +
+  geom_bar(aes(x=haul, y=data, fill=variable), stat="identity", position=position_dodge2(preserve="single")) +
+  facet_wrap(~trip2)
+
+# plot total catch and landings, with cleaned up hauls
+comb %>% 
+  filter(!(trip=="2023003" & haul %in% c(10,11,12,13))) %>% 
+  filter(!(trip=="2023084" & haul %in% c(1,2,3,4))) %>% 
+  filter(!(trip=="2023085" & haul %in% c(19,20,26,27,28))) %>% 
+  filter(discardweight>0) %>% 
+  dplyr::select(-discardweight, -landingweight, -catchweight) %>% 
+  pivot_longer(names_to = "variable", values_to = "data", discardperc) %>% 
+
+  ggplot() +
+  theme_publication() +
+  geom_bar(aes(x=haul, y=data, fill=variable), stat="identity", position=position_dodge2(preserve="single")) +
+  scale_y_continuous(labels=scales::percent) +
+  facet_wrap(~trip2)
+
+# average percentage discards
+comb %>% 
+  filter(!(trip=="2023003" & haul %in% c(10,11,12,13))) %>% 
+  filter(!(trip=="2023084" & haul %in% c(1,2,3,4))) %>% 
+  filter(!(trip=="2023085" & haul %in% c(19,20,26,27,28))) %>% 
+  filter(discardweight>0) %>% 
+  group_by(vessel, trip, trip2) %>% 
+  summarise(
+    catchweight = sum(catchweight),
+    discardweight = sum(discardweight)
+  ) %>% 
+  mutate(
+    discardperc = discardweight / catchweight
+  ) %>% 
+  pivot_longer(names_to = "variable", values_to = "data", discardperc) %>% 
+
+  ggplot() +
+  theme_publication() +
+  geom_bar(aes(x=trip2, y=data, fill=variable), stat="identity", position=position_dodge2(preserve="single")) +
+  coord_flip() +
+  scale_y_continuous(labels=scales::percent) 
+
+```
+
+
+```{r eval=FALSE, fig.asp=1.0, message=FALSE, warning=FALSE, comment=NA, include=FALSE}
+
+# NOT USED
+
+h %>% 
+  filter(year == 2023) %>% 
+  mutate(source="jaczon") %>% 
+  bind_rows(g %>% mutate(source="gfw")) %>% 
+  mutate(vessel = ifelse(vessel %in% c("SCH99","Z99"), "SCH99/Z99", vessel)) %>% 
+  mutate(quarter=paste0("Q", ceiling(month / 3))) %>% 
+  
+  ggplot(aes(x=lon, y=lat)) +
+  theme_publication() +
+  # coord_quickmap(xlim=c(-3,5) , ylim=c(49.5,53)) +
+  coord_quickmap(xlim=c(-4,6) , ylim=c(49.5,55)) +
+  geom_polygon(data=world_mr_df, aes(x=long, y=lat, group=group), fill = "grey75") +
+  geom_point(aes(colour=source), size=0.5, alpha=0.2) +
+  # geom_point(aes(colour=vesselname), size=0.5, alpha=0.5) +
+  # facet_wrap(~month, ncol=3)
+  # facet_wrap(~week, ncol=10)
+  facet_grid(vessel ~ quarter)
+
+```
+
 
 <!-- ########################################################################################## -->
 <!-- Figure: Mackerel by size category                                            -->
