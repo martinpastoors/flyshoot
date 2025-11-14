@@ -195,7 +195,7 @@ t <-
         nhauls        = n_distinct(paste(vessel, trip, haul)),
         nrects        = n_distinct(rect),
         # nlandedweight  = sum(!is.na(landingweight)),
-        ntotalcatch   = sum(!is.na(catchweight))
+        # ntotalcatch   = sum(!is.na(catchweight))
       ),
     k %>% 
       filter(year %in% yrs) %>% 
@@ -203,20 +203,40 @@ t <-
       summarise(gewicht = sum(gewicht, na.rm=TRUE)) %>% 
       group_by(year, month) %>% 
       summarise(
-        nlandedcatch  = sum(!is.na(gewicht)),
+        # nlandedcatch  = sum(!is.na(gewicht)),
         landedcatch   = sum(gewicht)
       ) %>% 
       ungroup() %>% 
       dplyr::select(-year, -month)
     
   )  %>% 
-  
+
+  # Discards reported
+  left_join(
+    e %>% 
+      filter(year %in% yrs) %>% 
+      filter(presentation == "DIS") %>% 
+      mutate(gewicht = as.numeric(ifelse(is.na(weight),0,weight)) + as.numeric(ifelse(is.na(weightundersized), 0, weightundersized))) %>% 
+      group_by(vessel, trip, haul, year, month) %>% 
+      summarise(
+        gewicht = sum(gewicht, na.rm=TRUE)      
+      ) %>% 
+      group_by(year, month) %>% 
+      summarise(
+        # ndiscardedcatch  = sum(!is.na(gewicht)),
+        discardedcatch   = sum(gewicht)
+      ) %>% 
+      ungroup() ,
+    by = c("year","month")
+  ) %>% 
+
   # discard ratio (for Aravis only)
   left_join(
     k %>% 
       filter(vessel %in% c("SCH99","Z99"), as.Date(datetime) >= lubridate::dmy("1/11/2023")) %>% 
       group_by(vessel, trip, haul, year, month) %>% 
       summarise(gewicht = sum(gewicht, na.rm=TRUE)) %>% 
+      
       left_join(h, by=c("vessel","trip","haul", "year", "month")) %>% 
       filter(!is.na(catchweight)) %>% 
     
@@ -243,9 +263,10 @@ t2 <-
     ndays = sum(ndays),
     nhauls = sum(nhauls),
     nrects = mean(nrects),
-    ntotalcatch = sum(ntotalcatch),
-    nlandedcatch = sum(nlandedcatch),
+    # ntotalcatch = sum(ntotalcatch),
+    # nlandedcatch = sum(nlandedcatch),
     landedcatch = sum(landedcatch),
+    discardedcatch = sum(discardedcatch, na.rm=TRUE),
     discardperc = mean(discardperc, na.rm=TRUE)
   ) %>% 
   mutate(
@@ -266,7 +287,7 @@ bind_rows(t, t2) %>%
                round        = c(0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0) )
 
   
-
+cat("Discard percentage based on SCH99 only")
 
 ```
 
@@ -675,6 +696,94 @@ print_option <- FALSE
 
 ```{r generating_maps, echo=FALSE, fig.align="center", fig.asp=1.0, message=FALSE, warning=FALSE}
 
+# Pre-calculate everything outside the loop
+xmin <- floor(2 * (min(k$lon, na.rm=TRUE)-0.5))/2
+xmax <- ceiling(2 * (max(k$lon, na.rm=TRUE)+0.5))/2
+ymin <- 49
+ymax <- ceiling(2* (max(k$lat, na.rm=TRUE)+0.5))/2
+
+xlim <- c(xmin, xmax)
+ylim <- c(ymin, ymax)
+
+show_species <- c("MAC","SQR","CTC","MUR","WHG","HOM")
+
+# Prepare data once
+t <-
+  k %>%
+  filter(species %in% show_species) %>% 
+  filter(year %in% 2023:2025) %>% 
+  filter(!(lat==0 & lon == 0)) %>% 
+  mutate(date = lubridate::as_date(datetime)) %>% 
+  mutate(quarter = lubridate::quarter(date)) %>% 
+  group_by(species, vessel, year, quarter, rect, date, haul, lat, lon) %>%
+  summarise(gewicht = sum(gewicht, na.rm=TRUE), .groups = 'drop') %>% 
+  filter(gewicht >= 20)
+
+# Pre-crop world data
+world_cropped <-
+  world_mr_df %>% 
+  filter(
+    long >= xlim[1], 
+    long <= xlim[2],
+    lat  >= ylim[1],
+    lat  <= ylim[2]
+  )
+
+# Calculate breaks once (using overall max)
+tt <- scales::trans_breaks("sqrt", function(x) x^2)(c(0, max(t$gewicht)))
+
+# Pre-filter haul data
+h_filtered <- h %>% filter(year %in% 2023:2025)
+
+# Split data by species once
+t_by_species <- split(t, t$species)
+
+# Loop through species
+for (myspecies in show_species) {
+  
+  t_sp <- t_by_species[[myspecies]]
+  
+  # Skip if no data for this species
+  if (is.null(t_sp) || nrow(t_sp) == 0) next
+  
+  p <-
+    ggplot(data=t_sp) +
+    theme_publication() +
+    theme(
+      text             = element_text(size=12),
+      plot.margin      = unit(c(0,0,0,0), "cm")
+    ) +
+    coord_quickmap(xlim=xlim, ylim=ylim) +
+    geom_polygon(data=world_cropped, aes(x=long, y=lat, group=group), fill = "grey75") +
+    geom_point(data=h_filtered,
+               aes(x=lon, y=lat, colour=as.character(year)),
+               shape=3, size=0.5, stroke=0.1, alpha=0.4) +
+    geom_point(aes(x=lon, y=lat, size = gewicht, colour = as.character(year)),
+                alpha = 0.4, shape=21) +
+    scale_size_continuous(breaks=tt, range=c(0.1, 5)) +
+    labs(x = NULL, y = NULL, size = "kg aanvoer/trek", colour="",
+         title=paste(myspecies,"Landings by haul")) +
+    guides(size = guide_legend(nrow = 1)) + 
+    facet_grid(quarter~year)
+
+  print(p)
+  
+  # ggsave(
+  #   filename = file.path(onedrive, "report", "FLYSHOOT trips overview", 
+  #                        paste0(myspecies, " landings by haul.png")),
+  #   plot = p,
+  #   width = 7,
+  #   height = 9.8,
+  #   units = "in",
+  #   dpi = 300
+  # )
+}
+
+```
+
+
+```{r generating_maps2, eval=FALSE, fig.align="center", fig.asp=1.0, message=FALSE, warning=FALSE, include=FALSE}
+
 # calculate the scaling of plots
 xmin <- floor(2 * (min(k$lon, na.rm=TRUE)-0.5))/2;
 xmax <- ceiling(2 * (max(k$lon, na.rm=TRUE)+0.5))/2;
@@ -683,29 +792,53 @@ ymax <- ceiling(2* (max(k$lat, na.rm=TRUE)+0.5))/2
 
 xlim <- c(xmin, xmax); ylim <- c(ymin, ymax)
 
+t <-
+  k %>%
+  filter(species %in% top$species) %>% 
+  filter(year %in% 2023:2025) %>% 
+  filter(!(lat==0 & lon == 0)) %>% 
+  mutate(date = lubridate::as_date(datetime)) %>% 
+  mutate(quarter = lubridate::quarter(date)) %>% 
+  # mutate(quarter = paste0("q",quarter)) %>% 
+  # group_by(species, vessel, year, month, date, rect, haul, lat, lon) %>%
+  group_by(species, vessel, year, quarter, rect, date, haul, lat, lon) %>%
+  summarise(gewicht = sum(gewicht, na.rm=TRUE)) %>% 
+  filter(gewicht >= 20)
+
+world_cropped <-
+  world_mr_df %>% 
+  filter(
+    long >= xlim[1], 
+    long <= xlim[2],
+    lat  >= ylim[1],
+    lat  <= ylim[2]
+  )
+
+tt <- scales::trans_breaks("sqrt", function(x) x^2)(c(0, max(t$gewicht)))
+
 # create list of catch by species by haul. From hm, or sph or else species = "oth"
 myspecies <- "COD"
 
 for (myspecies in top$species) {
   
-  t <-
-    k %>%
-    filter(species %in% myspecies) %>% 
-    filter(year %in% 2023:2025) %>% 
-    filter(!(lat==0 & lon == 0)) %>% 
-    mutate(date = lubridate::as_date(datetime)) %>% 
-    mutate(quarter = lubridate::quarter(date)) %>% 
-    # mutate(quarter = paste0("q",quarter)) %>% 
-    # group_by(species, vessel, year, month, date, rect, haul, lat, lon) %>%
-    group_by(species, vessel, year, quarter, rect, date, haul, lat, lon) %>%
-    summarise(gewicht = sum(gewicht, na.rm=TRUE)) %>% 
-    filter(gewicht >= 20)
-  
-
-  tt <- scales::trans_breaks("sqrt", function(x) x^2)(c(0, max(t$gewicht)))
+  # t <-
+  #   k %>%
+  #   filter(species %in% myspecies) %>% 
+  #   filter(year %in% 2023:2025) %>% 
+  #   filter(!(lat==0 & lon == 0)) %>% 
+  #   mutate(date = lubridate::as_date(datetime)) %>% 
+  #   mutate(quarter = lubridate::quarter(date)) %>% 
+  #   # mutate(quarter = paste0("q",quarter)) %>% 
+  #   # group_by(species, vessel, year, month, date, rect, haul, lat, lon) %>%
+  #   group_by(species, vessel, year, quarter, rect, date, haul, lat, lon) %>%
+  #   summarise(gewicht = sum(gewicht, na.rm=TRUE)) %>% 
+  #   filter(gewicht >= 20)
+  # 
+  # 
+  # tt <- scales::trans_breaks("sqrt", function(x) x^2)(c(0, max(t$gewicht)))
   
   p <-
-    ggplot(data=t) +
+    ggplot(data=filter(t, species == myspecies)) +
   
     theme_publication() +
     theme(
@@ -721,7 +854,7 @@ for (myspecies in top$species) {
     # geom_text(data=rect_df, aes(x=lon, y=lat, label=rect),
     #           hjust=0, vjust=0, nudge_x=0.05, nudge_y=0.025, colour="white") +
   
-    geom_polygon(data=world_mr_df, aes(x=long, y=lat, group=group), fill = "grey75") +
+    geom_polygon(data=world_cropped, aes(x=long, y=lat, group=group), fill = "grey75") +
   
     # geom_point(data=slice(tt, c(1,nrow(tt))),
     #           aes(x=lon, y=lat),
@@ -752,32 +885,32 @@ for (myspecies in top$species) {
 }
 ```
 
-```{r, echo=FALSE, fig.align="left", message=FALSE, warning=FALSE, cache=FALSE}
+```{r eval=FALSE, fig.align="left", message=FALSE, warning=FALSE, cache=FALSE, include=FALSE}
 knitr::include_graphics(file.path(onedrive, "report", "FLYSHOOT trips overview", 
                          paste0("MAC"," landings by haul.png")))
 ```
 
-```{r, echo=FALSE, fig.align="left", message=FALSE, warning=FALSE, cache=FALSE}
+```{r, echo=FALSE, fig.align="left", message=FALSE, warning=FALSE, cache=FALSE, include=FALSE}
 knitr::include_graphics(file.path(onedrive, "report", "FLYSHOOT trips overview", 
                          paste0("SQR"," landings by haul.png")))
 ```
 
-```{r, echo=FALSE, fig.align="left", message=FALSE, warning=FALSE, cache=FALSE}
+```{r, echo=FALSE, fig.align="left", message=FALSE, warning=FALSE, cache=FALSE, include=FALSE}
 knitr::include_graphics(file.path(onedrive, "report", "FLYSHOOT trips overview", 
                          paste0("CTC"," landings by haul.png")))
 ```
 
-```{r, echo=FALSE, fig.align="left", message=FALSE, warning=FALSE, cache=FALSE}
+```{r, echo=FALSE, fig.align="left", message=FALSE, warning=FALSE, cache=FALSE, include=FALSE}
 knitr::include_graphics(file.path(onedrive, "report", "FLYSHOOT trips overview", 
                          paste0("MUR"," landings by haul.png")))
 ```
 
-```{r, echo=FALSE, fig.align="left", message=FALSE, warning=FALSE, cache=FALSE}
+```{r, echo=FALSE, fig.align="left", message=FALSE, warning=FALSE, cache=FALSE, include=FALSE}
 knitr::include_graphics(file.path(onedrive, "report", "FLYSHOOT trips overview", 
                          paste0("WHG"," landings by haul.png")))
 ```
 
-```{r, echo=FALSE, fig.align="left", message=FALSE, warning=FALSE, cache=FALSE}
+```{r, echo=FALSE, fig.align="left", message=FALSE, warning=FALSE, cache=FALSE, include=FALSE}
 knitr::include_graphics(file.path(onedrive, "report", "FLYSHOOT trips overview", 
                          paste0("HOM"," landings by haul.png")))
 ```
@@ -1280,6 +1413,38 @@ t3 %>%
   # scale_x_continuous(breaks=1:53) +
   # facet_grid(year~division)
   facet_grid(vessel~year)
+
+```
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, comment=NA, fig.asp=1.0}
+
+fig_nums(
+  name    = "vangstsuccespersoort", level   = 1, display = FALSE,
+  caption = "gemiddelde vangst (aanvoer, kg) per dag, per soort en per schip")
+
+ee <- 
+  elog %>%
+  # filter(vessel %in% setvessel) %>% 
+  filter(species %in% top$species) %>% 
+  mutate(vessel = ifelse(vessel %in% c("SCH99","Z99"), "SCH99/Z99", vessel)) %>% 
+  mutate(species = factor(species, levels=c(top$species))) %>% 
+  group_by(vessel, year, date, species) %>% 
+  summarise(catchperday = sum(weight, na.rm=TRUE)) %>% 
+  group_by(vessel, year, species) %>% 
+  summarise(catchperday = mean(catchperday, na.rm=TRUE)) 
+
+# plot catchrate by species and vessel
+ee %>% 
+  ggplot(aes(x=year, y=catchperday)) +
+  theme_publication() +
+  # theme(legend.position = "none") +
+  geom_point(data=ee %>% filter(year < max(ee$year, na.rm=TRUE)),
+             aes(colour=vessel)) +
+  geom_point(data=ee %>% filter(year == max(ee$year, na.rm=TRUE)), colour="red", size=2) +
+  geom_line(aes(colour=vessel)) +
+  labs(title=paste("Gemiddelde aanvoer per dag"), y="aanvoer per dag (kg)")  +
+  expand_limits(y=0) +
+  facet_wrap(~species, scales="free_y")
 
 ```
 
