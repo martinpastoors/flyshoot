@@ -1,0 +1,667 @@
+---
+output:
+  word_document:
+    reference_docx: ../report_template.dotx
+params:
+  vessel: "SCH135"
+  startdate: !r lubridate::dmy("01/12/2025")
+  enddate: !r lubridate::dmy("04/12/2025")
+---
+
+
+```{r setup, include=FALSE}
+
+# ==========================================================================================================
+# FLYSHOOT Tripreport - Harmonized Version
+# 
+# This unified template supports both data streams:
+# - Stream 1: Multiple sources (haul, kisten, elog, gfw)
+# - Stream 2: PEFA only (elog data)
+# 
+# Created: December 2025
+# Based on: v1 and v2 harmonization
+# ==========================================================================================================
+
+# Reset lists
+rm(list=ls())
+
+# ==========================================================================================================
+# CONFIGURATION SECTION
+# ==========================================================================================================
+
+# Data source flags - control which data sources to load and use
+use_haul_data    <- TRUE   # Self-sampling haul data
+use_kisten_data  <- TRUE   # Marelec/scale data (landing weight by haul)
+use_elog_data    <- TRUE   # Electronic logbook (PEFA)
+use_gfw_data     <- FALSE  # Global Fishing Watch tracking data
+use_trip_data    <- TRUE   # Trip summary data
+
+# Report options
+comparisons      <- FALSE  # Include comparison plots between data sources
+target_aspect    <- 1.0    # Map aspect ratio (1.0 = square, >1 = portrait, <1 = landscape)
+buffer_pct       <- 0.1    # Map buffer as percentage (0.1 = 10% around data extent)
+
+# Trip selection mode: "date" or "manual" or "params"
+# "params" mode uses parameters passed from rendering script (recommended for automation)
+# "date" mode uses date range defined below
+# "manual" mode uses explicit trip IDs
+selection_mode   <- "params"
+
+# Check if parameters were passed (from rendering script)
+if(exists("params") && !is.null(params$vessel)) {
+  # Use parameters passed from rendering script
+  setvessel  <- params$vessel
+  startdate  <- params$startdate
+  enddate    <- params$enddate
+  selection_mode <- "date"  # Use date-based selection with parameters
+  
+} else if(selection_mode == "date") {
+  # Date-based selection (flexible, automatic trip discovery)
+  setvessel  <- "SCH135"
+  startdate  <- lubridate::dmy("01/12/2025")
+  enddate    <- lubridate::dmy("04/12/2025")
+  
+} else if(selection_mode == "manual") {
+  # Manual selection (explicit vessel and trip IDs)
+  setvessel  <- c("Z99", "SCH99")
+  settrip    <- c("2025264")
+}
+
+# ==========================================================================================================
+# SETUP
+# ==========================================================================================================
+
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE, 
+                      comment = "", crop = TRUE)
+knitr::opts_chunk$set(fig.width=10) 
+options(dplyr.summarise.inform = FALSE)
+
+# Libraries
+library(rmarkdown)
+library(tidyverse)
+library(lubridate)
+library(reshape2)
+library(RColorBrewer)
+library(viridis)
+library(pander)
+library(captioner)
+library(patchwork)
+library(icosa)
+
+# Initialize captioners
+tab_nums <- captioner::captioner(prefix = "Table ", levels=1, type=c("n"), infix=".")
+fig_nums <- captioner::captioner(prefix = "Figure ", levels=1, type=c("n"), infix=".")
+
+# Source utility functions
+source("../r/FLYSHOOT utils.R")
+
+# ==========================================================================================================
+# SPATIAL DATA SETUP
+# ==========================================================================================================
+
+# Determine spatial data directory
+get_spatial_dir <- function() {
+  user_home <- Sys.getenv("USERPROFILE")
+  if(user_home == "") user_home <- Sys.getenv("HOME")
+  
+  potential_paths <- c(
+    file.path(user_home, "OneDrive - Martin Pastoors/DATA/RDATA"),
+    file.path(user_home, "OneDrive/DATA/RDATA"),
+    "../DATA/RDATA"
+  )
+  
+  for(path in potential_paths) {
+    if(dir.exists(path)) return(path)
+  }
+  
+  stop("Could not find spatial data directory. Please set manually.")
+}
+
+spatialdir <- get_spatial_dir()
+
+# Load spatial data
+load(file.path(spatialdir, "world_lr_sf.RData"))
+load(file.path(spatialdir, "world_mr_sf.RData"))
+load(file.path(spatialdir, "world_lr_df.RData"))
+load(file.path(spatialdir, "world_mr_df.RData"))
+
+# Optional spatial data
+if(file.exists(file.path(spatialdir, "eez.df.RData"))) {
+  load(file.path(spatialdir, "eez.df.RData"))
+}
+
+# ICES rectangles
+rect_df <-
+  loadRData(file.path(spatialdir, "rect_df.RData")) %>% 
+  rename(rect = ICESNAME) %>% 
+  group_by(rect) %>% 
+  filter(row_number() == 1) %>% 
+  dplyr::select(rect, lon = long, lat)
+
+# ASFIS species codes
+asfis <-
+  loadRData(file.path(spatialdir, "asfis.RData")) %>% 
+  lowcase()
+
+# ==========================================================================================================
+# DATA LOADING
+# ==========================================================================================================
+
+# Set OneDrive directory
+onedrive <- get_onedrive(team="Martin Pastoors", site="FLYSHOOT - General/rdata")
+
+# Conditional data loading based on flags
+if(use_haul_data) {
+  load(file.path(onedrive, "haul.RData"))
+}
+
+if(use_kisten_data) {
+  load(file.path(onedrive, "kisten.RData"))
+}
+
+if(use_trip_data) {
+  load(file.path(onedrive, "trip.RData"))
+}
+
+if(use_elog_data) {
+  load(file.path(onedrive, "elog.RData"))
+  load(file.path(onedrive, "elog_trek.RData"))
+}
+
+if(use_gfw_data) {
+  load(file.path(onedrive, "gfw.RData"))
+}
+
+# ==========================================================================================================
+# HELPER FUNCTIONS
+# ==========================================================================================================
+
+# Species standardization function
+standardize_species <- function(data, species_col = "species") {
+  data %>% 
+    mutate(
+      !!species_col := case_when(
+        !!sym(species_col) == "SQC" ~ "SQR",  # Squid codes
+        TRUE ~ !!sym(species_col)
+      )
+    )
+}
+
+# Universal data filtering function
+filter_trip_data <- function(data, vessel_filter, trip_filter = NULL, 
+                             date_range = NULL, data_type = NULL) {
+  
+  result <- data %>% 
+    filter(vessel %in% vessel_filter)
+  
+  if(!is.null(trip_filter)) {
+    result <- result %>% filter(trip %in% trip_filter)
+  }
+  
+  if(!is.null(date_range)) {
+    date_col <- case_when(
+      data_type == "elog" ~ "catchdate",
+      data_type == "haul" ~ "date",
+      data_type == "kisten" ~ "datetime",
+      TRUE ~ "date"
+    )
+    result <- result %>% 
+      filter(!!sym(date_col) >= date_range[1],
+             !!sym(date_col) <= date_range[2])
+  }
+  
+  # Data-specific cleaning
+  if(data_type == "elog_trek") {
+    result <- result %>% 
+      mutate(lon = ifelse(lon == 0 & lat == 0, NA, lon),
+             lat = ifelse(is.na(lon) & lat == 0, NA, lat))
+  }
+  
+  if(data_type == "kisten") {
+    result <- result %>% 
+      mutate(soorten = tolower(soorten)) %>% 
+      distinct()
+  }
+  
+  return(result)
+}
+
+# Function to calculate optimal map extent with buffer
+calculate_map_extent <- function(data, lon_col = "lon", lat_col = "lat", 
+                                buffer_pct = 0.1, target_aspect = 1.0) {
+  
+  # Get data ranges
+  lon_range <- range(data[[lon_col]], na.rm = TRUE)
+  lat_range <- range(data[[lat_col]], na.rm = TRUE)
+  
+  # Add buffer
+  lon_buffer <- diff(lon_range) * buffer_pct
+  lat_buffer <- diff(lat_range) * buffer_pct
+  
+  xmin <- floor(lon_range[1] - lon_buffer)
+  xmax <- ceiling(lon_range[2] + lon_buffer)
+  ymin <- floor((lat_range[1] - lat_buffer) * 2) / 2
+  ymax <- ceiling((lat_range[2] + lat_buffer) * 2) / 2
+  
+  # Calculate actual distances using icosa
+  xdistance <- icosa::arcdist(p1 = c(xmin, ymin), p2 = c(xmax, ymin))
+  ydistance <- icosa::arcdist(p1 = c(xmin, ymin), p2 = c(xmin, ymax))
+  data_aspect <- ydistance / xdistance
+  
+  # Adjust to target aspect ratio
+  if (data_aspect > target_aspect) {
+    # Too tall, expand width
+    extra_x <- (ydistance / target_aspect - xdistance) / 2
+    extra_x_deg <- extra_x / 111  # approximate km to degrees
+    xmin <- xmin - extra_x_deg
+    xmax <- xmax + extra_x_deg
+  } else {
+    # Too wide, expand height
+    extra_y <- (xdistance * target_aspect - ydistance) / 2
+    extra_y_deg <- extra_y / 111
+    ymin <- ymin - extra_y_deg
+    ymax <- ymax + extra_y_deg
+  }
+  
+  return(list(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax,
+              xdistance = xdistance, ydistance = ydistance, 
+              aspect = data_aspect))
+}
+
+# Function to calculate optimal figure layout
+calculate_figure_layout <- function(n_panels, plot_type = "map") {
+  
+  if(plot_type == "map") {
+    # Maps look better in grid layouts
+    if(n_panels <= 4) {
+      ncol <- 2
+      panel_aspect <- 1.0
+    } else if(n_panels <= 9) {
+      ncol <- 3
+      panel_aspect <- 1.0
+    } else if(n_panels <= 16) {
+      ncol <- 4
+      panel_aspect <- 1.0
+    } else {
+      ncol <- 5
+      panel_aspect <- 1.0
+    }
+  } else if(plot_type == "timeseries") {
+    # Time series look better wider
+    if(n_panels <= 4) {
+      ncol <- 2
+      panel_aspect <- 1.25
+    } else if(n_panels <= 9) {
+      ncol <- 3
+      panel_aspect <- 1.25
+    } else {
+      ncol <- 4
+      panel_aspect <- 1.25
+    }
+  }
+  
+  nrows <- ceiling(n_panels / ncol)
+  fig_width <- knitr::opts_chunk$get("fig.width")
+  fig_height <- (fig_width / ncol) * panel_aspect * nrows + 1.5
+  fig_height <- min(fig_height, 10)
+  
+  return(list(ncol = ncol, nrows = nrows, 
+              fig_height = fig_height, 
+              panel_aspect = panel_aspect))
+}
+
+# ==========================================================================================================
+# TRIP SELECTION AND DATA FILTERING
+# ==========================================================================================================
+
+# Derive trip IDs if using date-based selection
+if(selection_mode == "date" && use_elog_data) {
+  settrip <- elog %>% 
+    filter(vessel %in% setvessel,
+           catchdate >= startdate,
+           catchdate <= enddate) %>% 
+    distinct(trip) %>% 
+    pull(trip)
+}
+
+# Filter all data sources
+if(use_elog_data) {
+  e <- filter_trip_data(elog, setvessel, settrip, data_type = "elog") %>% 
+    standardize_species()
+  
+  et <- filter_trip_data(elog_trek, setvessel, settrip, data_type = "elog_trek") %>% 
+    standardize_species()
+}
+
+if(use_haul_data) {
+  h <- filter_trip_data(haul, setvessel, settrip, data_type = "haul")
+}
+
+if(use_kisten_data) {
+  m <- filter_trip_data(kisten, setvessel, settrip, data_type = "kisten")
+}
+
+if(use_trip_data) {
+  tt <- trip %>% 
+    filter(vessel %in% setvessel, trip %in% settrip)
+}
+
+if(use_gfw_data) {
+  g <- gfw %>% 
+    filter(vessel %in% setvessel) %>% 
+    filter(date >= min(e$date, na.rm=TRUE), 
+           date <= max(e$date, na.rm=TRUE))
+}
+
+# Data availability check
+data_available <- FALSE
+if(use_elog_data && (nrow(e) > 0 || nrow(et) > 0)) {
+  data_available <- TRUE
+} else if(use_haul_data && nrow(h) > 0) {
+  data_available <- TRUE
+} else if(use_kisten_data && nrow(m) > 0) {
+  data_available <- TRUE
+}
+
+if(!data_available) {
+  stop(paste("No data found for vessel(s):", 
+             paste(setvessel, collapse=", "), 
+             "and trip(s):", 
+             paste(settrip, collapse=", ")))
+}
+
+# ==========================================================================================================
+# CALCULATE MAP EXTENT
+# ==========================================================================================================
+
+# Determine which data to use for extent calculation
+extent_data <- NULL
+if(use_elog_data && nrow(et) > 0) {
+  extent_data <- et
+} else if(use_elog_data && nrow(e) > 0) {
+  extent_data <- e
+} else if(use_haul_data && nrow(h) > 0) {
+  extent_data <- h
+}
+
+if(!is.null(extent_data)) {
+  extent <- calculate_map_extent(extent_data, 
+                                 buffer_pct = buffer_pct, 
+                                 target_aspect = target_aspect)
+  list2env(extent, envir = .GlobalEnv)
+}
+
+# ==========================================================================================================
+# SPECIES CONFIGURATION
+# ==========================================================================================================
+
+# Determine top species for detailed analysis
+myspecies <- e %>%
+  group_by(species) %>%
+  summarise(weight = sum(weight, na.rm = TRUE)) %>%
+  arrange(desc(weight)) %>%
+  slice_head(n = 10) %>%
+  left_join(dplyr::select(asfis, species, englishname, dutchname), 
+            by = "species") %>%
+  mutate(english_species = paste(englishname, species))
+
+nspecies_actual <- nrow(myspecies)
+
+```
+
+
+# Vessel tripreport `r paste(unique(e$vessel), collapse=", ")`, trip `r paste(unique(e$trip), collapse=", ")`
+
+### Trip start: `r format(min(e$date, na.rm=TRUE), '%d/%m/%Y')`, end: `r format(max(e$date, na.rm=TRUE), '%d/%m/%Y')`
+
+Report generated: `r format(Sys.time(), '%d/%m/%Y')`
+
+&nbsp;
+
+<!-- ########################################################################################## -->
+<!-- Table: Trip Summary                                                                      -->
+<!-- ########################################################################################## -->
+
+```{r samenvatting, echo=FALSE, message=FALSE, warning=FALSE, comment=NA}
+
+tab_nums(
+  name    = "samenvatting", 
+  level   = 1, 
+  display = FALSE,
+  caption = "Samenvatting van de reis")
+
+# Create trip summary based on available data
+if(use_elog_data && nrow(et) > 0) {
+  
+  c1 <- et %>%
+    group_by(vessel, trip) %>%
+    summarise(
+      nhauls = n_distinct(haul),
+      startdate = min(date, na.rm = TRUE),
+      enddate = max(date, na.rm = TRUE),
+      weeks = paste(unique(week), collapse = ", "),
+      months = paste(unique(month), collapse = ", "),
+      divisions = paste(unique(na.omit(faozone)), collapse = "; "),
+      rects = paste(unique(na.omit(rect)), collapse = "; "),
+      .groups = "drop"
+    ) %>%
+    mutate(
+      ndays = as.numeric(difftime(enddate, startdate, units = "days")) + 1,
+      haulsperday = round(nhauls / ndays, 2)
+    )
+  
+} else if(use_elog_data && nrow(e) > 0) {
+  
+  message("Note: Using elog summary data (no haul-level information)")
+  
+  c1 <- e %>%
+    group_by(vessel, trip) %>%
+    summarise(
+      startdate = min(date, na.rm = TRUE),
+      enddate = max(date, na.rm = TRUE),
+      weeks = paste(unique(week), collapse = ", "),
+      months = paste(unique(month), collapse = ", "),
+      divisions = paste(unique(na.omit(faozone)), collapse = "; "),
+      rects = paste(unique(na.omit(rect)), collapse = "; "),
+      .groups = "drop"
+    ) %>%
+    mutate(
+      ndays = as.numeric(difftime(enddate, startdate, units = "days")) + 1
+    )
+  
+} else if(use_haul_data && nrow(h) > 0) {
+  
+  c1 <- h %>%
+    group_by(vessel, trip) %>%
+    summarise(
+      nhauls = n_distinct(haul),
+      startdate = min(date, na.rm = TRUE),
+      enddate = max(date, na.rm = TRUE),
+      weeks = paste(unique(week), collapse = ", "),
+      months = paste(unique(month), collapse = ", "),
+      .groups = "drop"
+    ) %>%
+    mutate(
+      ndays = as.numeric(difftime(enddate, startdate, units = "days")) + 1,
+      haulsperday = round(nhauls / ndays, 2)
+    )
+}
+
+# Display summary table
+c1 %>%
+  dplyr::select(-vessel, -trip) %>%
+  pandoc.table(.,
+               style        = "simple",
+               split.tables = 100, 
+               split.cells  = c(rep(7, 10)),
+               justify      = "right",
+               missing      = "",
+               big.mark     = ',', 
+               round        = c(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1))
+
+```
+
+_`r tab_nums("samenvatting")`_
+
+<!-- ########################################################################################## -->
+<!-- Rest of report chunks follow similar pattern...                                          -->
+<!-- Note: In actual implementation, all chunks from both v1 and v2 would be included here   -->
+<!-- with appropriate conditional logic based on data availability                            -->
+<!-- ########################################################################################## -->
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+# Example: Conditional species composition table
+
+if(use_elog_data && nrow(e) > 0) {
+  
+  tab_nums(
+    name    = "catchbyspecies", 
+    level   = 1, 
+    display = FALSE,
+    caption = "Vangst per soort")
+  
+  e %>%
+    group_by(species) %>%
+    summarise(weight = sum(weight, na.rm = TRUE)) %>%
+    arrange(desc(weight)) %>%
+    left_join(dplyr::select(asfis, species, englishname, dutchname), 
+              by = "species") %>%
+    dplyr::select(Species = englishname, Code = species, 
+                 Dutch = dutchname, Weight = weight) %>%
+    pandoc.table(.,
+                 style        = "simple",
+                 justify      = "left",
+                 missing      = "",
+                 big.mark     = ',',
+                 round        = 0)
+}
+
+```
+
+_`r tab_nums("catchbyspecies")`_
+
+\newpage
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, comment=NA, fig.asp=1.2}
+
+# Example: Map of fishing locations with dynamic sizing
+
+if(!is.null(extent_data)) {
+  
+  fig_nums(
+    name    = "tripmap", 
+    level   = 1, 
+    display = FALSE,
+    caption = "Overzicht van de visserij locaties")
+  
+  # Create base map
+  p <- ggplot() +
+    theme_publication() +
+    theme(
+      panel.grid.minor = element_blank(),
+      text = element_text(size = 12),
+      plot.margin = unit(c(0, 0, 0, 0), "cm"),
+      panel.background = element_rect(fill = "lightskyblue1")
+    ) +
+    coord_quickmap(xlim = c(xmin, xmax), ylim = c(ymin, ymax)) +
+    geom_text(data = rect_df, 
+              aes(x = lon, y = lat, label = rect),
+              hjust = 0, vjust = 0, 
+              nudge_x = 0.05, nudge_y = 0.025, 
+              colour = "white") +
+    geom_polygon(data = world_mr_df, 
+                 aes(x = long, y = lat, group = group), 
+                 fill = "grey75")
+  
+  # Add data based on what's available
+  if(use_elog_data && nrow(et) > 0) {
+    p <- p + 
+      geom_point(data = et, 
+                 aes(x = lon, y = lat, colour = factor(haul)),
+                 size = 3, alpha = 0.7)
+  } else if(use_haul_data && nrow(h) > 0) {
+    p <- p + 
+      geom_point(data = h, 
+                 aes(x = lon, y = lat, colour = factor(haul)),
+                 size = 3, alpha = 0.7)
+  }
+  
+  p <- p +
+    scale_x_continuous(breaks = seq(floor(xmin), ceiling(xmax), 1)) +
+    scale_y_continuous(breaks = seq(floor(2*ymin)/2, ceiling(2*ymax)/2, 0.5)) +
+    labs(x = NULL, y = NULL, colour = "Haul")
+  
+  print(p)
+}
+
+```
+
+_`r fig_nums("tripmap")`_
+
+\newpage
+
+```{r}
+# Calculate layout for species plots
+layout <- calculate_figure_layout(nspecies_actual, plot_type = "timeseries")
+```
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, comment=NA, fig.height=layout$fig_height}
+
+# Example: Cumulative catch by species with dynamic layout
+
+if(use_elog_data && nrow(e) > 0) {
+  
+  fig_nums(
+    name    = "aanvoerperweekenjaar", 
+    level   = 1, 
+    display = FALSE,
+    caption = "Cumulatieve aanvoer per soort, week en jaar")
+  
+  ee <- elog %>%
+    standardize_species() %>%
+    filter(vessel %in% setvessel, 
+           year >= year(max(e$date)) - 3, 
+           date <= max(e$date), 
+           species %in% myspecies$species) %>%
+    mutate(vessel = ifelse(vessel %in% c("SCH99", "Z99"), 
+                          "SCH99/Z99", vessel)) %>%
+    group_by(vessel, species, year, week) %>%
+    summarise(landingweight = sum(weight, na.rm = TRUE), 
+              .groups = "drop") %>%
+    group_by(vessel, species, year) %>%
+    arrange(week) %>%
+    mutate(cumweight = cumsum(landingweight)) %>%
+    mutate(year = as.character(year)) %>%
+    mutate(species = factor(species, levels = myspecies$species))
+  
+  # Plot with dynamic layout
+  ee %>%
+    ggplot() +
+    theme_publication() +
+    geom_line(aes(x = week, y = cumweight, 
+                 colour = year, linewidth = year, alpha = year)) +
+    scale_linewidth_manual("year", 
+                          values = c("2022" = 0.5, "2023" = 0.5, 
+                                    "2024" = 0.5, "2025" = 1.5), 
+                          guide = "none") +
+    scale_colour_manual("year", 
+                       values = c("2022" = "gray40", "2023" = "gray40", 
+                                 "2024" = "blue", "2025" = "red")) +
+    scale_alpha_manual("year", 
+                      values = c("2022" = 1, "2023" = 1, 
+                                "2024" = 1, "2025" = 0.5), 
+                      guide = "none") +
+    labs(title = paste(unique(ee$vessel), 
+                      "cumulatieve aanvoer per soort, week en jaar"), 
+         y = "aanvoer (kg, cumulatief)") +
+    facet_wrap(~species, scales = "free_y", ncol = layout$ncol)
+}
+
+```
+
+_`r fig_nums("aanvoerperweekenjaar")`_
+
+<!-- ########################################################################################## -->
+<!-- Additional report sections would continue here                                           -->
+<!-- All chunks from v1 and v2 should be included with appropriate conditional logic          -->
+<!-- ########################################################################################## -->

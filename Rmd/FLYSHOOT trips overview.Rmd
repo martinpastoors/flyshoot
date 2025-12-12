@@ -167,6 +167,15 @@ top <-
 #   filter(is.na(presentation), year==2025) %>% 
 #   View()
 
+e %>%
+  filter(year>= 2023) %>%
+  filter(faozone %in% c("27.7.d", "27.7.e", "27.4.b","27.4.c")) %>% 
+  mutate(area = ifelse(faozone %in% c("27.7.d", "27.7.e"), "channel","northsea")) %>% 
+  group_by(species, scientificname, dutchname, area) %>% 
+  summarise(weight = sum(weight, na.rm=TRUE)) %>% 
+  writexl::write_xlsx(., path="export.xlsx")
+
+
 ```
 
 
