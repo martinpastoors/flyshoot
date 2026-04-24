@@ -2,6 +2,7 @@
 #
 # 20/03/2023
 # 23/12/2024 updated
+# 30/12/2025 updated
 
 library(tidyverse)
 library(lubridate)
@@ -12,11 +13,11 @@ rm(list=ls())
 source("../prf/r/my utils.R")
 
 asfis <-
-  loadRData("C:/DATA/RDATA/asfis.RData") %>% 
+  loadRData("C:/Users/MartinPastoors/OneDrive - Martin Pastoors/DATA/RDATA/asfis.RData") %>% 
   rename_all(tolower) %>% 
   dplyr::select(species, scientificname, englishname, dutchname)
 
-p <-
+regulated <-
   readxl::read_excel(file.path("C:/Users/MartinPastoors/Martin Pastoors/FLYSHOOT - General/data","regulated species.xlsx"),
                      col_names=TRUE, 
                      # col_types="text",
@@ -51,24 +52,45 @@ for (i in 1:length(filelist)) {
         setNames(gsub("eur","", names(.))) %>% 
         dplyr::select(-x) %>% 
         rename(dutchname=specie) %>%
-        left_join(p, by="dutchname") 
+        
+        # join with regulated
+        left_join(regulated, by="dutchname") %>% 
+        
+        # join with asfis
+        dplyr::select(-dutchname) %>% 
+        left_join(asfis, by="species")
     )
 }
 
+# skimr::skim(df)
+# df %>% filter(is.na(species)) %>% View()
+# df %>% filter(grepl("kat", tolower(dutchname))) %>% View()
+# df %>% filter(is.na(dutchname.y)) %>% View()
+# df %>% 
+#   filter(species %in% c("CTC","SQR","MAC")) %>% 
+#   ggplot(aes(x=year, y=avgprice)) +
+#   theme_publication() +
+#   geom_point(aes(colour=vessel)) +
+#   geom_line(aes(colour=vessel)) +
+#   facet_wrap(~species)
+
+df_raw <- df
+
 df <-
   df %>% 
-  group_by(year, species, regulated) %>% 
+  group_by(year, species, scientificname, englishname, dutchname, regulated) %>% 
   summarise(
     avgprice = weighted.mean(avgprice, weight),
     avgauction = weighted.mean(avgauction, weight),          
     weight   = sum(weight, na.rm=TRUE)
   ) %>% 
-  left_join(asfis, by="species") %>% 
-  drop_na(species)
+  drop_na(species) %>% 
+  ungroup()
 
 
+readr::write_rds(df_raw, file.path("C:/Users/MartinPastoors/Martin Pastoors/FLYSHOOT - General/rdata","prices_raw.rds"))
 readr::write_rds(df, file.path("C:/Users/MartinPastoors/Martin Pastoors/FLYSHOOT - General/rdata","prices.rds"))
-        
+
 
 # No longer needed    
 

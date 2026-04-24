@@ -9,10 +9,12 @@ library(readxl)
 rm(list=ls())
 
 source("../prf/r/my utils.R")
+datadir <- "C:/Users/MartinPastoors/OneDrive - Martin Pastoors/DATA"
+rdatadir <- "C:/Users/MartinPastoors/OneDrive - Martin Pastoors/DATA/RDATA"
 
 # read ERS and ASFIS
 ers       <- 
-  readxl::read_excel("C:/DATA/ERS-NL codeboek V3 vissoort codes e-catch MP.xls", sheet="Vissoorten") %>% 
+  readxl::read_excel(file.path(datadir, "ERS-NL codeboek V3 vissoort codes e-catch MP.xls"), sheet="Vissoorten") %>% 
   filter(!grepl("NIET", OPMERKING)) %>% 
   
   # dplyr::select(-OPMERKING) %>%
@@ -28,7 +30,7 @@ ers       <-
 # old asfis
 
 asfis_old <- 
-  readxl::read_excel("C:/DATA/FAO ASFIS 6 languages_2014 plus dutch and english.xlsx", col_types = "text") %>% 
+  readxl::read_excel(file.path(datadir, "FAO ASFIS 6 languages_2014 plus dutch and english.xlsx"), col_types = "text") %>% 
   rename(species = "3A_CODE") %>% 
   lowcase() %>% 
   ungroup() %>% 
@@ -37,7 +39,7 @@ asfis_old <-
 
 
 asfis <- 
-  readxl::read_excel("C:/DATA/FAO ASFIS_sp_2022_REV1.xlsx") %>% 
+  readxl::read_excel(file.path(datadir, "FAO ASFIS_sp_2022_REV1.xlsx")) %>% 
   rename(species = "3A_CODE") %>% 
   lowcase() %>% 
   left_join(asfis_old) %>% 
@@ -56,6 +58,8 @@ asfis <-
   dplyr::select(-dutch_name2) 
   
 
-save(asfis, file="C:/DATA/RDATA/asfis.RData") 
+save(asfis, file=file.path(rdatadir, "asfis.RData")) 
 
-  
+# asfis %>% filter(grepl("krab", tolower(dutchname))) %>% View()
+# asfis %>% filter(grepl("hyas araneus", tolower(scientificname))) %>% View()
+
