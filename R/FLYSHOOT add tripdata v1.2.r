@@ -27,6 +27,7 @@ move_data  = TRUE
 
 onedrive   = "C:/Users/MartinPastoors/Martin Pastoors/FLYSHOOT - General/rdata"
 tripdir    = "C:/Users/MartinPastoors/Martin Pastoors/FLYSHOOT - General/tripdata"
+gfwdir     = "C:/Users/MartinPastoors/Martin Pastoors/FLYSHOOT - General/data/GFW"
 spatialdir = "C:/Users/MartinPastoors/OneDrive - Martin Pastoors/DATA/RDATA"
   
 
@@ -74,6 +75,20 @@ load(file.path(onedrive, "soorten.RData"))
 
 # elog <- elog %>% filter(paste0(vessel, trip) %notin% c("SCH1352023344", "SCH1352023345","SCH1352023346", "SCH1352023347")) 
 # save(elog,         file = file.path(onedrive, "elog.RData"))  
+
+# GFW coupling
+# source("r/GFW_digivloot_matching.R")
+
+# gfw_trips  <- readRDS(file.path(gfwdir, "gfw_trips_cumulative.rds")) %>%
+#   add_digivloot_ids(
+#     gfw_trips = .,
+#     digivloot_data = trip,
+#     vessel_mapping = create_vessel_mapping()
+#   )
+
+# gfw_events <- readRDS(file.path(gfwdir, "gfw_events_by_trip_cumulative.rds"))
+# gfw_trips %>% filter(trip_year == 2026, vessel == "SCH99") %>% View()
+
 
 # ----------------------------------------------------------------------------
 # inventory of files to be processed

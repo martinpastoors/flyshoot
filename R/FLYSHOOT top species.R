@@ -16,7 +16,7 @@ require(tidyverse, quietly=TRUE)     # combined package of dplyr, tidyr, ggplot,
 source("R/FLYSHOOT utils.r")
 # source("../mptools/R/get_onedrive.r")
 
-spatialdir <- "C:/DATA/RDATA"
+spatialdir <- "C:/Users/MartinPastoors/OneDrive - Martin Pastoors/DATA/RDATA"
 asfis <- 
   loadRData(file.path(spatialdir, "asfis.RData")) %>% 
   rename_all(tolower) 
@@ -71,7 +71,7 @@ top   <-
     englishspecies = ifelse(species == "PIL", "European pilchard PIL", englishspecies)
   ) %>% 
   arrange(desc(value)) %>% 
-  slice_head(n=15)
+  slice_head(n=12)
 
 readr::write_rds(top, file=file.path(onedrive,
                                      "rdata",

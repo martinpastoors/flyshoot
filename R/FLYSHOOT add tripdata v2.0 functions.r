@@ -627,7 +627,7 @@ get_trip_from_h <- function(h) {
     mutate(source = unique(h$source[!is.na(h$source)])) %>% 
     ungroup() %>% 
     bind_rows(dplyr::select(h,
-                            vessel, trip, haul, date, lat, lon, source)) %>% 
+                            vessel, trip, haul, date=shoottime, lat, lon, source)) %>% 
     arrange(vessel, trip, haul) %>% 
     
     # calculate distance between shoot and haul positions

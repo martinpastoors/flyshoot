@@ -26,6 +26,7 @@ rm(list=ls())
 add_data   = TRUE
 move_data  = TRUE
 
+
 onedrive   = "C:/Users/MartinPastoors/Martin Pastoors/FLYSHOOT - General/rdata"
 tripdir    = "C:/Users/MartinPastoors/Martin Pastoors/FLYSHOOT - General/tripdata"
 spatialdir = "C:/Users/MartinPastoors/OneDrive - Martin Pastoors/DATA/RDATA"
@@ -216,6 +217,7 @@ for (i in 1:nrow(my_trips)) {
     if(add_data) {
       
       elog <-
+      # tmp <-
         elog %>%
         filter(paste0(vessel, trip) %notin% paste0(e$vessel, e$trip)) %>%
         bind_rows(e)
@@ -235,8 +237,9 @@ for (i in 1:nrow(my_trips)) {
     
   }
   
+  # elog %>% filter(catchdate >= dmy("26/1/2026")) %>% group_by(vessel, trip) %>% summarise(weight=sum(weight, na.rm=TRUE))
+  # elog %>% filter(vessel=="SL9", catchdate >= dmy("1/1/2026")) %>% group_by(vessel, trip, date) %>% summarise(weight=sum(weight, na.rm=TRUE)) %>% View()
   
-
 } # end of loop
 
 
