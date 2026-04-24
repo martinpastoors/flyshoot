@@ -1,0 +1,23 @@
+{
+  "onedrive_data": "C:/Users/MartinPastoors/Martin Pastoors/FLYSHOOT - General/data",
+  "onedrive_rdata": "C:/Users/MartinPastoors/Martin Pastoors/FLYSHOOT - General/rdata",
+  "tripdata": "C:/Users/MartinPastoors/Martin Pastoors/FLYSHOOT - General/tripdata",
+  "spatial_data": "C:/Users/MartinPastoors/OneDrive - Martin Pastoors/DATA/RDATA",
+  "raw_data_path": "C:/Users/MartinPastoors/Martin Pastoors/FLYSHOOT - General/data/raw",
+  "processed_data_path": "C:/Users/MartinPastoors/Martin Pastoors/FLYSHOOT - General/data/processed",
+  "outputs_path": "C:/Users/MartinPastoors/Martin Pastoors/FLYSHOOT - General/data/outputs",
+  "cache_path": "C:/Users/MartinPastoors/Martin Pastoors/FLYSHOOT - General/data/cache",
+  "archive_path": "C:/Users/MartinPastoors/Martin Pastoors/FLYSHOOT - General/data/archive",
+  "tripdata_input": "C:/Users/MartinPastoors/Martin Pastoors/FLYSHOOT - General/tripdata/_te verwerken",
+  "tripdata_processed": "C:/Users/MartinPastoors/Martin Pastoors/FLYSHOOT - General/tripdata/_verwerkt",
+  "file_patterns": {
+    "treklijst": "treklijst",
+    "kisten": "kisten",
+    "pefa": "elog pefa",
+    "pefa_trek": "elog_pefa_per_trek",
+    "mcatch": "elog mcatch"
+  },
+  "date_format": "%Y-%m-%d",
+  "add_spatial_data": true,
+  "validate_data": true
+}
