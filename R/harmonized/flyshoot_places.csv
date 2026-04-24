@@ -1,0 +1,30 @@
+name,lon,lat,type,harbour_code
+Den Helder,4.76,52.953,port,NLDHR
+IJmuiden,4.62,52.46,port,NLIJM
+Scheveningen,4.27,52.106,port,NLSCE
+Vlissingen,3.576,51.441,port,NLVLI
+Zeebrugge,3.196,51.33,port,BEZEE
+Stellendam,4.019,51.826,port,NLSTD
+Urk,5.601,52.663,port,NLURK
+Colijnsplaat,3.849,51.598,port,NLCOL
+Boulogne sur Mer,1.609,50.726,port,FRBOL
+Calais,1.856,50.951,port,FRCQF
+Dunkerque,2.377,51.034,port,FRDKK
+Le Havre,0.107,49.494,port,FRLEH
+Cherbourg,-1.64,49.634,port,FRCER
+Brest,-4.486,48.39,port,FRBES
+Brixham,-3.512,50.394,port,GBBRX
+Newhaven,0.056,50.789,port,GBNHV
+Plymouth,-4.143,50.37,port,GBPLY
+Newlyn,-5.546,50.101,port,GBNYL
+Peterhead,-1.78,57.51,port,GBPHD
+Fraserburgh,-2.003,57.692,port,GBFRB
+Harwich,1.282,51.95,port,GBHRW
+Lowestoft,1.751,52.477,port,GBLOW
+Grimsby,-0.087,53.563,port,GBGSY
+Amsterdam,4.895,52.37,city,
+Rotterdam,4.477,51.923,city,
+Antwerpen,4.402,51.22,city,
+Dover,1.304,51.127,city,
+London,-0.118,51.508,city,
+Hamburg,9.993,53.55,city,

@@ -1,0 +1,2687 @@
+---
+output:
+  word_document:
+    reference_docx: report_template.dotx
+---
+
+```{r setup, include=FALSE}
+
+# ==========================================================================================================
+# FLYSHOOT Tripreport
+# Updated: March 2026
+#
+# Sits in the same R/ folder as 00_setup.R – 03_main_workflow.R.
+# Relies on config.json (written by 00_setup.R) and load_flyshoot_data()
+# (defined in 02_storage_functions.R).
+#
+# All maps use geom_sf / sf objects — no geom_polygon / data.frame worlds.
+# ==========================================================================================================
+
+# rm(list = ls())  # removed: wipes calling environment when render() is used
+
+# ==========================================================================================================
+# PARAMETER HANDLING
+# ==========================================================================================================
+
+# Variables injected via envir= in render() call.
+# Fallback defaults used when running chunks interactively in RStudio.
+# Read render parameters passed via options() by the render script.
+# options() is process-global and immune to environment scoping issues.
+setvessel   <- getOption("flyshoot.vessel",      default = "SCH99")
+startdate   <- getOption("flyshoot.startdate",   default = lubridate::dmy("17/02/2026"))
+enddate     <- getOption("flyshoot.enddate",     default = lubridate::dmy("20/02/2026"))
+lang        <- getOption("flyshoot.lang",        default = "nl")
+max_species <- getOption("flyshoot.max_species", default = 12)
+
+cat(glue("\n  ▶ Rendering vessel: {setvessel} | {format(startdate,'%d/%m/%Y')} – {format(enddate,'%d/%m/%Y')}\n"))
+
+# ==========================================================================================================
+# LANGUAGE STRINGS — all UI text goes through txt("key")
+# ==========================================================================================================
+strings <- list(
+  nl = list(
+    cap_samenvatting = "Samenvatting van de reis",
+    cap_catch        = "Vangst per soort per dag (kg)",
+    cap_tripmap      = "Overzicht van de reis en de vangsten per trek",
+    cap_rectmap      = "Visserijlocaties per ICES rechthoek",
+    cap_cumul        = "Cumulatieve aanvoer per soort, week en jaar",
+    cap_haul_bar     = "Vangst per trek per soort",
+    cap_bubble       = "Vangst per trek - kaart (totaal gewicht)",
+    col_trip         = "Trip",
+    col_from         = "Van",
+    col_to           = "Tot",
+    col_days         = "Dagen",
+    col_hauls        = "Trekken",
+    col_hauls_day    = "Tr/dag",
+    col_distance     = "Afstand (nm)",
+    col_weeks        = "Week",
+    col_divisions    = "Divisie",
+    col_rects        = "ICES rect",
+    col_gear         = "Gear",
+    col_mesh         = "Maaswijdte (mm)",
+    col_vopening     = "Vert. opening (m)",
+    col_cable        = "Kabel (m)",
+    col_cablethick   = "Kabeldikte (mm)",
+    col_groundrope   = "Grondtouw (m)",
+    col_escape       = "Escape panel",
+    col_species      = "Soort",
+    col_code         = "Code",
+    col_total_kg     = "Totaal (kg)",
+    total_row        = "TOTAAL",
+    source_label     = "Bron",
+    cap_catch_overview = "Overzicht aanvoer en discards per reis",
+    cap_catch_zone   = "Vangst per soort per economische zone (kg)",
+    overall_discards   = "Totale discards per reis",
+    lbl_aanvoer        = "aanvoer",
+    lbl_vangst         = "totale vangst",
+    col_source       = "Bron",
+    col_presentation = "Presentatie",
+    col_discard_rsn  = "Discard reden",
+    col_weight_total = "Totaal (kg)",
+    row_total        = "Totaal",
+    row_elog         = "Elog",
+    row_elog_trek    = "Elog trek",
+    row_kisten       = "Kisten",
+    hdr_report       = "Reisoverzicht",
+    hdr_trip         = "Reis",
+    hdr_start        = "Start",
+    hdr_end          = "Einde",
+    hdr_trips_for    = "reis voor vaartuig",
+    hdr_generated    = "Rapport gegenereerd",
+    plot_locs        = "Overzicht van de reis en de vangsten per trek",
+    plot_trip_label  = "Reis:",
+    plot_rect        = "locaties per ICES rechthoek",
+    plot_cumul       = "cumulatieve aanvoer per soort",
+    plot_haul        = "vangst per trek",
+    plot_haul_kg     = "vangst per trek (kg)",
+    plot_trip_lbl    = "Reis:",
+    xlab_week        = "ISO week",
+    ylab_cumul       = "Aanvoer (kg, cumulatief)",
+    xlab_haul        = "Trek (haul_id)",
+    ylab_weight      = "Gewicht (kg)",
+    legend_species   = "Soort",
+    legend_year      = "Jaar",
+    legend_rect      = "ICES rect"
+  ),
+  en = list(
+    cap_samenvatting = "Trip summary",
+    cap_catch        = "Catch by species per day (kg)",
+    cap_tripmap      = "Overview of the trip and catches per haul",
+    cap_rectmap      = "Fishing locations by ICES rectangle",
+    cap_cumul        = "Cumulative landings by species, week and year",
+    cap_haul_bar     = "Catch per haul by species",
+    cap_bubble       = "Catch per haul - map (total weight)",
+    col_trip         = "Trip",
+    col_from         = "From",
+    col_to           = "To",
+    col_days         = "Days",
+    col_hauls        = "Hauls",
+    col_hauls_day    = "Hauls/day",
+    col_distance     = "Distance (nm)",
+    col_weeks        = "Week",
+    col_divisions    = "Division",
+    col_rects        = "ICES rect",
+    col_gear         = "Gear",
+    col_mesh         = "Mesh size (mm)",
+    col_vopening     = "Vert. opening (m)",
+    col_cable        = "Cable (m)",
+    col_cablethick   = "Cable diam. (mm)",
+    col_groundrope   = "Groundrope (m)",
+    col_escape       = "Escape panel",
+    col_species      = "Species",
+    col_code         = "Code",
+    col_total_kg     = "Total (kg)",
+    total_row        = "TOTAL",
+    source_label     = "Source",
+    cap_catch_overview = "Overview landings and discards per trip",
+    cap_catch_zone   = "Catch by species per economic zone (kg)",
+    overall_discards   = "Overall discards per trip",
+    lbl_aanvoer        = "landings",
+    lbl_vangst         = "total catch",
+    col_source       = "Source",
+    col_presentation = "Presentation",
+    col_discard_rsn  = "Discard reason",
+    col_weight_total = "Total (kg)",
+    row_total        = "Total",
+    row_elog         = "Elog",
+    row_elog_trek    = "Elog trek",
+    row_kisten       = "Kisten",
+    hdr_report       = "Tripreport",
+    hdr_trip         = "Trip",
+    hdr_start        = "Start",
+    hdr_end          = "End",
+    hdr_trips_for    = "trip(s) for vessel",
+    hdr_generated    = "Report generated",
+    plot_locs        = "Overview of the trip and catches per haul",
+    plot_trip_label  = "Trip:",
+    plot_rect        = "locations by ICES rectangle",
+    plot_cumul       = "cumulative landings by species",
+    plot_haul        = "catch per haul",
+    plot_haul_kg     = "catch per haul (kg)",
+    plot_trip_lbl    = "Trip:",
+    xlab_week        = "ISO week",
+    ylab_cumul       = "Landings (kg, cumulative)",
+    xlab_haul        = "Haul (haul_id)",
+    ylab_weight      = "Weight (kg)",
+    legend_species   = "Species",
+    legend_year      = "Year",
+    legend_rect      = "ICES rect"
+  )
+)
+txt <- function(key) { v <- strings[[lang]][[key]]; if (is.null(v)) stop("Unknown key: ", key); v }
+species_name_col <- if (lang == "nl") "dutchname" else "englishname"
+tab_prefix <- if (lang == "nl") "Tabel " else "Table "
+fig_prefix <- if (lang == "nl") "Figuur " else "Figure "
+
+# ==========================================================================================================
+# LIBRARIES
+# ==========================================================================================================
+
+library(withr)
+library(tidyverse)
+library(lubridate)
+library(arrow)
+library(sf)
+library(jsonlite)
+library(glue)
+library(flextable)
+library(officer)
+library(captioner)
+library(patchwork)
+library(viridis)
+library(icosa)
+library(ggnewscale)  # allows two fill scales in same plot
+# marmap and metR are optional — install for depth contours:
+# install.packages(c('marmap','metR'))
+
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE,
+                      comment = "", crop = TRUE, fig.width = 10)
+options(dplyr.summarise.inform = FALSE)
+
+tab_nums <- captioner::captioner(prefix = tab_prefix, levels = 1, type = "n", infix = ".")
+fig_nums <- captioner::captioner(prefix = fig_prefix, levels = 1, type = "n", infix = ".")
+
+# flextable defaults — applied to every table in the document
+flextable::set_flextable_defaults(
+  font.family  = "Calibri",
+  font.size    = 9,
+  border.color = "#AAAAAA",
+  padding      = 3,
+  theme_fun    = theme_vanilla
+)
+# Left-align all flextables on the page (no centering)
+knitr::opts_chunk$set(ft.align = "left")
+
+# ==========================================================================================================
+# PROJECT ROOT
+#
+# knitr knits in a fresh R session with a different working directory than your
+# interactive RStudio session. Relative paths and here::here() therefore behave
+# differently between the two contexts — the root cause of the path errors.
+#
+# Solution: store the project root in .Renviron so it is available identically
+# in every context (interactive, knit, batch render, Task Scheduler).
+#
+# One-time setup:
+#   1. Run:  usethis::edit_r_environ()
+#   2. Add:  FLYSHOOT_PROJECT=C:/GIT/flyshoot
+#            (use your actual project root — the folder containing config.json)
+#   3. Save and restart R (Session > Restart R)
+# ==========================================================================================================
+
+project_root <- Sys.getenv("FLYSHOOT_PROJECT")
+
+if (project_root == "") {
+  stop(
+    "Environment variable FLYSHOOT_PROJECT is not set.\n\n",
+    "  1. Run:  usethis::edit_r_environ()\n",
+    "  2. Add:  FLYSHOOT_PROJECT=C:/GIT/flyshoot\n",
+    "           (replace with the folder that contains config.json)\n",
+    "  3. Save, then restart R: Session > Restart R\n",
+    "  4. Knit again."
+  )
+}
+
+# Convenience wrapper — all file paths in this Rmd use p("subpath")
+p <- function(...) file.path(project_root, ...)
+
+# Word template — pandoc resolves reference_docx relative to the Rmd file, so
+# copy it next to the Rmd once at the start of each knit session.
+# This means report_template.dotx only needs to exist in the project root.
+local({
+  template_src <- p("report_template.dotx")
+  rmd_input    <- knitr::current_input(dir = TRUE)  # NULL when run interactively
+  if (!is.null(rmd_input) && file.exists(template_src)) {
+    template_dest <- file.path(dirname(rmd_input), "report_template.dotx")
+    if (!identical(template_src, template_dest))
+      file.copy(template_src, template_dest, overwrite = TRUE)
+  }
+})
+
+# Check whether the output .docx is already open in Word (Windows locks the
+# file for writing). Catching this here gives a clear message instead of a
+# cryptic pandoc "permission denied" error at the very end of knitting.
+local({
+  rmd_input <- knitr::current_input(dir = TRUE)
+  if (!is.null(rmd_input)) {
+    docx_out <- paste0(tools::file_path_sans_ext(rmd_input), ".docx")
+    if (file.exists(docx_out)) {
+      test <- tryCatch(
+        { con <- file(docx_out, open = "ab"); close(con); FALSE },
+        error = function(e) TRUE
+      )
+      if (test) stop(
+        "Output file is open in Word — please close it before knitting:\n  ",
+        docx_out
+      )
+    }
+  }
+})
+
+# ==========================================================================================================
+# CONFIGURATION — load from config.json written by 00_setup.R
+# ==========================================================================================================
+
+if (!file.exists(p("config.json"))) {
+  stop("config.json not found at: ", p("config.json"), "\nPlease run 00_setup.R first.")
+}
+config <- jsonlite::read_json(p("config.json"))
+
+# source() the functions files with the working directory temporarily set to
+# the project root. This means the plain file.exists("config.json") checks
+# inside those files resolve correctly, identically to running them interactively.
+withr::with_dir(project_root, {
+  source(p("R", "harmonized", "02_storage_functions.R"))
+  source(p("R", "FLYSHOOT utils.R"))
+})
+
+# ==========================================================================================================
+# SPATIAL DATA
+# Loads the same sf objects that 03_main_workflow.R uses for spatial enrichment.
+# All objects live under config$spatial_data.
+# ==========================================================================================================
+
+spatialdir <- config$spatial_data
+
+# World coastline (medium resolution sf object)
+load(file.path(spatialdir, "world_mr_sf.RData"))   # -> world_mr_sf
+
+# ICES rectangles sf
+rect_sf_path <- file.path(spatialdir, "rect_sf.RData")
+if (file.exists(rect_sf_path)) {
+  load(rect_sf_path)                               # -> rect_sf
+  rect_sf <- rect_sf %>% dplyr::select(rect = ICESNAME)
+} else {
+  rect_sf <- NULL
+}
+
+# EEZ sf
+eez_sf_path <- file.path(spatialdir, "eez.sf.RData")
+if (file.exists(eez_sf_path)) {
+  # Capture whatever object name is inside the file
+  eez_before <- ls()
+  load(eez_sf_path)
+  eez_after  <- setdiff(ls(), eez_before)
+  # Standardise to eez_sf regardless of stored name
+  if (length(eez_after) > 0) {
+    eez_sf <- get(eez_after[1])
+    rm(list = eez_after[eez_after != "eez_sf"])
+  } else {
+    eez_sf <- NULL
+  }
+} else {
+  # Try alternative common filenames
+  alt_paths <- c(
+    file.path(spatialdir, "eez.RData"),
+    file.path(spatialdir, "eez_sf.RData"),
+    file.path(spatialdir, "eez.df.RData")
+  )
+  found <- Filter(file.exists, alt_paths)
+  if (length(found) > 0) {
+    eez_before <- ls()
+    load(found[1])
+    eez_after  <- setdiff(ls(), eez_before)
+    if (length(eez_after) > 0) {
+      obj <- get(eez_after[1])
+      # Convert to sf if it is a data frame (old eez.df format)
+      eez_sf <- if (inherits(obj, "sf")) obj
+                else if (is.data.frame(obj) &&
+                         all(c("long","lat","group") %in% names(obj))) {
+                  message("  ⚠ eez loaded as data.frame — EEZ boundaries not available as sf")
+                  NULL
+                } else obj
+      rm(list = eez_after[eez_after != "eez_sf"])
+    } else { eez_sf <- NULL }
+  } else {
+    message("  ⚠ No EEZ file found in ", spatialdir)
+    eez_sf <- NULL
+  }
+}
+
+# ASFIS species codes (flat table — not sf)
+asfis <- loadRData(file.path(spatialdir, "asfis.RData")) %>%
+  rename_with(tolower)
+
+# ==========================================================================================================
+# DATA LOADING — via load_flyshoot_data() from 02_storage_functions.R
+# Filtered upfront to the requested vessel; trip filtering happens after
+# trip_id resolution below.
+# ==========================================================================================================
+
+use_haul_data  <- TRUE
+use_kisten_data <- TRUE
+use_elog_data  <- TRUE
+use_elog_trek  <- TRUE
+use_trip_data  <- TRUE
+
+safe_load <- function(type) {
+  tryCatch(
+    load_flyshoot_data(type, vessel_ids = setvessel),
+    error = function(e) { message(glue("  ⚠ Could not load {type}: {e$message}")); tibble() }
+  )
+}
+
+if (use_elog_data)   elog      <- safe_load("elog")
+if (use_elog_trek)   elog_trek <- safe_load("elog_trek")
+if (use_haul_data)   haul      <- safe_load("haul")
+if (use_kisten_data) kisten    <- safe_load("kisten")
+if (use_trip_data)   trip      <- safe_load("trip")
+vm_raw <- tryCatch(
+  load_flyshoot_data("vessel_movement", vessel_ids = setvessel),
+  error = function(e) { message("  ⚠ vessel_movement not available"); tibble() }
+)
+
+# ==========================================================================================================
+# TRIP RESOLUTION — derive trip_id(s) from date range
+# ==========================================================================================================
+
+# Primary: elog  |  fallbacks: haul, elog_trek, kisten
+# NOTE: always filter on vessel AND date — trip_ids are not unique across vessels
+resolve_settrip <- function(df) {
+  df %>%
+    dplyr::filter(vessel %in% setvessel, date >= startdate, date <= enddate) %>%
+    dplyr::distinct(trip_id) %>%
+    dplyr::pull(trip_id)
+}
+
+settrip <- if (use_elog_data && nrow(elog) > 0 &&
+               length(resolve_settrip(elog)) > 0) {
+  resolve_settrip(elog)
+} else if (use_haul_data && nrow(haul) > 0 &&
+           length(resolve_settrip(haul)) > 0) {
+  resolve_settrip(haul)
+} else if (use_elog_trek && nrow(elog_trek) > 0 &&
+           length(resolve_settrip(elog_trek)) > 0) {
+  resolve_settrip(elog_trek)
+} else if (use_kisten_data && nrow(kisten) > 0 &&
+           length(resolve_settrip(kisten)) > 0) {
+  resolve_settrip(kisten)
+} else {
+  stop(glue("No data found for vessel {setvessel} between ",
+            "{format(startdate,'%d/%m/%Y')} and {format(enddate,'%d/%m/%Y')}"))
+}
+
+if (length(settrip) == 0) {
+  stop(glue("No trips found for vessel {setvessel} in requested date range."))
+}
+vm     <- if (nrow(vm_raw) > 0) dplyr::filter(vm_raw, vessel %in% setvessel, trip_id %in% settrip) else vm_raw
+has_vm <- nrow(vm) > 0
+
+# ==========================================================================================================
+# FILTER ALL DATASETS TO settrip
+# ==========================================================================================================
+
+harmonise_species <- function(x) dplyr::case_when(x == "SQC" ~ "SQR", TRUE ~ x)
+
+# Filter on BOTH vessel and trip_id — trip_ids alone are not unique across vessels
+if (use_elog_data && nrow(elog) > 0) {
+  e <- elog %>%
+    dplyr::filter(vessel %in% setvessel, trip_id %in% settrip) %>%
+    dplyr::mutate(species_code = harmonise_species(species_code))
+} else { e <- tibble() }
+
+if (use_elog_trek && nrow(elog_trek) > 0) {
+  et <- elog_trek %>%
+    dplyr::filter(vessel %in% setvessel, trip_id %in% settrip) %>%
+    dplyr::mutate(
+      shoot_lon    = dplyr::if_else(shoot_lon == 0 & shoot_lat == 0, NA_real_, shoot_lon),
+      shoot_lat    = dplyr::if_else(is.na(shoot_lon), NA_real_, shoot_lat),
+      species_code = harmonise_species(species_code)
+    )
+  # Fallback: trip_id mismatch between elog and elog_trek (pipeline bug)
+  # e.g. elog has "2026031600015", elog_trek has "2026031620260319"
+  # In that case filter by vessel + date range instead
+  if (nrow(et) == 0) {
+    message("  ⚠ elog_trek trip_id mismatch with elog — filtering by date range instead")
+    et <- elog_trek %>%
+      dplyr::filter(vessel %in% setvessel,
+                    date >= startdate, date <= enddate) %>%
+      dplyr::mutate(
+        shoot_lon    = dplyr::if_else(shoot_lon == 0 & shoot_lat == 0, NA_real_, shoot_lon),
+        shoot_lat    = dplyr::if_else(is.na(shoot_lon), NA_real_, shoot_lat),
+        species_code = harmonise_species(species_code)
+      )
+    if (nrow(et) > 0)
+      message(glue("  ✓ elog_trek: {nrow(et)} rows via date fallback | trip_ids: ",
+                   "{paste(unique(et$trip_id), collapse=', ')}"))
+  }
+} else { et <- tibble() }
+
+if (use_haul_data && nrow(haul) > 0) {
+  h <- haul %>% dplyr::filter(vessel %in% setvessel, trip_id %in% settrip)
+} else { h <- tibble() }
+
+if (use_kisten_data && nrow(kisten) > 0) {
+  m <- kisten %>%
+    dplyr::filter(vessel %in% setvessel, trip_id %in% settrip) %>%
+    dplyr::mutate(
+      species_code = toupper(species_code),
+      species_code = harmonise_species(species_code)
+    ) %>%
+    dplyr::distinct()
+} else { m <- tibble() }
+
+if (use_trip_data && nrow(trip) > 0) {
+  tt <- trip %>% dplyr::filter(vessel %in% setvessel, trip_id %in% settrip)
+} else { tt <- tibble() }
+
+# Availability flags
+has_elog      <- nrow(e)  > 0
+has_elog_trek <- nrow(et) > 0
+has_haul      <- nrow(h)  > 0
+has_kisten    <- nrow(m)  > 0
+
+if (!has_elog && !has_elog_trek && !has_haul && !has_kisten) {
+  stop(glue("No data for vessel {setvessel}, trip(s) {paste(settrip, collapse=',')}"))
+}
+
+# ==========================================================================================================
+# SPECIES CONFIGURATION — top 10 by weight
+# ==========================================================================================================
+
+catch_for_species <- if (has_elog) e else if (has_kisten) m else tibble()
+
+if (nrow(catch_for_species) > 0) {
+  myspecies <- catch_for_species %>%
+    dplyr::group_by(species_code) %>%
+    dplyr::summarise(weight = sum(weight_kg, na.rm = TRUE), .groups = "drop") %>%
+    dplyr::arrange(desc(weight)) %>%
+    dplyr::slice_head(n = max_species) %>%
+    dplyr::left_join(
+      dplyr::select(asfis, species, englishname, dutchname),
+      by = c("species_code" = "species")
+    ) %>%
+    dplyr::mutate(label = paste(englishname, species_code))
+} else {
+  myspecies <- tibble(species_code = character(), weight = numeric(),
+                      englishname = character(), dutchname = character(), label = character())
+}
+nspecies <- nrow(myspecies)
+
+# ==========================================================================================================
+# SPATIAL SETUP — build sf point objects from position columns
+# These are reused by all map chunks below.
+# ==========================================================================================================
+
+make_sf_points <- function(df, lon = "shoot_lon", lat = "shoot_lat") {
+  df %>%
+    dplyr::filter(!is.na(.data[[lon]]), !is.na(.data[[lat]])) %>%
+    sf::st_as_sf(coords = c(lon, lat), crs = 4326, remove = FALSE)
+}
+
+# ICES rect centroid helper — used as position fallback when no shoot_lon/lat available
+ices_rect_to_lonlat <- function(rects) {
+  rects <- trimws(toupper(rects))
+  valid <- grepl("^[0-9]{2}[A-Z][0-9]$", rects)
+  lon   <- rep(NA_real_, length(rects))
+  lat   <- rep(NA_real_, length(rects))
+  # Exact mapplots::ices.rect formula (Hans Gerritsen)
+  # rx = paste0(1-based letter index, digit) as integer; lon = rx - 59.5
+  # lat = (row_num + 71.5) / 2
+  if (any(valid, na.rm = TRUE)) {
+    row_num  <- as.integer(substr(rects[valid], 1, 2))
+    col_lett <- match(substr(rects[valid], 3, 3), LETTERS)   # 1-based: A=1,E=5,F=6...
+    col_dig  <- substr(rects[valid], 4, 4)
+    rx       <- as.integer(paste0(col_lett, col_dig))
+    lon[valid] <- rx - 59.5
+    lat[valid] <- (row_num + 71.5) / 2
+  }
+  data.frame(lon = lon, lat = lat)
+}
+
+# Derive approximate positions from ICES rect centroids when no actual positions exist
+derive_positions_from_rects <- function(df) {
+  rect_col <- intersect(c("ices_rect", "ices_rectangle"), names(df))
+  if (length(rect_col) == 0) return(tibble::tibble())
+  rects <- unique(na.omit(df[[rect_col[1]]]))
+  if (length(rects) == 0) return(tibble::tibble())
+  coords <- ices_rect_to_lonlat(rects)
+  valid  <- !is.na(coords$lon) & !is.na(coords$lat)
+  if (!any(valid)) return(tibble::tibble())
+  tibble::tibble(shoot_lon = coords$lon[valid], shoot_lat = coords$lat[valid])
+}
+
+# Best position source for bounding box
+pos_sf <- if (has_elog_trek && any(!is.na(et$shoot_lon))) {
+  make_sf_points(et)
+} else if (has_elog && any(!is.na(e$shoot_lon))) {
+  make_sf_points(e)
+} else if (has_haul && any(!is.na(h$shoot_lon))) {
+  make_sf_points(h)
+} else if (has_elog) {
+  # Fallback: derive approximate positions from ICES rect centroids in elog
+  rect_pts <- derive_positions_from_rects(e)
+  if (nrow(rect_pts) > 0) {
+    sf::st_as_sf(rect_pts, coords = c("shoot_lon", "shoot_lat"), crs = 4326, remove = FALSE)
+  } else { NULL }
+} else {
+  NULL
+}
+
+# ==========================================================================================================
+# MAP EXTENT
+# Include fishing positions AND vessel_movement positions for the bounding box
+# so port-to-port routes don't get clipped.
+# ==========================================================================================================
+
+# Collect all positions: haul data + vessel_movement route
+# Collect real positions first
+real_lons <- c(
+  if (has_elog_trek) et$shoot_lon[!is.na(et$shoot_lon)],
+  if (has_elog)       e$shoot_lon[!is.na(e$shoot_lon)],
+  if (has_haul)       h$shoot_lon[!is.na(h$shoot_lon)]
+)
+real_lats <- c(
+  if (has_elog_trek) et$shoot_lat[!is.na(et$shoot_lat)],
+  if (has_elog)       e$shoot_lat[!is.na(e$shoot_lat)],
+  if (has_haul)       h$shoot_lat[!is.na(h$shoot_lat)]
+)
+
+# Only derive rect-based positions when NO real positions exist
+rect_approx_pos <- if (length(real_lons) == 0 && has_elog) {
+  derive_positions_from_rects(e)
+} else { tibble::tibble() }
+
+# vm positions: include all (port + elog_rect haul positions) for a complete bbox
+vm_lons <- if (has_vm) vm$lon[!is.na(vm$lon)] else c()
+vm_lats <- if (has_vm) vm$lat[!is.na(vm$lat)] else c()
+
+all_lons <- c(real_lons, vm_lons,
+              if (nrow(rect_approx_pos) > 0) rect_approx_pos$shoot_lon)
+all_lats <- c(real_lats, vm_lats,
+              if (nrow(rect_approx_pos) > 0) rect_approx_pos$shoot_lat)
+
+if (length(all_lons) > 0 && length(all_lats) > 0) {
+  lon_range <- range(all_lons, na.rm = TRUE)
+  lat_range <- range(all_lats, na.rm = TRUE)
+  if (diff(lon_range) == 0) lon_range <- lon_range + c(-1, 1)
+  if (diff(lat_range) == 0) lat_range <- lat_range + c(-0.5, 0.5)
+} else {
+  lon_range <- c(-2, 8); lat_range <- c(50, 57)
+}
+
+# Use tighter buffer for rect-based trips (centroids are already ~0.5deg from edge)
+using_rect_positions <- length(real_lons) == 0 && nrow(rect_approx_pos) > 0
+lon_buffer <- diff(lon_range) * if (using_rect_positions) 0.05 else 0.1
+lat_buffer <- diff(lat_range) * if (using_rect_positions) 0.05 else 0.1
+xmin <- floor(lon_range[1] - lon_buffer)
+xmax <- ceiling(lon_range[2] + lon_buffer)
+ymin <- floor((lat_range[1] - lat_buffer) * 2) / 2
+ymax <- ceiling((lat_range[2] + lat_buffer) * 2) / 2
+
+target_aspect <- 1.0
+if (xmin == xmax) { xmin <- xmin - 0.5; xmax <- xmax + 0.5 }
+if (ymin == ymax) { ymin <- ymin - 0.3; ymax <- ymax + 0.3 }
+xdistance   <- icosa::arcdist(p1 = c(xmin, ymin), p2 = c(xmax, ymin))
+ydistance   <- icosa::arcdist(p1 = c(xmin, ymin), p2 = c(xmin, ymax))
+data_aspect <- if (is.finite(xdistance) && xdistance > 0) ydistance / xdistance else 1.0
+
+if (data_aspect > target_aspect) {
+  extra_x_deg <- (ydistance / target_aspect - xdistance) / 2 / 111
+  xmin <- xmin - extra_x_deg
+  xmax <- xmax + extra_x_deg
+} else {
+  extra_y_deg <- (xdistance * target_aspect - ydistance) / 2 / 111
+  ymin <- ymin - extra_y_deg
+  ymax <- ymax + extra_y_deg
+}
+
+map_xlim <- c(xmin, xmax)
+map_ylim <- c(ymin, ymax)
+
+# ==========================================================================================================
+# DEPTH CONTOURS via marmap (NOAA ETOPO bathymetry, cached locally)
+# install.packages("marmap") if not yet installed
+# ==========================================================================================================
+depth_layer   <- list()   # raster fill of sea (deep blue → shallow)
+contour_layer <- list()   # depth contour lines + labels
+bathy_df      <- NULL
+
+if (requireNamespace("marmap", quietly = TRUE)) {
+  # One regional cache covers the whole North Sea / NE Atlantic.
+  # Crop to map extent at render time — no per-trip downloads needed.
+  BATHY_LON1 <- -8;  BATHY_LON2 <- 10
+  BATHY_LAT1 <- 48;  BATHY_LAT2 <- 62
+  regional_cache <- file.path(config$cache_path,
+    sprintf("bathy_regional_%d_%d_%d_%d.rds",
+            BATHY_LON1, BATHY_LON2, BATHY_LAT1, BATHY_LAT2))
+
+  bathy_regional <- tryCatch({
+    cached <- if (file.exists(regional_cache)) readRDS(regional_cache) else NULL
+    if (!is.null(cached) && inherits(cached, "bathy")) {
+      message("  ✓ Regional bathymetry loaded from cache")
+      cached
+    } else {
+      if (file.exists(regional_cache)) file.remove(regional_cache)
+      message(glue("  Downloading regional NOAA bathymetry ",
+                   "[{BATHY_LON1},{BATHY_LON2}] x [{BATHY_LAT1},{BATHY_LAT2}]",
+                   " — one-time download, ~2–5 MB..."))
+      b <- marmap::getNOAA.bathy(
+        lon1 = BATHY_LON1, lon2 = BATHY_LON2,
+        lat1 = BATHY_LAT1, lat2 = BATHY_LAT2,
+        resolution = 1, keep = FALSE
+      )
+      if (inherits(b, "bathy")) {
+        saveRDS(b, regional_cache)
+        message("  ✓ Regional bathymetry downloaded and cached at: ", regional_cache)
+      }
+      b
+    }
+  }, error = function(e) { message("  ⚠ marmap download failed: ", e$message); NULL })
+
+  # Keep full regional bathy — crop to map extent when building each layer
+  bathy <- bathy_regional
+
+  if (!is.null(bathy) && inherits(bathy, "bathy")) {
+    bathy_df <- tryCatch({
+      df <- marmap::fortify.bathy(bathy)
+      message(glue("  ✓ bathy_df: {nrow(df)} cells, z [{round(min(df$z))}, {round(max(df$z))}]"))
+      df
+    }, error = function(e) { message("  ⚠ fortify.bathy failed: ", e$message); NULL })
+
+    if (!is.null(bathy_df)) {
+
+    # Depth fill: crop bathy_df to map extent before plotting
+    bathy_crop <- dplyr::filter(bathy_df,
+      x >= xmin, x <= xmax, y >= ymin, y <= ymax, z <= 0)
+    depth_layer <- list(
+      geom_tile(
+        data = bathy_crop,
+        aes(x = x, y = y, fill = z)
+      ),
+      scale_fill_gradientn(
+        colours  = c("#08306b", "#2171b5", "#6baed6", "#c6dbef"),
+        values   = scales::rescale(c(-500, -100, -20, 0)),
+        limits   = c(NA, 0),
+        na.value = "transparent",
+        name     = if (lang == "nl") "Diepte (m)" else "Depth (m)",
+        guide    = guide_colorbar(barwidth = 5, barheight = 0.6,
+                                  title.position = "top",
+                                  direction = "horizontal",
+                                  order = 3)
+      )
+    )
+
+    # Contour lines + labels at ecologically meaningful depths
+    if (requireNamespace("metR", quietly = TRUE)) {
+      contour_layer <- list(
+        metR::geom_contour2(
+          data = dplyr::filter(bathy_df, x >= xmin, x <= xmax, y >= ymin, y <= ymax, z < 0),
+          aes(x = x, y = y, z = z),
+          breaks = c(-20, -50, -100, -200),
+          colour = "white", linewidth = 0.2, alpha = 0.5
+        ),
+        metR::geom_text_contour(
+          data = dplyr::filter(bathy_df, x >= xmin, x <= xmax, y >= ymin, y <= ymax, z < 0),
+          aes(x = x, y = y, z = z),
+          breaks = c(-50, -100, -200),
+          size = 2, colour = "white", alpha = 0.8,
+          check_overlap = TRUE, skip = 0
+        )
+      )
+    } # end metR contours
+    } # end !is.null(bathy_df)
+  }
+} else {
+  message("  ℹ Install 'marmap' for depth: install.packages(c('marmap','metR'))")
+}
+
+# ==========================================================================================================
+# PLACE NAMES — loaded from flyshoot_places.csv in the project root
+# To add/remove places, edit that file — no changes to this Rmd needed.
+# ==========================================================================================================
+places_file <- p("R", "harmonized", "flyshoot_places.csv")
+places <- if (file.exists(places_file)) {
+  readr::read_csv(places_file, col_types = "cddc", show_col_types = FALSE)
+} else {
+  message("  ⚠ flyshoot_places.csv not found at: ", places_file,
+          " — using empty places table")
+  tibble::tibble(name = character(), lon = numeric(),
+                 lat = numeric(), type = character())
+}
+
+# Keep unfiltered copy for port coordinate lookups
+places_all <- places
+
+# Only show places within the map extent
+places <- dplyr::filter(places, lon >= xmin, lon <= xmax,
+                                lat >= ymin, lat <= ymax)
+
+places_sf <- if (nrow(places) > 0) {
+  sf::st_as_sf(places, coords = c("lon", "lat"), crs = 4326, remove = FALSE)
+} else { NULL }
+
+# ==========================================================================================================
+# CROP SPATIAL LAYERS
+# ==========================================================================================================
+map_bbox <- sf::st_bbox(c(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax),
+                        crs = sf::st_crs(4326))
+sf::sf_use_s2(FALSE)
+world_crop <- sf::st_crop(world_mr_sf, map_bbox)
+# Keep only rectangles that contain actual shoot/haul positions (not just bbox overlap)
+rect_crop <- if (!is.null(rect_sf)) {
+  tryCatch({
+    # Collect all shoot positions from available data sources
+    pos_lons <- c(
+      if (has_haul      && "shoot_lon" %in% names(h))  h$shoot_lon[!is.na(h$shoot_lon)],
+      if (has_elog_trek && "shoot_lon" %in% names(et)) et$shoot_lon[!is.na(et$shoot_lon)],
+      if (has_elog      && "shoot_lon" %in% names(e))  e$shoot_lon[!is.na(e$shoot_lon)]
+    )
+    pos_lats <- c(
+      if (has_haul      && "shoot_lat" %in% names(h))  h$shoot_lat[!is.na(h$shoot_lat)],
+      if (has_elog_trek && "shoot_lat" %in% names(et)) et$shoot_lat[!is.na(et$shoot_lat)],
+      if (has_elog      && "shoot_lat" %in% names(e))  e$shoot_lat[!is.na(e$shoot_lat)]
+    )
+    # If no real positions, fall back to rect centroid positions (elog_rect trips)
+    if (length(pos_lons) == 0 && nrow(rect_approx_pos) > 0) {
+      pos_lons <- rect_approx_pos$shoot_lon
+      pos_lats <- rect_approx_pos$shoot_lat
+    }
+
+    if (length(pos_lons) > 0 && length(pos_lats) > 0) {
+      pts_sf <- sf::st_as_sf(
+        data.frame(lon = pos_lons, lat = pos_lats),
+        coords = c("lon", "lat"), crs = 4326
+      )
+      # Keep only rects that contain at least one actual position
+      contains <- suppressMessages(
+        sf::st_intersects(rect_sf, pts_sf, sparse = TRUE)
+      )
+      used <- lengths(contains) > 0
+      if (any(used)) rect_sf[used, ] else NULL
+    } else {
+      # Last resort: crop to map bbox
+      bbox_poly  <- sf::st_as_sfc(map_bbox)
+      intersects <- suppressMessages(sf::st_intersects(rect_sf, bbox_poly, sparse = FALSE)[,1])
+      if (any(intersects)) rect_sf[intersects, ] else NULL
+    }
+  }, error = function(e) NULL)
+} else { NULL }
+# EEZ boundaries cropped to map extent
+eez_crop <- if (!is.null(eez_sf)) {
+  tryCatch(sf::st_crop(eez_sf, map_bbox), error = function(e) NULL)
+} else { NULL }
+sf::sf_use_s2(TRUE)
+
+# ==========================================================================================================
+# SHARED BASE MAP LAYERS
+# Grid lines removed — ICES rectangles provide the spatial reference grid instead
+# ==========================================================================================================
+
+# Degree-minute axis label formatter
+fmt_dms <- function(x, is_lon = TRUE) {
+  sapply(x, function(v) {
+    if (is.na(v)) return("")
+    hemi    <- if (is_lon) ifelse(v >= 0, "E", "W") else ifelse(v >= 0, "N", "S")
+    v       <- abs(v)
+    deg     <- floor(v)
+    min_dec <- (v - deg) * 60
+    min     <- floor(min_dec)
+    if (min == 0) sprintf("%d°%s", deg, hemi)
+    else          sprintf("%d°%02d'%s", deg, min, hemi)
+  })
+}
+base_map <- list(
+  theme_bw(),
+  theme(
+    panel.background = element_rect(fill = "white"),
+    panel.border     = element_rect(fill = NA, colour = "grey40", linewidth = 0.4),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    plot.margin      = unit(c(0, 0, 0, 0), "cm"),
+    text             = element_text(size = 11),
+    axis.text        = element_text(size = 7),
+    legend.position  = "bottom",
+    legend.box       = "horizontal"
+  ),
+  depth_layer,
+  contour_layer,
+  # EEZ boundaries — dashed dark line, no fill
+  if (!is.null(eez_crop)) geom_sf(data = eez_crop, fill = NA,
+      colour = "grey20", linewidth = 0.6, linetype = "solid") else NULL,
+  geom_sf(data = world_crop, fill = "grey82", colour = "grey55", linewidth = 0.3),
+  coord_sf(xlim = map_xlim, ylim = map_ylim, expand = FALSE),
+  scale_x_continuous(
+    breaks = scales::extended_breaks(n = 5)(map_xlim),
+    labels = function(x) fmt_dms(x, is_lon = TRUE),
+    expand = c(0, 0)
+  ),
+  scale_y_continuous(
+    breaks = scales::extended_breaks(n = 5)(map_ylim),
+    labels = function(x) fmt_dms(x, is_lon = FALSE),
+    expand = c(0, 0)
+  ),
+  labs(x = NULL, y = NULL)
+)
+
+# ICES rectangles (lines only — these replace the grid)
+# ICES rectangle labels — placed in bottom-left corner of each cell
+# Uses st_coordinates on the bbox corner: hjust=0 (left), vjust=1 (bottom)
+# Extract SW corner of each ICES rectangle for bottom-left label placement
+rect_label_layer <- if (!is.null(rect_crop) && nrow(rect_crop) > 0) {
+  # Get SW (bottom-left) corner: min lon, min lat of each rectangle bbox
+  sw_corners <- rect_crop %>%
+    dplyr::mutate(
+      bbox   = purrr::map(geometry, sf::st_bbox),
+      sw_lon = purrr::map_dbl(bbox, ~.x["xmin"]),
+      sw_lat = purrr::map_dbl(bbox, ~.x["ymin"])
+    ) %>%
+    sf::st_drop_geometry() %>%
+    sf::st_as_sf(coords = c("sw_lon", "sw_lat"), crs = 4326)
+
+  list(
+    geom_sf(data = rect_crop, fill = NA, colour = "white",
+            linewidth = 0.2, alpha = 0.9, linetype = "solid"),
+    # Shadow for readability (slightly offset dark text underneath)
+    geom_sf_text(data = sw_corners, aes(label = rect),
+                 colour   = "grey10",
+                 size     = 2.8,
+                 hjust    = 0, vjust = 0,
+                 nudge_x  = (xmax - xmin) * 0.005,
+                 nudge_y  = (ymax - ymin) * 0.005,
+                 fontface = "bold"),
+    # White text on top
+    geom_sf_text(data = sw_corners, aes(label = rect),
+                 colour   = "white",
+                 size     = 2.8,
+                 hjust    = 0, vjust = 0,
+                 nudge_x  = (xmax - xmin) * 0.004,
+                 nudge_y  = (ymax - ymin) * 0.004,
+                 fontface = "bold")
+  )
+} else { list() }
+
+# Place name layer (ports = filled triangle, cities = open circle)
+places_layer <- if (!is.null(places_sf)) {
+  ports <- dplyr::filter(places_sf, type == "port")
+  cities <- dplyr::filter(places_sf, type == "city")
+  layers <- list()
+  if (nrow(cities) > 0) {
+    layers <- c(layers, list(
+      geom_sf(data = cities, shape = 21, size = 1.5,
+              fill = "white", colour = "grey30", stroke = 0.5),
+      geom_sf_text(data = cities, aes(label = name),
+                   size = 2.2, colour = "grey20",
+                   nudge_y = (ymax - ymin) * 0.018,
+                   check_overlap = TRUE)
+    ))
+  }
+  if (nrow(ports) > 0) {
+    layers <- c(layers, list(
+      geom_sf(data = ports, shape = 24, size = 2,
+              fill = "orange", colour = "darkorange3", stroke = 0.5),
+      geom_sf_text(data = ports, aes(label = name),
+                   size = 2.4, colour = "darkorange4", fontface = "bold",
+                   nudge_y = (ymax - ymin) * 0.018,
+                   check_overlap = TRUE)
+    ))
+  }
+  layers
+} else { list() }
+
+# ==========================================================================================================
+# DOCUMENT COLOUR PALETTE — use these throughout for consistency
+# ==========================================================================================================
+pal_aanvoer   <- "#5B8DB8"   # steel blue  — landings / aanvoer
+pal_discards  <- "#D96B4F"   # terracotta  — discards
+pal_header    <- "#D5E8F0"   # light blue  — table headers (keep existing)
+pal_cur_year  <- "#C0392B"   # deep red    — current year line (fig 5)
+pal_prev_year <- "#2E6DA4"   # mid blue    — previous year line (fig 5)
+pal_hist_year <- "grey65"    # grey        — older years (fig 5)
+pal_day_pal   <- function(n) scales::hue_pal(h = c(200, 340), l = 60, c = 70)(n)
+# ^ day colours: cool blue→warm pink, avoids clash with species colours
+
+# ==========================================================================================================
+# SPECIES COLOUR PALETTE — fixed colours per FAO 3-alpha code
+# Consistent across all plots in the report. Extend as needed.
+# ==========================================================================================================
+species_palette <- c(
+  SQR="#7B2D8B", SQC="#7B2D8B",  # squid — purple
+  MAC="#1F6FB2",                   # mackerel — dark blue
+  HOM="#4AA8D8",                   # horse mackerel — mid blue
+  MUR="#E84646",                   # red mullet — red
+  WHG="#F4A742",                   # whiting — orange
+  CTC="#E8C84A",                   # cuttlefish — yellow
+  BSS="#3FAD6B",                   # sea bass — green
+  RJC="#8B4513",                   # ray — brown
+  COD="#2E8B57",                   # cod — sea green
+  POK="#20B2AA",                   # saithe — teal
+  HAD="#9370DB",                   # haddock — medium purple
+  PLE="#FF7F50",                   # plaice — coral
+  SOL="#FFD700",                   # sole — gold
+  TUR="#4682B4",                   # turbot — steel blue
+  BLL="#87CEEB",                   # brill — sky blue
+  DAB="#DEB887",                   # dab — burlywood
+  LEM="#F0E68C",                   # lemon sole — khaki
+  GUU="#98FB98",                   # gurnard — pale green
+  GUR="#90EE90",                   # gurnard spp — light green
+  BRB="#FF69B4",                   # red bream — hot pink
+  RJI="#A0522D",                   # blonde ray — sienna
+  PIL="#6495ED",                   # pilchard — cornflower
+  SPR="#48D1CC",                   # sprat — medium turquoise
+  HER="#191970",                   # herring — midnight blue
+  OCC="#FF8C00",                   # octopus — dark orange
+  ANK="#DC143C",                   # monkfish — crimson
+  SCR="#556B2F",                   # scad — dark olive
+  Other="grey65"                   # catch-all
+)
+
+# Function: get colour for a species code, falling back to a generated colour
+sp_colour <- function(codes) {
+  cols <- species_palette[codes]
+  missing <- is.na(cols)
+  if (any(missing)) {
+    # generate reproducible colours for unknown codes
+    set.seed(42)
+    extra <- scales::hue_pal()(sum(missing))
+    cols[missing] <- extra
+  }
+  setNames(as.character(cols), codes)
+}
+
+# ==========================================================================================================
+# FIGURE HEIGHT CAP — adjust this single value to control max plot height on page.
+# A4 text area ~9.2". Reserve ~0.3" for caption. word_scale = 6.3/10 = 0.63.
+# max_fig_h = (9.2 - 0.3) / 0.63 ≈ 14.1 knitr device inches.
+# ==========================================================================================================
+max_fig_h <- 14.6   # ← full A4 page height in knitr inches (9.2" / 0.63)
+
+# Date range for titles
+report_start <- if (has_elog) min(e$date, na.rm = TRUE) else
+                if (has_haul) min(h$date, na.rm = TRUE) else startdate
+report_end   <- if (has_elog) max(e$date, na.rm = TRUE) else
+                if (has_haul) max(h$date, na.rm = TRUE) else enddate
+
+```
+
+
+# `r paste(setvessel, collapse = ", ")` — `r txt("hdr_report")`
+
+### `r txt("plot_trip_lbl")` `r paste(settrip, collapse=", ")` | `r format(report_start, "%d %b")` – `r format(report_end, "%d %b %Y")`
+
+`r txt("hdr_generated")`: `r format(Sys.time(), '%d/%m/%Y')`
+
+&nbsp;
+
+<!-- ########################################################################################## -->
+<!-- Table 1: Trip summary                                                                     -->
+<!-- ########################################################################################## -->
+
+```{r tab_samenvatting}
+
+tab_nums("samenvatting", display = FALSE, caption = txt("cap_samenvatting"))
+
+# ── Trip metrics ──────────────────────────────────────────────────────────────
+# Spatial columns (fao_division, ices_rect) are added by add_spatial_attributes()
+# to the haul dataset. For elog_trek and elog these columns may be absent or all-NA
+# (pefa_trek files don't carry position-derived spatial data at the catch row level).
+# Strategy: derive date/haul counts from best available source, then overlay spatial
+# columns from haul data if present.
+
+get_spatial_from_haul <- function() {
+  if (!has_haul) return(NULL)
+  h %>%
+    dplyr::group_by(vessel, trip_id) %>%
+    dplyr::summarise(
+      divisions = if ("fao_division" %in% names(.))
+                    paste(sort(unique(na.omit(fao_division))), collapse = "; ")
+                  else NA_character_,
+      rects     = if ("ices_rect" %in% names(.))
+                    paste(sort(unique(na.omit(ices_rect))), collapse = "; ")
+                  else NA_character_,
+      .groups = "drop"
+    )
+}
+
+if (has_elog_trek) {
+  c1 <- et %>%
+    dplyr::group_by(vessel, trip_id) %>%
+    dplyr::summarise(
+      nhauls    = dplyr::n_distinct(haul_id),
+      startdate = min(date, na.rm = TRUE),
+      enddate   = max(date, na.rm = TRUE),
+      weeks     = paste(sort(unique(isoweek(date))), collapse = ", "),
+      # Use elog_trek spatial if populated, else will be overridden from haul below
+      divisions = paste(sort(unique(na.omit(fao_division))), collapse = "; "),
+      rects     = paste(sort(unique(na.omit(ices_rect))), collapse = "; "),
+      .groups   = "drop"
+    ) %>%
+    dplyr::mutate(
+      ndays       = as.numeric(difftime(enddate, startdate, units = "days")) + 1,
+      hauls_p_day = round(nhauls / ndays, 1)
+    )
+} else if (has_elog) {
+  c1 <- e %>%
+    dplyr::group_by(vessel, trip_id) %>%
+    dplyr::summarise(
+      startdate = min(date, na.rm = TRUE),
+      enddate   = max(date, na.rm = TRUE),
+      weeks     = paste(sort(unique(isoweek(date))), collapse = ", "),
+      divisions = paste(sort(unique(na.omit(fao_division))), collapse = "; "),
+      rects     = paste(sort(unique(na.omit(ices_rect))), collapse = "; "),
+      .groups   = "drop"
+    ) %>%
+    dplyr::mutate(ndays = as.numeric(difftime(enddate, startdate, units = "days")) + 1)
+} else {
+  c1 <- h %>%
+    dplyr::group_by(vessel, trip_id) %>%
+    dplyr::summarise(
+      nhauls    = dplyr::n_distinct(haul_id),
+      startdate = min(date, na.rm = TRUE),
+      enddate   = max(date, na.rm = TRUE),
+      weeks     = paste(sort(unique(isoweek(date))), collapse = ", "),
+      divisions = if ("fao_division" %in% names(.))
+                    paste(sort(unique(na.omit(fao_division))), collapse = "; ") else NA_character_,
+      rects     = if ("ices_rect" %in% names(.))
+                    paste(sort(unique(na.omit(ices_rect))),    collapse = "; ") else NA_character_,
+      .groups   = "drop"
+    ) %>%
+    dplyr::mutate(
+      ndays       = as.numeric(difftime(enddate, startdate, units = "days")) + 1,
+      hauls_p_day = round(nhauls / ndays, 1)
+    )
+}
+
+# Override divisions/rects from haul when the primary source has empty values
+# (haul has add_spatial_attributes() applied; elog_trek/elog rows often do not)
+spatial_from_haul <- get_spatial_from_haul()
+if (!is.null(spatial_from_haul)) {
+  c1 <- c1 %>%
+    dplyr::left_join(spatial_from_haul, by = c("vessel", "trip_id"),
+                     suffix = c("", "_haul")) %>%
+    dplyr::mutate(
+      divisions = dplyr::if_else(
+        is.na(divisions) | divisions == "",
+        divisions_haul, divisions),
+      rects = dplyr::if_else(
+        is.na(rects) | rects == "",
+        rects_haul, rects)
+    ) %>%
+    dplyr::select(-dplyr::ends_with("_haul"))
+}
+
+# ── Total distance from vessel_movement ──────────────────────────────────────
+if (has_vm) {
+  # Compute trip distance from vm positions using haversine formula
+  # Falls back to stored 'distance' column if present and non-NA
+  haversine_nm <- function(lon1, lat1, lon2, lat2) {
+    R   <- 6371
+    phi <- (lat2 - lat1) * pi / 180
+    lam <- (lon2 - lon1) * pi / 180
+    a   <- sin(phi/2)^2 + cos(lat1*pi/180)*cos(lat2*pi/180)*sin(lam/2)^2
+    2 * R * asin(pmin(1, sqrt(a))) / 1.852  # km -> nm
+  }
+
+  dist_summary <- if ("distance" %in% names(vm) &&
+                       sum(!is.na(vm$distance)) > 0) {
+    # Use stored distance column (check units: should be nm)
+    vm %>%
+      dplyr::group_by(trip_id) %>%
+      dplyr::summarise(total_distance = round(sum(distance, na.rm = TRUE), 1),
+                       .groups = "drop")
+  } else {
+    # Compute from lat/lon
+    vm %>%
+      dplyr::filter(!is.na(lat), !is.na(lon)) %>%
+      dplyr::arrange(vessel, trip_id, date) %>%
+      dplyr::group_by(trip_id) %>%
+      dplyr::mutate(
+        seg_nm = haversine_nm(
+          dplyr::lag(lon, default = dplyr::first(lon)),
+          dplyr::lag(lat, default = dplyr::first(lat)),
+          lon, lat)
+      ) %>%
+      dplyr::summarise(total_distance = round(sum(seg_nm, na.rm = TRUE), 1),
+                       .groups = "drop")
+  }
+  c1 <- dplyr::left_join(c1, dist_summary, by = "trip_id")
+}
+
+# ── Total distance from vessel_movement ──────────────────────────────────────
+
+
+# ── Gear settings ────────────────────────────────────────────────────────────
+# mesh_size_mm: always prefer elog (reliably populated from e-logbook system).
+# Other gear columns (vertical_opening_m, cable_length_m, etc.): from haul
+# (treklijst source), falling back to elog when haul is absent.
+gear_cols <- c("gear_type", "mesh_size_mm", "vertical_opening_m",
+               "cable_length_m", "cable_thickness_mm",
+               "groundrope_length_m", "escape_panel")
+
+gear_src <- if (has_haul && any(gear_cols %in% names(h))) { h
+} else if (has_elog && any(c("gear_type","mesh_size_mm") %in% names(e))) { e
+} else { NULL }
+
+if (!is.null(gear_src)) {
+  gear_info <- gear_src %>%
+    dplyr::select(trip_id, dplyr::any_of(gear_cols)) %>%
+    dplyr::distinct() %>%
+    dplyr::group_by(trip_id) %>%
+    dplyr::slice(1) %>%
+    dplyr::ungroup() %>%
+    # Coerce mesh_size_mm to character so it can later hold "80; 100" style strings
+    dplyr::mutate(dplyr::across(dplyr::any_of("mesh_size_mm"), as.character))
+  c1 <- dplyr::left_join(c1, gear_info, by = "trip_id")
+}
+
+# Override mesh_size_mm from elog — always use elog as the authoritative source.
+# Collapse all distinct mesh sizes into a single string (e.g. "80; 100").
+# This completely replaces whatever gear_info put into c1 for mesh_size_mm.
+if (has_elog && "mesh_size_mm" %in% names(e)) {
+  mesh_from_elog <- e %>%
+    dplyr::filter(!is.na(mesh_size_mm)) %>%
+    dplyr::group_by(trip_id) %>%
+    dplyr::summarise(
+      mesh_size_mm_elog = paste(sort(unique(as.integer(mesh_size_mm))), collapse = "; "),
+      .groups = "drop"
+    )
+
+  # Remove existing mesh_size_mm from c1 entirely before joining, so there is
+  # no coalesce ambiguity — elog value always wins unconditionally.
+  c1 <- c1 %>%
+    dplyr::select(-dplyr::any_of("mesh_size_mm")) %>%
+    dplyr::left_join(mesh_from_elog %>% dplyr::rename(mesh_size_mm = mesh_size_mm_elog),
+                     by = "trip_id")
+}
+
+# ── Build display table ───────────────────────────────────────────────────────
+
+# Helper to apply consistent flextable styling
+style_ft <- function(ft, caption = NULL) {
+  ft <- flextable::bold(ft, part = "header")
+  ft <- flextable::bg(ft, part = "header", bg = "#D5E8F0")
+  ft <- flextable::hline_top(ft, part = "header",
+           border = officer::fp_border(color = "#2E75B6", width = 1.5))
+  ft <- flextable::hline_bottom(ft, part = "header",
+           border = officer::fp_border(color = "#2E75B6", width = 1.5))
+  ft <- flextable::hline_bottom(ft, part = "body",
+           border = officer::fp_border(color = "#AAAAAA", width = 0.5))
+  ft <- flextable::autofit(ft)
+  # Prevent Word from repeating header row at bottom of table
+  ft <- flextable::set_table_properties(
+    ft, opts_word = list(split = FALSE, keep_with_next = TRUE)
+  )
+  if (!is.null(caption)) ft <- flextable::set_caption(ft, caption)
+  ft
+}
+# ── Part A: trip logistics ───────────────────────────────────────────────────
+part_a <- c1 %>%
+  dplyr::mutate(
+    startdate = format(startdate, "%d/%m/%Y"),
+    enddate   = format(enddate,   "%d/%m/%Y"),
+    # total_distance from trip parquet (nm); round to 1 decimal
+    total_distance = if ("total_distance" %in% names(.))
+      round(total_distance, 1) else NA_real_
+  ) %>%
+  dplyr::select(trip_id, startdate, enddate, ndays,
+                dplyr::any_of(c("nhauls", "hauls_p_day")),
+                weeks, divisions, rects,
+                dplyr::any_of("total_distance")) %>%
+  dplyr::rename(
+    !!txt("col_trip")      := trip_id,
+    !!txt("col_from")      := startdate,
+    !!txt("col_to")        := enddate,
+    !!txt("col_days")      := ndays,
+    !!txt("col_weeks")     := weeks,
+    !!txt("col_divisions") := divisions,
+    !!txt("col_rects")     := rects
+  ) %>%
+  {
+    d <- .
+    if ("nhauls"          %in% names(d)) d <- dplyr::rename(d, !!txt("col_hauls")     := nhauls)
+    if ("hauls_p_day"     %in% names(d)) d <- dplyr::rename(d, !!txt("col_hauls_day") := hauls_p_day)
+    if ("total_distance"  %in% names(d)) d <- dplyr::rename(d, !!txt("col_distance")  := total_distance)
+    d
+  }
+
+ft_a <- flextable::flextable(part_a)
+ft_a <- style_ft(ft_a, caption = tab_nums("samenvatting"))
+# Cap width of Divisie and ICES rect columns so long lists wrap rather than
+# pushing the Distance column off the page.
+for (col_nm in intersect(c(txt("col_divisions"), txt("col_rects")), names(part_a))) {
+  ft_a <- flextable::width(ft_a, j = col_nm, width = 1.1)
+}
+flextable::set_table_properties(ft_a, width = 1, layout = "autofit")
+
+# ── Part B: gear settings ────────────────────────────────────────────────────
+gear_cols_b <- c("gear_type", "mesh_size_mm", "vertical_opening_m",
+                 "cable_length_m", "cable_thickness_mm")
+
+if (any(gear_cols_b %in% names(c1))) {
+  gear_rename <- c(
+    "gear_type"         = txt("col_gear"),
+    "mesh_size_mm"      = txt("col_mesh"),
+    "vertical_opening_m"= txt("col_vopening"),
+    "cable_length_m"    = txt("col_cable"),
+    "cable_thickness_mm"= txt("col_cablethick")
+  )
+  present_gear <- intersect(names(gear_rename), names(c1))
+
+  part_b <- c1 %>%
+    dplyr::select(trip_id, dplyr::any_of(names(gear_rename))) %>%
+    dplyr::rename(!!txt("col_trip") := trip_id,
+                  dplyr::any_of(setNames(present_gear, gear_rename[present_gear])))
+
+  style_ft(flextable::flextable(part_b))
+}
+```
+
+
+&nbsp;
+
+<!-- ########################################################################################## -->
+<!-- Table 2: Catch by species                                                                 -->
+<!-- ########################################################################################## -->
+
+```{r tab_vangst_soort}
+
+src_lbl <- dplyr::case_when(
+  has_elog_trek && nrow(et) > 0 && "weight_kg" %in% names(et) ~ "elog_trek",
+  has_kisten    && nrow(m)  > 0                                ~ "kisten",
+  has_elog      && nrow(e)  > 0                                ~ "elog",
+  TRUE                                                         ~ "?"
+)
+tab_nums("catchbyspecies", display = FALSE,
+         caption = paste0(txt("cap_catch"), " [", src_lbl, "]"))
+
+# Data source priority for catch by species: elog_trek > kisten > elog
+catch_src <- if (has_elog_trek && nrow(et) > 0 && "weight_kg" %in% names(et)) {
+  et
+} else if (has_kisten && nrow(m) > 0) {
+  m
+} else if (has_elog && nrow(e) > 0) {
+  e
+} else { tibble::tibble() }
+
+if (nrow(catch_src) > 0) {
+
+  # Ordered species (by total weight descending)
+  species_order <- catch_src %>%
+    dplyr::group_by(species_code) %>%
+    dplyr::summarise(total = sum(weight_kg, na.rm = TRUE), .groups = "drop") %>%
+    dplyr::arrange(desc(total)) %>%
+    dplyr::left_join(dplyr::select(asfis, species, dutchname, englishname),
+                     by = c("species_code" = "species"))
+
+  # Ordered dates for column headers
+  trip_dates <- sort(unique(catch_src$date[!is.na(catch_src$date)]))
+  date_labels <- format(trip_dates, "%d/%m")  # e.g. "01/12"
+
+  # Daily catch per species (wide pivot)
+  daily_wide <- catch_src %>%
+    dplyr::filter(!is.na(date)) %>%
+    dplyr::mutate(date_lbl = format(date, "%d/%m")) %>%
+    dplyr::group_by(species_code, date_lbl) %>%
+    dplyr::summarise(kg = round(sum(weight_kg, na.rm = TRUE)), .groups = "drop") %>%
+    tidyr::pivot_wider(names_from = date_lbl, values_from = kg,
+                       values_fill = 0L) %>%
+    # Ensure date columns appear in chronological order
+    dplyr::select(species_code, dplyr::any_of(date_labels))
+
+  # Total per species
+  totals <- catch_src %>%
+    dplyr::group_by(species_code) %>%
+    dplyr::summarise(!!txt("col_total_kg") := round(sum(weight_kg, na.rm = TRUE)), .groups = "drop")
+
+  # Assemble: keep species_code for joining, rename at the very end
+  tbl <- species_order %>%
+    dplyr::select(species_code,
+                  !!txt("col_species") := !!species_name_col) %>%
+    dplyr::left_join(daily_wide, by = "species_code") %>%
+    dplyr::left_join(totals,     by = "species_code") %>%
+    # Now rename species_code to the translated Code column and reorder
+    dplyr::rename(!!txt("col_code") := species_code) %>%
+    dplyr::select(!!txt("col_species"), !!txt("col_code"), dplyr::everything())
+
+  # Columns to sum and right-align (everything except species name and code)
+  species_col <- txt("col_species")
+  code_col    <- txt("col_code")
+  num_cols    <- setdiff(names(tbl), c(species_col, code_col))
+
+  # Grand total row
+  totaal_row <- tbl %>%
+    dplyr::summarise(dplyr::across(dplyr::all_of(num_cols), sum, na.rm = TRUE)) %>%
+    dplyr::mutate(
+      !!txt("col_species") := txt("total_row"),
+      !!txt("col_code")    := "",
+      .before = 1
+    )
+
+  tbl <- dplyr::bind_rows(tbl, totaal_row)
+  n_data <- nrow(tbl) - 1
+
+  # Build flextable
+  ft <- flextable::flextable(tbl)
+  ft <- flextable::set_caption(ft, tab_nums("catchbyspecies"))
+  ft <- flextable::bold(ft, part = "header")
+  ft <- flextable::bold(ft, i = nrow(tbl), part = "body")
+  ft <- flextable::bg(ft, part = "header", bg = "#D5E8F0")
+  ft <- flextable::bg(ft, i = nrow(tbl), bg = "#F0F0F0", part = "body")
+  ft <- flextable::hline_top(ft, part = "header",
+         border = officer::fp_border(color = "#2E75B6", width = 1.5))
+  ft <- flextable::hline_bottom(ft, part = "header",
+         border = officer::fp_border(color = "#2E75B6", width = 1.5))
+  ft <- flextable::hline(ft, i = n_data, part = "body",
+         border = officer::fp_border(color = "#2E75B6", width = 1.0))
+  ft <- flextable::hline_bottom(ft, part = "body",
+         border = officer::fp_border(color = "#AAAAAA", width = 0.5))
+  ft <- flextable::colformat_num(ft, j = num_cols, big.mark = ",")
+  ft <- flextable::align(ft, j = num_cols, align = "right", part = "all")
+  ft <- flextable::align(ft, j = c(species_col, code_col), align = "left", part = "all")
+  ft <- flextable::autofit(ft)
+  ft
+}
+```
+
+
+&nbsp;
+
+<!-- ########################################################################################## -->
+<!-- Table 3: Catch by species per economic zone                                               -->
+<!-- ########################################################################################## -->
+
+```{r tab_vangst_zone}
+
+tab_nums("catchbyzone", display = FALSE, caption = txt("cap_catch_zone"))
+
+# Use elog as source — it reliably carries economic_zone from the e-logbook system.
+# Fall back to elog_trek if elog is absent and elog_trek has economic_zone.
+zone_src <- if (has_elog && nrow(e) > 0 && "economic_zone" %in% names(e)) {
+  e
+} else if (has_elog_trek && nrow(et) > 0 && "economic_zone" %in% names(et)) {
+  et
+} else { tibble::tibble() }
+
+if (nrow(zone_src) > 0 && any(!is.na(zone_src$economic_zone))) {
+
+  # Same species ordering as Table 2 (by total weight descending)
+  zone_species_order <- zone_src %>%
+    dplyr::group_by(species_code) %>%
+    dplyr::summarise(total = sum(weight_kg, na.rm = TRUE), .groups = "drop") %>%
+    dplyr::arrange(desc(total)) %>%
+    dplyr::left_join(dplyr::select(asfis, species, dutchname, englishname),
+                     by = c("species_code" = "species"))
+
+  # Ordered zones for column headers (alphabetical; NA last)
+  zone_levels <- sort(unique(na.omit(zone_src$economic_zone)))
+
+  # Catch per species per zone (wide pivot)
+  zone_wide <- zone_src %>%
+    dplyr::filter(!is.na(economic_zone)) %>%
+    dplyr::group_by(species_code, economic_zone) %>%
+    dplyr::summarise(kg = round(sum(weight_kg, na.rm = TRUE)), .groups = "drop") %>%
+    tidyr::pivot_wider(names_from = economic_zone, values_from = kg,
+                       values_fill = 0L) %>%
+    dplyr::select(species_code, dplyr::any_of(zone_levels))
+
+  # Total per species (across all zones)
+  zone_totals <- zone_src %>%
+    dplyr::group_by(species_code) %>%
+    dplyr::summarise(!!txt("col_total_kg") := round(sum(weight_kg, na.rm = TRUE)),
+                     .groups = "drop")
+
+  # Assemble table
+  tbl_z <- zone_species_order %>%
+    dplyr::select(species_code,
+                  !!txt("col_species") := !!species_name_col) %>%
+    dplyr::left_join(zone_wide,   by = "species_code") %>%
+    dplyr::left_join(zone_totals, by = "species_code") %>%
+    dplyr::rename(!!txt("col_code") := species_code) %>%
+    dplyr::select(!!txt("col_species"), !!txt("col_code"), dplyr::everything())
+
+  species_col_z <- txt("col_species")
+  code_col_z    <- txt("col_code")
+  num_cols_z    <- setdiff(names(tbl_z), c(species_col_z, code_col_z))
+
+  # Grand total row
+  totaal_row_z <- tbl_z %>%
+    dplyr::summarise(dplyr::across(dplyr::all_of(num_cols_z), sum, na.rm = TRUE)) %>%
+    dplyr::mutate(
+      !!txt("col_species") := txt("total_row"),
+      !!txt("col_code")    := "",
+      .before = 1
+    )
+
+  tbl_z  <- dplyr::bind_rows(tbl_z, totaal_row_z)
+  n_data_z <- nrow(tbl_z) - 1
+
+  ft_z <- flextable::flextable(tbl_z)
+  ft_z <- flextable::set_caption(ft_z, tab_nums("catchbyzone"))
+  ft_z <- flextable::bold(ft_z, part = "header")
+  ft_z <- flextable::bold(ft_z, i = nrow(tbl_z), part = "body")
+  ft_z <- flextable::bg(ft_z, part = "header", bg = "#D5E8F0")
+  ft_z <- flextable::bg(ft_z, i = nrow(tbl_z), bg = "#F0F0F0", part = "body")
+  ft_z <- flextable::hline_top(ft_z, part = "header",
+           border = officer::fp_border(color = "#2E75B6", width = 1.5))
+  ft_z <- flextable::hline_bottom(ft_z, part = "header",
+           border = officer::fp_border(color = "#2E75B6", width = 1.5))
+  ft_z <- flextable::hline(ft_z, i = n_data_z, part = "body",
+           border = officer::fp_border(color = "#2E75B6", width = 1.0))
+  ft_z <- flextable::hline_bottom(ft_z, part = "body",
+           border = officer::fp_border(color = "#AAAAAA", width = 0.5))
+  ft_z <- flextable::colformat_num(ft_z, j = num_cols_z, big.mark = ",")
+  ft_z <- flextable::align(ft_z, j = num_cols_z, align = "right", part = "all")
+  ft_z <- flextable::align(ft_z, j = c(species_col_z, code_col_z), align = "left", part = "all")
+  ft_z <- flextable::autofit(ft_z)
+  ft_z
+}
+```
+
+
+&nbsp;
+
+<!-- ########################################################################################## -->
+<!-- Table 4: Catch overview — flat table by source / presentation / size / discard reason    -->
+<!-- ########################################################################################## -->
+
+```{r tab_catch_overview}
+
+tab_nums("catchoverview", display = FALSE, caption = txt("cap_catch_overview"))
+
+# Build one row per source × presentation × size_category × discard_reason combination.
+# Only include rows that actually have data; empty slots are silently dropped.
+# Columns present depend on what each source provides — no NA-only columns shown.
+
+overview_rows <- list()
+
+# ── Elog ──────────────────────────────────────────────────────────────────────
+if (has_elog && nrow(e) > 0) {
+  grp_cols <- intersect(c("presentation", "size_category", "discard_reason"), names(e))
+  overview_rows[["elog"]] <- e %>%
+    dplyr::mutate(source_lbl = txt("row_elog")) %>%
+    dplyr::group_by(source_lbl, dplyr::across(dplyr::all_of(grp_cols))) %>%
+    dplyr::summarise(weight_kg = round(sum(weight_kg, na.rm = TRUE)), .groups = "drop")
+}
+
+# ── Elog trek ─────────────────────────────────────────────────────────────────
+if (has_elog_trek && nrow(et) > 0) {
+  grp_cols_et <- intersect(c("presentation", "size_category", "discard_reason"), names(et))
+  overview_rows[["elog_trek"]] <- et %>%
+    dplyr::mutate(source_lbl = txt("row_elog_trek")) %>%
+    dplyr::group_by(source_lbl, dplyr::across(dplyr::all_of(grp_cols_et))) %>%
+    dplyr::summarise(weight_kg = round(sum(weight_kg, na.rm = TRUE)), .groups = "drop")
+}
+
+# ── Kisten ────────────────────────────────────────────────────────────────────
+if (has_kisten && nrow(m) > 0 && !has_elog_trek) {
+  grp_cols_m <- intersect(c("presentation", "size_category", "discard_reason"), names(m))
+  overview_rows[["kisten"]] <- m %>%
+    dplyr::mutate(source_lbl = txt("row_kisten")) %>%
+    dplyr::group_by(source_lbl, dplyr::across(dplyr::all_of(grp_cols_m))) %>%
+    dplyr::summarise(weight_kg = round(sum(weight_kg, na.rm = TRUE)), .groups = "drop")
+}
+
+if (length(overview_rows) > 0) {
+
+  ov <- dplyr::bind_rows(overview_rows)
+
+  # Drop columns that are entirely NA (source doesn't provide them)
+  ov <- ov %>% dplyr::select(dplyr::where(~ !all(is.na(.))))
+
+  # Drop rows where weight is 0 or NA
+  ov <- ov %>% dplyr::filter(!is.na(weight_kg), weight_kg > 0)
+
+  # Rename columns to translated labels.
+  # rename() needs c(new_name = "old_name") — build via setNames.
+  col_old <- c("source_lbl", "presentation", "size_category",
+               "discard_reason", "weight_kg")
+  col_new <- c(txt("col_source"), txt("col_presentation"),
+               if (lang == "nl") "Grootte" else "Size",
+               txt("col_discard_rsn"), txt("col_weight_total"))
+  keep       <- col_old %in% names(ov)
+  rename_vec <- setNames(col_old[keep], col_new[keep])
+  ov <- dplyr::rename(ov, dplyr::all_of(rename_vec))
+
+  kg_col <- txt("col_weight_total")
+
+  src_col    <- txt("col_source")
+  sub_suffix <- if (lang == "nl") " subtotaal" else " subtotal"
+
+  # Build subtotal rows: one per source, labelled with suffix
+  subtotals <- ov %>%
+    dplyr::group_by(.data[[src_col]]) %>%
+    dplyr::summarise(!!kg_col := sum(.data[[kg_col]], na.rm = TRUE),
+                     .groups = "drop") %>%
+    dplyr::mutate(!!src_col := paste0(.data[[src_col]], sub_suffix))
+
+  # Interleave data rows and subtotal rows using a sort key:
+  # give each data row a sequence number within its group, give each
+  # subtotal row a sequence number just after the last data row.
+  ov_seq <- ov %>%
+    dplyr::group_by(.data[[src_col]]) %>%
+    dplyr::mutate(.seq = dplyr::row_number(),
+                  .is_sub = FALSE) %>%
+    dplyr::ungroup()
+
+  sub_seq <- ov %>%
+    dplyr::group_by(.data[[src_col]]) %>%
+    dplyr::summarise(.seq = dplyr::n() + 0.5,    # sorts after last data row
+                     !!kg_col := sum(.data[[kg_col]], na.rm = TRUE),
+                     .groups = "drop") %>%
+    dplyr::mutate(!!src_col := paste0(.data[[src_col]], sub_suffix),
+                  .is_sub = TRUE)
+
+  ov_final <- dplyr::bind_rows(ov_seq, sub_seq) %>%
+    dplyr::arrange(.data[[src_col]], .seq) %>%
+    dplyr::select(-.seq, -.is_sub)
+  # no grand total — elog and elog_trek measure the same catch
+  n_rows   <- nrow(ov_final)
+
+  # Row indices for styling
+  subtotal_rows <- which(grepl(
+    if (lang == "nl") " subtotaal" else " subtotal",
+    ov_final[[src_col]], fixed = TRUE))
+
+  ft_ov <- flextable::flextable(ov_final)
+  ft_ov <- flextable::set_caption(ft_ov, tab_nums("catchoverview"))
+  ft_ov <- flextable::bold(ft_ov, part = "header")
+  ft_ov <- flextable::bold(ft_ov, i = subtotal_rows, part = "body")
+  ft_ov <- flextable::italic(ft_ov, i = subtotal_rows, part = "body")
+  ft_ov <- flextable::bg(ft_ov, part = "header", bg = "#D5E8F0")
+  ft_ov <- flextable::bg(ft_ov, i = subtotal_rows, bg = "#EAF2FB", part = "body")
+  ft_ov <- flextable::hline_top(ft_ov, part = "header",
+             border = officer::fp_border(color = "#2E75B6", width = 1.5))
+  ft_ov <- flextable::hline_bottom(ft_ov, part = "header",
+             border = officer::fp_border(color = "#2E75B6", width = 1.5))
+  for (sr in subtotal_rows) {
+    ft_ov <- flextable::hline(ft_ov, i = sr, part = "body",
+               border = officer::fp_border(color = "#2E75B6", width = 0.75))
+  }
+  ft_ov <- flextable::hline_bottom(ft_ov, part = "body",
+             border = officer::fp_border(color = "#AAAAAA", width = 0.5))
+  ft_ov <- flextable::align(ft_ov, j = kg_col, align = "right", part = "all")
+  ft_ov <- flextable::colformat_num(ft_ov, j = kg_col, big.mark = ",")
+  ft_ov <- flextable::autofit(ft_ov)
+  ft_ov
+}
+```
+
+
+\newpage
+
+<!-- ########################################################################################## -->
+<!-- Figure 1: Map of fishing locations                                                        -->
+<!-- ########################################################################################## -->
+
+```{r fig_tripmap_setup}
+# Compute aspect-corrected figure height from map extent
+lat_correction <- cos(mean(c(ymin, ymax)) * pi / 180)
+data_aspect    <- ((ymax - ymin) / (xmax - xmin)) / lat_correction
+fig_h_tripmap  <- min(10 * data_aspect + 1.5, max_fig_h)
+```
+
+```{r fig_tripmap, fig.height=fig_h_tripmap}
+
+fig_nums("tripmap", display = FALSE, caption = txt("cap_tripmap"))
+
+
+
+if (!is.null(pos_sf)) {
+
+  # ── Catch weight per haul ────────────────────────────────────────────────────
+  # Prefer elog_trek (haul-level catch); fall back to elog aggregated to haul
+  haul_catch_source <- "none"
+  haul_catch <- if (has_elog_trek && any(!is.na(et$shoot_lon))) {
+    haul_catch_source <- "elog_trek"
+    et %>%
+      dplyr::group_by(haul_id, shoot_lon, shoot_lat) %>%
+      dplyr::summarise(
+        weight_kg = sum(weight_kg, na.rm = TRUE),
+        .groups = "drop"
+      ) %>%
+      dplyr::filter(!is.na(shoot_lon), !is.na(shoot_lat))
+  } else if (has_haul && any(!is.na(h$shoot_lon))) {
+    haul_catch_source <- "haul"
+    # Use total_catch_kg if available, otherwise sum from elog/kisten
+    h_base <- h %>%
+      dplyr::select(haul_id, shoot_lon, shoot_lat,
+                    dplyr::any_of("total_catch_kg")) %>%
+      dplyr::filter(!is.na(shoot_lon), !is.na(shoot_lat))
+    if ("total_catch_kg" %in% names(h_base)) {
+      dplyr::rename(h_base, weight_kg = total_catch_kg)
+    } else if (has_elog_trek) {
+      # join weights from elog_trek
+      wts <- et %>% dplyr::group_by(haul_id) %>%
+        dplyr::summarise(weight_kg = sum(weight_kg, na.rm=TRUE), .groups="drop")
+      dplyr::left_join(h_base, wts, by="haul_id") %>%
+        dplyr::mutate(weight_kg = dplyr::if_else(is.na(weight_kg), 0, weight_kg))
+    } else if (has_kisten) {
+      wts <- m %>% dplyr::group_by(haul_id) %>%
+        dplyr::summarise(weight_kg = sum(weight_kg, na.rm=TRUE), .groups="drop")
+      dplyr::left_join(h_base, wts, by="haul_id") %>%
+        dplyr::mutate(weight_kg = dplyr::if_else(is.na(weight_kg), 0, weight_kg))
+    } else {
+      dplyr::mutate(h_base, weight_kg = 0)
+    }
+  } else if (has_elog && any(!is.na(e$shoot_lon))) {
+    haul_catch_source <- "elog"
+    grp_cols <- intersect(c("haul_id", "shoot_lon", "shoot_lat"), names(e))
+    e %>%
+      dplyr::filter(!is.na(shoot_lon), !is.na(shoot_lat)) %>%
+      dplyr::group_by(dplyr::across(dplyr::all_of(grp_cols))) %>%
+      dplyr::summarise(weight_kg = sum(weight_kg, na.rm = TRUE), .groups = "drop") %>%
+      { if (!"haul_id" %in% names(.)) dplyr::mutate(., haul_id = dplyr::row_number()) else . }
+  } else if (has_elog && "ices_rect" %in% names(e) && any(!is.na(e$ices_rect))) {
+    # Fallback: no actual positions — use ICES rect centroids with daily catch totals
+    haul_catch_source <- "elog_rect"
+    rect_coords <- ices_rect_to_lonlat(e$ices_rect)
+    e %>%
+      dplyr::mutate(shoot_lon = rect_coords$lon, shoot_lat = rect_coords$lat) %>%
+      dplyr::filter(!is.na(shoot_lon), !is.na(shoot_lat)) %>%
+      dplyr::group_by(date, shoot_lon, shoot_lat) %>%
+      dplyr::summarise(weight_kg = sum(weight_kg, na.rm = TRUE), .groups = "drop") %>%
+      dplyr::mutate(haul_id = dplyr::row_number())
+  } else {
+    tibble::tibble()
+  }
+
+  haul_sf <- if (nrow(haul_catch) > 0) {
+    sf::st_as_sf(haul_catch, coords = c("shoot_lon", "shoot_lat"),
+                 crs = 4326, remove = FALSE)
+  } else { NULL }
+
+  # ── Route line from vessel_movement ──────────────────────────────────────────
+  # Port coordinates are pre-filled in the vm parquet at processing time.
+  route_sf <- if (has_vm) {
+    vm_trip <- vm %>%
+      dplyr::filter(vessel %in% setvessel, trip_id %in% settrip,
+                    !is.na(lat), !is.na(lon)) %>%
+      dplyr::arrange(vessel, trip_id, date)
+    if (nrow(vm_trip) > 1) {
+      lines <- vm_trip %>%
+        dplyr::group_by(vessel, trip_id) %>%
+        dplyr::group_map(~ sf::st_linestring(as.matrix(.x[, c("lon","lat")]))) %>%
+        sf::st_sfc(crs = 4326)
+      trip_keys <- vm_trip %>% dplyr::distinct(vessel, trip_id)
+      sf::st_sf(trip_keys, geometry = lines)
+    } else { NULL }
+  } else if (has_haul && nrow(h) > 0 &&
+             sum(!is.na(h$shoot_lon) & !is.na(h$shoot_lat)) > 1) {
+    # Fallback: connect haul shoot positions in chronological order
+    haul_pts <- h %>%
+      dplyr::filter(!is.na(shoot_lon), !is.na(shoot_lat)) %>%
+      dplyr::arrange(trip_id, date, haul_id) %>%
+      dplyr::group_by(vessel, trip_id)
+    lines <- haul_pts %>%
+      dplyr::group_map(~ sf::st_linestring(as.matrix(.x[, c("shoot_lon","shoot_lat")]))) %>%
+      sf::st_sfc(crs = 4326)
+    trip_keys <- dplyr::distinct(haul_pts, vessel, trip_id)
+    sf::st_sf(dplyr::ungroup(trip_keys), geometry = lines)
+  } else { NULL }
+  trip_colour_map <- NULL  # built after day_colours below
+
+  # ── Port locations — from vessel_movement lat/lon, or looked up from places ───
+  # Port locations: from vessel_movement departure/arrival events.
+  # vm already has ports derived from haul departure_port/arrival_port columns.
+  # If vm is missing, fall back to haul columns directly.
+  ports_raw <- if (has_vm) {
+    vm %>%
+      dplyr::filter(vessel %in% setvessel, trip_id %in% settrip,
+                    event_type %in% c("departure", "arrival")) %>%
+      dplyr::distinct(vessel, trip_id, event_type, port, lat, lon)
+  } else if (has_haul && nrow(h) > 0) {
+    dplyr::bind_rows(
+      h %>% dplyr::filter(!is.na(departure_port)) %>%
+        dplyr::slice(1) %>%
+        dplyr::transmute(vessel, trip_id, event_type = "departure",
+                         port = departure_port, lat = NA_real_, lon = NA_real_),
+      h %>% dplyr::filter(!is.na(arrival_port)) %>%
+        dplyr::slice(dplyr::n()) %>%
+        dplyr::transmute(vessel, trip_id, event_type = "arrival",
+                         port = arrival_port, lat = NA_real_, lon = NA_real_)
+    ) %>% dplyr::filter(!is.na(port))
+  } else { NULL }
+
+  # Port coordinates are pre-filled in vm parquet — just convert to sf
+  ports_sf <- if (!is.null(ports_raw) && nrow(ports_raw) > 0) {
+    ports_located <- dplyr::filter(ports_raw, !is.na(lat), !is.na(lon))
+    if (nrow(ports_located) > 0)
+      sf::st_as_sf(ports_located, coords = c("lon", "lat"), crs = 4326, remove = FALSE)
+    else NULL
+  } else { NULL }
+
+  # ── Build plot ────────────────────────────────────────────────────────────────
+  p <- ggplot() +
+    base_map +
+    rect_label_layer
+
+  # Route line — one per trip, coloured by that trip's day colour
+  if (!is.null(route_sf)) {
+    route_plot <- if (!is.null(trip_colour_map)) {
+      dplyr::left_join(route_sf, trip_colour_map, by = "trip_id") %>%
+        dplyr::mutate(colour = dplyr::if_else(is.na(colour), "yellow", colour))
+    } else {
+      dplyr::mutate(route_sf, colour = "yellow")
+    }
+    p <- p + geom_sf(data = route_plot, aes(colour = colour),
+                       linewidth = 1.2, linetype = "dashed", alpha = 0.95,
+                       show.legend = FALSE) +
+             scale_colour_identity()
+  }
+
+  # Reset fill scale so bubbles can use a discrete fill
+  # independently of the continuous depth fill
+  p <- p + ggnewscale::new_scale_fill()
+
+  # Haul bubbles: SIZE = catch weight, COLOUR = fishing day (discrete)
+  if (!is.null(haul_sf)) {
+    # Add day label for discrete colour
+    # Join one date per haul_id (slice_max avoids duplicates when multiple rows/haul)
+    # For elog_rect, date is already in haul_sf (grouped by date during construction).
+    # For all other sources, join date from the appropriate source dataset by haul_id.
+    if (haul_catch_source == "elog_rect") {
+      haul_sf <- haul_sf %>%
+        dplyr::mutate(day_lbl = format(as.Date(date), "%d/%m"))
+    } else {
+      date_src <- if (haul_catch_source == "elog_trek") et
+                  else if (haul_catch_source == "haul")  h
+                  else                                    e   # "elog" or any other
+      haul_dates <- date_src %>%
+        dplyr::distinct(haul_id, date) %>%
+        dplyr::group_by(haul_id) %>%
+        dplyr::slice(1) %>%
+        dplyr::ungroup()
+      # Only join date if not already present (avoids date.x/date.y conflict)
+      if (!"date" %in% names(haul_sf)) {
+        haul_sf <- dplyr::left_join(haul_sf, haul_dates, by = "haul_id")
+      }
+      haul_sf <- haul_sf %>%
+        dplyr::mutate(day_lbl = format(as.Date(date), "%d/%m"))
+    }
+    day_levels <- sort(unique(haul_sf$day_lbl))
+    haul_sf <- dplyr::mutate(haul_sf,
+                              day_lbl = factor(day_lbl, levels = day_levels))
+    day_colours <- setNames(
+      pal_day_pal(length(day_levels)),
+      day_levels
+    )
+    # Map each trip to its first fishing day colour for route lines
+    haul_trip_day <- if (haul_catch_source == "elog_trek") dplyr::distinct(et, trip_id, date)
+                     else if (haul_catch_source == "haul")     dplyr::distinct(h,  trip_id, date)
+                     else if (haul_catch_source == "elog_rect") haul_catch %>%
+                       dplyr::mutate(trip_id = dplyr::first(settrip)) %>%
+                       dplyr::distinct(trip_id, date)
+                     else                                       dplyr::distinct(e,  trip_id, date)
+    trip_colour_map <- haul_trip_day %>%
+      dplyr::arrange(trip_id, date) %>%
+      dplyr::group_by(trip_id) %>%
+      dplyr::slice(1) %>%
+      dplyr::mutate(day_lbl = format(date, "%d/%m"),
+                    colour  = day_colours[day_lbl]) %>%
+      dplyr::select(trip_id, colour) %>%
+      dplyr::ungroup()
+    p <- p +
+      geom_sf(data = haul_sf,
+              aes(size = weight_kg, fill = day_lbl),
+              shape = 21, colour = "white", stroke = 0.3, alpha = 0.65) +
+      scale_size_continuous(
+        name   = if (lang == "nl") "Vangst (kg)" else "Catch (kg)",
+        range  = c(2, 16),
+        labels = scales::comma
+      ) +
+      scale_fill_manual(
+        name   = if (lang == "nl") "Dag" else "Day",
+        values = day_colours
+      ) +
+      guides(
+        # Day colours: large filled squares for clear colour identification
+        fill = guide_legend(
+          nrow          = 1,
+          order         = 1,
+          override.aes  = list(shape = 22, size = 5, stroke = 0.3, colour = "white")
+        ),
+        # Catch weight: grey bubbles showing size scale
+        size = guide_legend(
+          nrow          = 1,
+          order         = 2,
+          override.aes  = list(fill = "grey60", colour = "white", stroke = 0.3)
+        )
+      )
+  } else {
+    # Fallback: plain points, one per unique position
+    fb_src <- if (has_elog_trek) et else if (has_haul) h else e
+    point_sf <- make_sf_points(fb_src)
+    if ("haul_id" %in% names(point_sf)) {
+      point_sf <- point_sf %>%
+        dplyr::group_by(haul_id) %>%
+        dplyr::slice(1) %>%
+        dplyr::ungroup()
+    } else {
+      point_sf <- dplyr::distinct(point_sf, shoot_lon, shoot_lat, .keep_all = TRUE) %>%
+        dplyr::mutate(haul_id = dplyr::row_number())
+    }
+    p <- p +
+      geom_sf(data = point_sf,
+              aes(colour = factor(haul_id)),
+              size = 2.5, alpha = 0.8, show.legend = FALSE) +
+      scale_colour_viridis_d(option = "turbo")
+  }
+
+  # Port markers (red dots + label)
+  if (!is.null(ports_sf) && nrow(ports_sf) > 0) {
+    p <- p +
+      geom_sf(data = ports_sf,
+              colour = "red", fill = "red",
+              shape = 21, size = 4, stroke = 1.2) +
+      geom_sf_text(data = ports_sf,
+                   aes(label = port),
+                   colour = "red", size = 2.8, fontface = "bold",
+                   nudge_y = (ymax - ymin) * 0.025,
+                   check_overlap = TRUE)
+  }
+
+  # Place names and ports
+  p <- p + places_layer
+
+  p <- p +
+    labs(
+      title    = glue("{paste(setvessel, collapse='/')} — {txt(\"plot_locs\")}"),
+      subtitle = glue("{txt(\"plot_trip_lbl\")} {paste(settrip, collapse=', ')} | ",
+                      "{format(report_start,'%d %b')} – {format(report_end,'%d %b %Y')}"),
+      x = NULL, y = NULL,
+      caption  = fig_nums("tripmap")
+    ) +
+    theme(
+      legend.position      = "bottom",
+      legend.box           = "horizontal",
+      legend.box.just      = "center",
+      legend.justification = "center",
+      legend.margin        = margin(t = 4, b = 2),
+      legend.spacing.x     = unit(6, "pt"),
+      legend.text          = element_text(size = 8),
+      legend.title         = element_text(size = 8, face = "bold"),
+      legend.key.size      = unit(1.2, "lines"),
+      plot.caption         = element_text(size = 9, face = "italic", hjust = 0)
+    )
+
+  print(p)
+}
+```
+
+\newpage
+
+<!-- ########################################################################################## -->
+<!-- Figure 2: Catch per haul per species (faceted map)                                       -->
+<!-- ########################################################################################## -->
+
+```{r fig_catchperspecies_setup}
+# Tight bbox — haul positions + vm (ports) so routes are never clipped
+all_lons2 <- c(
+  if (has_elog_trek) et$shoot_lon[!is.na(et$shoot_lon)],
+  if (has_haul)       h$shoot_lon[!is.na(h$shoot_lon)],
+  if (has_elog)       e$shoot_lon[!is.na(e$shoot_lon)],
+  if (has_vm)         vm$lon[!is.na(vm$lon)]
+)
+all_lats2 <- c(
+  if (has_elog_trek) et$shoot_lat[!is.na(et$shoot_lat)],
+  if (has_haul)       h$shoot_lat[!is.na(h$shoot_lat)],
+  if (has_elog)       e$shoot_lat[!is.na(e$shoot_lat)],
+  if (has_vm)         vm$lat[!is.na(vm$lat)]
+)
+
+if (length(all_lons2) > 0) {
+  lr2 <- range(all_lons2, na.rm = TRUE)
+  la2 <- range(all_lats2, na.rm = TRUE)
+  if (diff(lr2) == 0) lr2 <- lr2 + c(-0.5, 0.5)
+  if (diff(la2) == 0) la2 <- la2 + c(-0.3, 0.3)
+  buf_lon <- diff(lr2) * 0.05
+  buf_lat <- diff(la2) * 0.05
+  xmin2 <- floor((lr2[1] - buf_lon) * 4) / 4
+  xmax2 <- ceiling((lr2[2] + buf_lon) * 4) / 4
+  ymin2 <- floor((la2[1] - buf_lat) * 4) / 4
+  ymax2 <- ceiling((la2[2] + buf_lat) * 4) / 4
+} else {
+  xmin2 <- xmin; xmax2 <- xmax; ymin2 <- ymin; ymax2 <- ymax
+}
+
+# Aspect-corrected figure height for facet grid
+# Guard: ensure non-zero extent before arcdist
+if (xmin2 == xmax2) { xmin2 <- xmin2 - 0.5; xmax2 <- xmax2 + 0.5 }
+if (ymin2 == ymax2) { ymin2 <- ymin2 - 0.3; ymax2 <- ymax2 + 0.3 }
+xd2  <- icosa::arcdist(p1 = c(xmin2, ymin2), p2 = c(xmax2, ymin2))
+yd2  <- icosa::arcdist(p1 = c(xmin2, ymin2), p2 = c(xmin2, ymax2))
+asp2 <- if (is.finite(xd2) && xd2 > 0) yd2 / xd2 else 1.0
+
+# ── Dynamic layout ────────────────────────────────────────────────────────────
+# asp2 = height/width ratio of the map extent (already calculated above).
+# We want panels that are as square as possible and fill the page.
+#
+# Page geometry (A4, normal margins):
+#   text width  ≈ 6.3"   text height ≈ 9.2" (minus title+legend ≈ 0.8")
+#   knitr fig.width = 10 → Word scale factor = 6.3/10 = 0.63
+#
+# For a grid of ncol × nrows panels:
+#   panel_w = text_w / ncol            (in actual inches on page)
+#   panel_h = panel_w * asp2           (preserving map aspect)
+#   total_h = panel_h * nrows + 0.8   (+ title/legend)
+#
+# We want total_h ≤ page_h_usable.
+# Rearranging: nrows ≤ (page_h_usable - 0.8) / (text_w / ncol * asp2)
+#
+# Strategy: try ncol = 2,3,4 and pick the one where the resulting grid
+# best fills the page (maximises nspecies shown without exceeding page).
+
+page_h    <- max_fig_h * 0.63  # derived from max_fig_h
+text_w    <- 6.3    # usable text width in inches
+legend_h  <- 0.8   # title + legend row
+
+best <- local({
+  results <- lapply(2:5, function(nc) {
+    panel_w <- text_w / nc
+    panel_h <- panel_w * asp2
+    max_rows <- floor((page_h - legend_h) / panel_h)
+    max_rows <- max(max_rows, 1)
+    fits     <- min(nc * max_rows, nspecies)
+    # score: maximise species shown, penalise empty cells
+    empty    <- nc * max_rows - fits
+    list(ncol = nc, nrows = max_rows, fits = fits, empty = empty,
+         total_h = panel_h * max_rows + legend_h)
+  })
+  # Pick the layout that shows the most species; break ties by fewest empties
+  scores <- sapply(results, function(r) r$fits * 100 - r$empty)
+  results[[which.max(scores)]]
+})
+
+ncol2          <- best$ncol
+nrows2         <- best$nrows
+nspecies_plot  <- best$fits   # may be less than nspecies if page is tall
+fig_asp2       <- best$total_h / text_w * (text_w / (text_w))  # h/w for knitr
+# fig.asp = total_h_on_page / text_w — but knitr uses fig.width=10 in device inches
+# so fig.height = fig.asp * fig.width where fig.asp = total_h / text_w * (10/6.3... wait)
+# Simpler: fig.height in knitr device inches = total_page_h / word_scale
+word_scale <- text_w / 10
+fig_h2     <- min(best$total_h / word_scale, max_fig_h)
+
+# Crop world to tight bbox
+map_bbox2 <- sf::st_bbox(c(xmin = xmin2, xmax = xmax2,
+                            ymin = ymin2, ymax = ymax2),
+                          crs = sf::st_crs(4326))
+sf::sf_use_s2(FALSE)
+world_crop2 <- tryCatch(sf::st_crop(world_mr_sf, map_bbox2),
+                         error = function(e) world_crop)
+eez_crop2   <- if (!is.null(eez_sf)) {
+  tryCatch(sf::st_crop(eez_sf, map_bbox2), error = function(e) NULL)
+} else { NULL }
+sf::sf_use_s2(TRUE)
+
+# Depth tile for tight bbox (reuse bathy_df if extent overlaps, else skip)
+depth_layer2 <- if (!is.null(bathy_df)) {
+  bathy_sub <- dplyr::filter(bathy_df,
+                               x >= xmin2, x <= xmax2,
+                               y >= ymin2, y <= ymax2,
+                               z <= 0)
+  if (nrow(bathy_sub) > 0) {
+    list(geom_tile(data = bathy_sub, aes(x = x, y = y, fill = z)),
+         scale_fill_gradientn(
+           colours  = c("#08306b","#2171b5","#6baed6","#c6dbef"),
+           values   = scales::rescale(c(-500,-100,-20,0)),
+           limits   = c(NA, 0), na.value = "transparent",
+           name     = if (lang == "nl") "Diepte (m)" else "Depth (m)",
+           guide    = guide_colorbar(barwidth = 4, barheight = 0.4,
+                                     title.position = "top",
+                                     direction = "horizontal", order = 3)))
+  } else { list() }
+} else { list() }
+```
+
+```{r fig_catchperspecies, fig.width=10, fig.height=fig_h2, out.width="100%", dpi=150}
+
+fig_nums("catchperspecies", display = FALSE,
+         caption = if (lang == "nl") "Vangst per trek per soort (kg)"
+                   else "Catch per haul by species (kg)")
+
+# Haul-level catch per species from best source
+if (has_elog_trek && any(!is.na(et$shoot_lon))) {
+  haul_sp <- et %>%
+    dplyr::filter(!is.na(shoot_lon), !is.na(shoot_lat),
+                  species_code %in% myspecies$species_code[seq_len(nspecies_plot)]) %>%
+    dplyr::group_by(haul_id, shoot_lon, shoot_lat, species_code) %>%
+    dplyr::summarise(weight_kg = sum(weight_kg, na.rm = TRUE), .groups = "drop")
+} else if (has_kisten && has_haul &&
+           any(!is.na(h$shoot_lon))) {
+  # kisten has weight but no position — join positions from haul
+  haul_pos <- h %>%
+    dplyr::select(haul_id, shoot_lon, shoot_lat) %>%
+    dplyr::filter(!is.na(shoot_lon), !is.na(shoot_lat)) %>%
+    dplyr::distinct(haul_id, .keep_all = TRUE)
+  haul_sp <- m %>%
+    dplyr::filter(species_code %in% myspecies$species_code[seq_len(nspecies_plot)]) %>%
+    dplyr::group_by(haul_id, species_code) %>%
+    dplyr::summarise(weight_kg = sum(weight_kg, na.rm = TRUE), .groups = "drop") %>%
+    dplyr::inner_join(haul_pos, by = "haul_id")
+} else if (has_elog && "haul_id" %in% names(e) && any(!is.na(e$shoot_lon))) {
+  haul_sp <- e %>%
+    dplyr::filter(!is.na(shoot_lon), !is.na(shoot_lat),
+                  species_code %in% myspecies$species_code[seq_len(nspecies_plot)]) %>%
+    dplyr::group_by(haul_id, shoot_lon, shoot_lat, species_code) %>%
+    dplyr::summarise(weight_kg = sum(weight_kg, na.rm = TRUE), .groups = "drop")
+} else if (has_elog && any(!is.na(e$shoot_lon))) {
+  # elog without haul_id — use position as proxy
+  haul_sp <- e %>%
+    dplyr::filter(!is.na(shoot_lon), !is.na(shoot_lat),
+                  species_code %in% myspecies$species_code[seq_len(nspecies_plot)]) %>%
+    dplyr::group_by(shoot_lon, shoot_lat, species_code) %>%
+    dplyr::summarise(weight_kg = sum(weight_kg, na.rm = TRUE), .groups = "drop") %>%
+    dplyr::mutate(haul_id = dplyr::row_number())
+} else if (has_elog && "ices_rect" %in% names(e) && any(!is.na(e$ices_rect))) {
+  # Fallback: use ICES rect centroids as positions, daily catch per species
+  rect_coords2 <- ices_rect_to_lonlat(e$ices_rect)
+  haul_sp <- e %>%
+    dplyr::mutate(shoot_lon = rect_coords2$lon, shoot_lat = rect_coords2$lat) %>%
+    dplyr::filter(!is.na(shoot_lon), !is.na(shoot_lat),
+                  species_code %in% myspecies$species_code[seq_len(nspecies_plot)]) %>%
+    dplyr::group_by(date, shoot_lon, shoot_lat, species_code) %>%
+    dplyr::summarise(weight_kg = sum(weight_kg, na.rm = TRUE), .groups = "drop") %>%
+    dplyr::mutate(haul_id = dplyr::row_number())
+} else { haul_sp <- NULL }
+
+if (!is.null(haul_sp) && nrow(haul_sp) > 0) {
+
+  haul_sp_sf <- sf::st_as_sf(haul_sp,
+                               coords = c("shoot_lon", "shoot_lat"),
+                               crs = 4326, remove = FALSE)
+
+  # Facet label: "Soort (CODE)" or "Species (CODE)"
+  # Add species names and build facet labels
+  name_col <- if (lang == "nl") "dutchname" else "englishname"
+
+  # Ordered levels from myspecies (already has dutchname/englishname)
+  lbl_levels <- myspecies %>%
+    dplyr::slice_head(n = nspecies_plot) %>%
+    dplyr::mutate(
+      nm  = dplyr::coalesce(.data[[name_col]], species_code),
+      lbl = paste0(nm, " (", species_code, ")")
+    ) %>%
+    dplyr::pull(lbl)
+
+  # Join names onto haul_sp_sf, create facet_lbl, then factor it
+  haul_sp_sf <- haul_sp_sf %>%
+    dplyr::left_join(
+      dplyr::select(asfis, species, dutchname, englishname),
+      by = c("species_code" = "species")
+    ) %>%
+    dplyr::mutate(
+      sp_name   = dplyr::coalesce(.data[[name_col]], species_code),
+      facet_lbl = paste0(sp_name, " (", species_code, ")")
+    ) %>%
+    dplyr::mutate(
+      facet_lbl = factor(facet_lbl, levels = lbl_levels)
+    )
+
+  # Add day label to haul_sp_sf for discrete colour scale.
+  # For elog_rect, date is already in haul_sp_sf (grouped by date); skip join.
+  if (!"date" %in% names(haul_sp_sf)) {
+    src_dates2 <- if (has_elog_trek) dplyr::distinct(et, haul_id, date)
+                  else if (has_haul) dplyr::distinct(h,  haul_id, date)
+                  else               dplyr::distinct(e,  haul_id, date)
+    haul_sp_sf <- dplyr::left_join(haul_sp_sf, src_dates2, by = "haul_id")
+  }
+  haul_sp_sf <- haul_sp_sf %>%
+    dplyr::mutate(
+      day_lbl = factor(format(as.Date(date), "%d/%m"),
+                       levels = sort(unique(format(as.Date(date), "%d/%m"))))
+    )
+  day_levels2  <- levels(haul_sp_sf$day_lbl)
+  day_colours2 <- setNames(pal_day_pal(length(day_levels2)), day_levels2)
+
+  p2 <- ggplot() +
+    theme_bw() +
+    theme(
+      panel.background = element_rect(fill = "white"),
+      panel.border     = element_rect(fill = NA, colour = "grey40", linewidth = 0.3),
+      panel.grid       = element_blank(),
+      plot.margin      = unit(c(0, 0, 0, 0), "cm"),
+      strip.background = element_rect(fill = "grey92", colour = "grey60"),
+      strip.text       = element_text(size = 6, face = "bold", margin = margin(1,1,1,1)),
+      axis.text        = element_text(size = 5),
+      legend.position      = "bottom",
+      legend.box           = "horizontal",
+      legend.box.just      = "center",
+      legend.justification = "center",
+      legend.margin        = margin(t = 4, b = 2),
+      legend.spacing.x     = unit(6, "pt"),
+      legend.text          = element_text(size = 7),
+      legend.title         = element_text(size = 7, face = "bold"),
+      legend.key.size      = unit(1.0, "lines")
+    ) +
+    depth_layer2 +
+    ggnewscale::new_scale_fill() +
+    geom_sf(data = world_crop2, fill = "grey82", colour = "grey55", linewidth = 0.2) +
+    { if (!is.null(eez_crop2)) geom_sf(data = eez_crop2, fill = NA,
+        colour = "grey20", linewidth = 0.6, linetype = "solid") else NULL } +
+    # Route trajectory (reuse route_sf from fig 1 — same trip)
+{ if (!is.null(route_sf)) {
+        rc <- if (!is.null(trip_colour_map))
+          dplyr::left_join(route_sf, trip_colour_map, by = "trip_id") %>%
+            dplyr::mutate(colour = dplyr::if_else(is.na(colour), "yellow", colour))
+        else
+          dplyr::mutate(route_sf, colour = "yellow")
+        # Use aes colour mapping instead of per-row loops to avoid Reduce(+, NULL)
+        geom_sf(data = rc, aes(colour = colour),
+                linewidth = 1.2, linetype = "dashed", alpha = 0.95,
+                show.legend = FALSE)
+      } else NULL } +
+    # Departure / arrival ports
+    scale_colour_identity() +
+    { if (!is.null(ports_sf) && nrow(ports_sf) > 0) list(
+        geom_sf(data = ports_sf, colour = "red", fill = "red",
+                shape = 21, size = 3, stroke = 1.0),
+        geom_sf_text(data = ports_sf, aes(label = port),
+                     colour = "red", size = 2.2, fontface = "bold",
+                     nudge_y = (ymax2 - ymin2) * 0.03,
+                     check_overlap = TRUE))
+      else NULL } +
+    coord_sf(xlim = c(xmin2, xmax2), ylim = c(ymin2, ymax2), expand = FALSE) +
+    scale_x_continuous(breaks = scales::extended_breaks(n = 3)(c(xmin2, xmax2)),
+                       labels = function(x) fmt_dms(x, is_lon = TRUE),
+                       expand = c(0, 0)) +
+    scale_y_continuous(breaks = scales::extended_breaks(n = 3)(c(ymin2, ymax2)),
+                       labels = function(x) fmt_dms(x, is_lon = FALSE),
+                       expand = c(0, 0)) +
+    geom_sf(data = haul_sp_sf,
+            aes(size = weight_kg, fill = day_lbl),
+            shape = 21, colour = "white", stroke = 0.3, alpha = 0.65) +
+    scale_size_continuous(
+      name   = if (lang == "nl") "Vangst (kg)" else "Catch (kg)",
+      range  = c(1.5, 12), labels = scales::comma
+    ) +
+    scale_fill_manual(
+      name   = if (lang == "nl") "Dag" else "Day",
+      values = day_colours2
+    ) +
+    guides(
+      fill = guide_legend(nrow = 1, order = 1,
+                          override.aes = list(shape = 22, size = 5,
+                                              stroke = 0.3, colour = "white")),
+      size = guide_legend(nrow = 1, order = 2,
+                          override.aes = list(fill = "grey60", colour = "white"))
+    ) +
+    labs(title    = glue("{paste(setvessel, collapse='/')} — ",
+                         "{if(lang=='nl') 'vangst per trek per soort' else 'catch per haul by species'}"),
+         subtitle = glue("{txt('plot_trip_lbl')} {paste(settrip, collapse=', ')} | ",
+                         "{format(report_start,'%d %b')} – {format(report_end,'%d %b %Y')}"),
+         caption  = fig_nums("catchperspecies"),
+         x = NULL, y = NULL) +
+    theme(plot.caption = element_text(size = 9, face = "italic", hjust = 0)) +
+    facet_wrap(~facet_lbl, ncol = ncol2)
+
+  print(p2)
+}
+```
+
+\newpage
+
+<!-- ########################################################################################## -->
+<!-- Figure 3: Catch per haul by species and trip                                             -->
+<!-- ########################################################################################## -->
+
+```{r fig_vangst_per_haul_setup}
+# Determine grouping: by haul (preferred) or by day (elog-only fallback)
+# elog_trek and kisten have haul_id; elog-only trips don't.
+bar_by_haul <- has_elog_trek || has_kisten
+haul_src <- if (has_elog_trek) et else if (has_kisten) m else if (has_elog) e else tibble()
+
+# Per-trip bar counts for proportional panel heights
+bar_counts <- if (nrow(haul_src) > 0) {
+  if (bar_by_haul) {
+    haul_src %>% dplyr::group_by(trip_id) %>%
+      dplyr::summarise(n = dplyr::n_distinct(haul_id), .groups = "drop")
+  } else {
+    haul_src %>% dplyr::group_by(trip_id) %>%
+      dplyr::summarise(n = dplyr::n_distinct(date), .groups = "drop")
+  }
+} else {
+  tibble::tibble(trip_id = character(), n = integer())
+}
+n_bars_total <- sum(bar_counts$n)
+n_trips      <- nrow(bar_counts)
+fig_h_bar    <- max(4, min(n_bars_total * 0.30 + n_trips * 0.6 + 2, max_fig_h))
+```
+
+```{r fig_vangst_per_haul, fig.width=10, fig.height=fig_h_bar}
+
+fig_nums("vangstperhaul", display = FALSE, caption = txt("cap_haul_bar"))
+
+haul_catch <- if (has_elog_trek) et else if (has_kisten) m else if (has_elog) e else tibble()
+
+# x-axis grouping variable: haul_id when available, date when elog-only
+x_var     <- if (bar_by_haul) "haul_id" else "date"
+x_label   <- if (bar_by_haul) txt("xlab_haul") else if (lang == "nl") "Datum" else "Date"
+
+if (nrow(haul_catch) > 0 && nspecies > 0) {
+
+  # Ensure x_var exists
+  if (!x_var %in% names(haul_catch)) {
+    if (x_var == "haul_id") haul_catch <- dplyr::mutate(haul_catch, haul_id = dplyr::row_number())
+    if (x_var == "date")    haul_catch <- dplyr::mutate(haul_catch, date = as.Date(NA))
+  }
+
+  # Top species + "Other"
+  top_sp      <- myspecies$species_code
+  sp_name_lkp <- myspecies %>%
+    dplyr::mutate(sp_label = paste0(.data[[species_name_col]], " (", species_code, ")")) %>%
+    dplyr::select(species_code, sp_label)
+
+  bar_data <- haul_catch %>%
+    dplyr::group_by(trip_id, .data[[x_var]], species_code) %>%
+    dplyr::summarise(weight_kg = sum(weight_kg, na.rm = TRUE), .groups = "drop") %>%
+    dplyr::mutate(
+      sp_grp = dplyr::if_else(species_code %in% top_sp, species_code, "Other")
+    ) %>%
+    dplyr::group_by(trip_id, .data[[x_var]], sp_grp) %>%
+    dplyr::summarise(weight_kg = sum(weight_kg, na.rm = TRUE), .groups = "drop") %>%
+    dplyr::left_join(
+      dplyr::bind_rows(
+        sp_name_lkp %>% dplyr::rename(sp_grp = species_code),
+        tibble::tibble(sp_grp = "Other",
+                       sp_label = if (lang == "nl") "Overig" else "Other")
+      ), by = "sp_grp"
+    )
+
+  # Species order by total trip weight descending; Other always last
+  sp_order <- bar_data %>%
+    dplyr::filter(sp_grp != "Other") %>%
+    dplyr::group_by(sp_label) %>%
+    dplyr::summarise(tot = sum(weight_kg, na.rm = TRUE), .groups = "drop") %>%
+    dplyr::arrange(desc(tot)) %>%
+    dplyr::pull(sp_label)
+  other_lbl <- if (lang == "nl") "Overig" else "Other"
+  sp_order  <- c(sp_order, other_lbl)
+
+  # ggplot stacks geom_col so that factor level 1 appears at the TOP of the stack
+  # (rightmost after coord_flip). Reversing the factor levels puts the highest-
+  # catch species (originally level 1) at the BOTTOM = LEFT after coord_flip.
+  sp_order_plot <- rev(sp_order)   # reversed for correct left-to-right visual order
+  bar_data <- bar_data %>%
+    dplyr::mutate(sp_label = factor(sp_label, levels = sp_order_plot)) %>%
+    dplyr::arrange(trip_id, .data[[x_var]], sp_label)
+
+  # Viridis colours assigned in trip-weight order (highest = first turbo colour)
+  bar_colours <- setNames(
+    scales::viridis_pal(option = "turbo")(length(sp_order)),
+    sp_order
+  )
+
+  # Helper: contrasting text colour
+  contrast_colour <- function(hex) {
+    rgb <- grDevices::col2rgb(hex) / 255
+    lum <- 0.2126 * rgb[1,] + 0.7152 * rgb[2,] + 0.0722 * rgb[3,]
+    ifelse(lum > 0.45, "grey15", "white")
+  }
+
+  bar_data_stacked <- bar_data %>%
+    dplyr::mutate(.sort_idx = match(as.character(sp_label), sp_order)) %>%
+    dplyr::arrange(trip_id, .data[[x_var]], .sort_idx) %>%
+    dplyr::select(-.sort_idx) %>%
+    dplyr::group_by(trip_id, .data[[x_var]]) %>%
+    dplyr::mutate(
+      y_top    = cumsum(weight_kg),
+      y_bottom = y_top - weight_kg,
+      y_mid    = (y_top + y_bottom) / 2,
+      trip_max = max(weight_kg)
+    ) %>%
+    dplyr::ungroup() %>%
+    dplyr::mutate(
+      fill_hex    = bar_colours[as.character(sp_label)],
+      fill_hex    = dplyr::if_else(is.na(fill_hex), "grey65", fill_hex),
+      text_colour = contrast_colour(fill_hex),
+      is_dominant = weight_kg == trip_max,
+      show_label  = is_dominant & weight_kg >= trip_max * 0.05
+    )
+  label_data <- dplyr::filter(bar_data_stacked, show_label)
+
+  p_bar <- ggplot(bar_data,
+                  aes(x = factor(.data[[x_var]]), y = weight_kg, fill = sp_label)) +
+    theme_bw() +
+    theme(
+      panel.grid.major.y = element_blank(),
+      panel.grid.minor   = element_blank(),
+      strip.background   = element_rect(fill = "grey92", colour = "grey60"),
+      strip.text         = element_text(size = 9, face = "bold"),
+      axis.text          = element_text(size = 8),
+      legend.position    = "bottom",
+      legend.box         = "horizontal",
+      legend.text        = element_text(size = 7),
+      legend.title       = element_text(size = 7, face = "bold"),
+      legend.key.size    = unit(0.8, "lines")
+    ) +
+    geom_col(width = 0.8) +
+    geom_text(
+      data = label_data,
+      aes(x = factor(.data[[x_var]]), y = y_mid,
+          label = sp_grp, colour = I(text_colour)),
+      size = 2.2, fontface = "bold", inherit.aes = FALSE
+    ) +
+    coord_flip() +
+    scale_x_discrete(limits = rev) +
+    scale_y_continuous(breaks = scales::pretty_breaks(n = 4),
+                       expand = expansion(mult = c(0, 0.03))) +
+    scale_fill_manual(
+      name   = if (lang == "nl") "Soort" else "Species",
+      values = bar_colours,
+      breaks = sp_order,
+      guide  = guide_legend(nrow = 2)
+    ) +
+    labs(
+      title    = glue("{paste(setvessel, collapse='/')} — ",
+                      "{if (bar_by_haul) {if(lang=='nl') 'aanvoer per soort en trek' else 'catch per species and haul'} else {if(lang=='nl') 'aanvoer per soort en dag' else 'catch per species and day'}}"),
+      subtitle = glue("{txt('plot_trip_lbl')} {paste(settrip, collapse=', ')} | ",
+                      "{format(report_start,'%d %b')} – {format(report_end,'%d %b %Y')}"),
+      x       = x_label,
+      y       = if (lang == "nl") "Aanvoer (kg)" else "Catch (kg)",
+      caption = fig_nums("vangstperhaul")
+    ) +
+    theme(plot.caption = element_text(size = 9, face = "italic", hjust = 0)) +
+    facet_grid(trip_id ~ ., scales = "free_y", space = "free_y")
+
+  print(p_bar)
+}
+```
+
+\newpage
+
+<!-- ########################################################################################## -->
+<!-- Figure 4: Total catch vs landings per haul (discard estimate)                            -->
+<!-- ########################################################################################## -->
+
+```{r fig_discards_setup}
+# Only render if haul data exists (zero-catch hauls are now shown too)
+has_catchweight <- has_haul && "total_catch_kg" %in% names(h) &&
+                   sum(!is.na(h$total_catch_kg) & h$total_catch_kg > 0) > 0
+
+fig_h_disc <- if (has_haul) {
+  # Use ALL hauls for height (including zero-catch) so bars are not cramped
+  disc_haul_counts <- h %>%
+    dplyr::group_by(trip_id) %>%
+    dplyr::summarise(n = dplyr::n_distinct(haul_id), .groups = "drop")
+  n_disc_hauls <- sum(disc_haul_counts$n)
+  n_disc_trips <- nrow(disc_haul_counts)
+  max(4, min(n_disc_hauls * 0.30 + n_disc_trips * 0.6 + 2, max_fig_h))
+} else { 4 }
+```
+
+```{r fig_discards, fig.height=fig_h_disc}
+fig_nums("discards", display = FALSE, caption = txt("cap_catch_overview"))
+
+if (has_catchweight) {
+
+  # ── Landing by haul (fallback chain unchanged) ──────────────────────────
+  landing_by_haul <- 
+    if (has_elog_trek && nrow(et) > 0 && "haul_id" %in% names(et) && sum(!is.na(et$haul_id)) > 0) {
+      et %>% dplyr::group_by(trip_id, haul_id) %>%
+      dplyr::summarise(landing_kg = sum(weight_kg, na.rm = TRUE), .groups = "drop")
+  } else if (has_kisten && nrow(m) > 0 && "haul_id" %in% names(m) &&
+             sum(!is.na(m$haul_id)) > 0) {
+    m %>% dplyr::group_by(trip_id, haul_id) %>%
+      dplyr::summarise(landing_kg = sum(weight_kg, na.rm = TRUE), .groups = "drop")
+  } else if (has_kisten && nrow(m) > 0 && "date" %in% names(m)) {
+    m_daily <- m %>% dplyr::group_by(trip_id, date) %>%
+      dplyr::summarise(landing_kg = sum(weight_kg, na.rm = TRUE), .groups = "drop")
+    h %>%
+      dplyr::filter(!is.na(total_catch_kg), total_catch_kg > 0) %>%
+      dplyr::select(trip_id, haul_id, date) %>%
+      dplyr::left_join(m_daily, by = c("trip_id", "date")) %>%
+      dplyr::group_by(trip_id, date) %>%
+      dplyr::mutate(landing_kg = landing_kg / dplyr::n()) %>%
+      dplyr::ungroup() %>%
+      dplyr::select(trip_id, haul_id, landing_kg)
+  } else if (has_elog && nrow(e) > 0 && "haul_id" %in% names(e)) {
+    e %>% dplyr::group_by(trip_id, haul_id) %>%
+      dplyr::summarise(landing_kg = sum(weight_kg, na.rm = TRUE), .groups = "drop")
+  } else {
+    tibble::tibble(trip_id = character(), haul_id = integer(), landing_kg = numeric())
+  }
+
+  # ── Build disc_data starting from ALL hauls (incl. zero-catch) ──────────
+  # Left-join catch and landing onto the full haul list so zero-catch hauls
+  # appear as zero-length bars rather than being silently dropped.
+  all_hauls <- h %>%
+    dplyr::distinct(trip_id, haul_id)
+
+  disc_data <- all_hauls %>%
+    dplyr::left_join(
+      h %>% dplyr::select(trip_id, haul_id, total_catch_kg, date),
+      by = c("trip_id", "haul_id")
+    ) %>%
+    dplyr::left_join(landing_by_haul, by = c("trip_id", "haul_id")) %>%
+    dplyr::mutate(
+      total_catch_kg = dplyr::coalesce(total_catch_kg, 0),
+      landing_kg     = dplyr::coalesce(landing_kg,     0),
+      discard_kg     = pmax(total_catch_kg - landing_kg, 0),
+      discard_pct    = dplyr::if_else(
+        total_catch_kg > 0,
+        round(100 * discard_kg / total_catch_kg),
+        0L
+      ),
+      haul_lbl = as.integer(haul_id)
+    )
+
+  # ── Overall discard % per trip for annotation ────────────────────────────
+  x_max_all <- max(disc_data$total_catch_kg, na.rm = TRUE)
+  trip_pct <- disc_data %>%
+    dplyr::group_by(trip_id) %>%
+    dplyr::summarise(
+      pct   = dplyr::if_else(
+        sum(total_catch_kg) > 0,
+        round(100 * sum(discard_kg) / sum(total_catch_kg)),
+        0L
+      ),
+      .groups = "drop"
+    ) %>%
+    dplyr::mutate(
+      x_pos = x_max_all * 0.98,
+      label = glue::glue("{txt('overall_discards')} {pct}%")
+    )
+
+  # ── Pivot to long for stacked bars ───────────────────────────────────────
+  lbl_aanvoer  <- txt("lbl_aanvoer")
+  lbl_discards <- "Discards"
+
+  disc_long <- disc_data %>%
+    dplyr::select(trip_id, haul_lbl, haul_id, landing_kg, discard_kg, discard_pct) %>%
+    tidyr::pivot_longer(cols = c(landing_kg, discard_kg),
+                        names_to = "type", values_to = "kg") %>%
+    dplyr::mutate(
+      type    = dplyr::recode(type,
+                  landing_kg = lbl_aanvoer,
+                  discard_kg = lbl_discards),
+      type    = factor(type, levels = c(lbl_discards, lbl_aanvoer)),
+      pct_lbl = dplyr::if_else(type == lbl_discards & kg > 0,
+                  paste0(discard_pct, "%"),
+                  NA_character_)
+    )
+
+  # Haul 1 at top: factor levels are set per-trip in descending order.
+  # Because facet_grid uses scales="free_y", each trip's panel gets its own
+  # independent discrete axis — levels only need to be consistent within a trip.
+  disc_long <- disc_long %>%
+    dplyr::group_by(trip_id) %>%
+    dplyr::mutate(
+      haul_lbl = factor(haul_lbl,
+                        levels = rev(sort(unique(haul_lbl))))
+    ) %>%
+    dplyr::ungroup()
+
+  # Label at right edge of full stacked bar
+  disc_long_label <- disc_long %>%
+    dplyr::group_by(trip_id, haul_lbl) %>%
+    dplyr::mutate(bar_total = sum(kg, na.rm = TRUE)) %>%
+    dplyr::ungroup() %>%
+    dplyr::filter(type == lbl_discards, !is.na(pct_lbl))
+
+  ggplot(disc_long, aes(y = haul_lbl, x = kg, fill = type)) +
+    theme_bw() +
+    theme(
+      strip.background   = element_rect(fill = "grey90"),
+      strip.text.y.right = element_text(angle = -90),  # rotated to the right
+      panel.grid.minor   = element_blank(),
+      legend.position    = "bottom"
+    ) +
+    geom_col(width = 0.7, alpha = 0.85) +
+    geom_text(
+      data = disc_long_label,
+      aes(x = bar_total, y = haul_lbl, label = pct_lbl),
+      hjust = -0.15, size = 2.8, inherit.aes = FALSE, colour = "grey20"
+    ) +
+    geom_text(
+      data = trip_pct,
+      aes(x = x_pos, y = Inf, label = label),
+      hjust = 1, vjust = 1.5, size = 3, fontface = "bold", inherit.aes = FALSE
+    ) +
+    scale_fill_manual(
+      name   = NULL,
+      values = setNames(c(pal_aanvoer, pal_discards),
+                        c(lbl_aanvoer, lbl_discards))
+    ) +
+    scale_x_continuous(expand = expansion(mult = c(0, 0.18))) +
+    facet_grid(trip_id ~ ., scales = "free_y", space = "free_y") +
+    labs(
+      title    = glue("{paste(setvessel, collapse='/')} — {txt('cap_catch_overview')}"),
+      subtitle = glue("{txt('plot_trip_lbl')} {paste(settrip, collapse=', ')} | ",
+                      "{format(report_start,'%d %b')} \u2013 {format(report_end,'%d %b %Y')}"),
+      caption  = fig_nums("discards"),
+      y = if (lang == "nl") "Trek" else "Haul",
+      x = "kg"
+    ) +
+    theme(plot.caption = element_text(size = 9, face = "italic", hjust = 0))
+}
+```
+
+\newpage
+
+<!-- ########################################################################################## -->
+<!-- Figure 5: Cumulative catch by species, week and year                                     -->
+<!-- ########################################################################################## -->
+
+```{r layout_species}
+ncol_species <- if (nspecies <= 4) 2 else if (nspecies <= 9) 3 else 4
+fig_h_cumul  <- min((10 / ncol_species) * ceiling(nspecies / ncol_species) + 1.5, max_fig_h)
+```
+
+```{r fig_aanvoer_cumulatief, fig.height=fig_h_cumul}
+
+fig_nums("aanvoerperweekenjaar", display = FALSE,
+         caption = txt("cap_cumul"))
+
+if (has_elog && nspecies > 0) {
+  current_year <- year(max(e$date, na.rm = TRUE))
+
+  # Reload full elog for multi-year context, strictly for this vessel
+  elog_hist <- elog %>%
+    dplyr::filter(
+      vessel %in% setvessel,
+      year(date) >= current_year - 3,
+      date <= max(e$date, na.rm = TRUE),
+      species_code %in% myspecies$species_code
+    ) %>%
+    dplyr::mutate(
+      species_code = harmonise_species(species_code),
+      yr = year(date),
+      wk = isoweek(date)
+    ) %>%
+    dplyr::group_by(vessel, species_code, yr, wk) %>%
+    dplyr::summarise(landing_kg = sum(weight_kg, na.rm = TRUE), .groups = "drop") %>%
+    dplyr::group_by(vessel, species_code, yr) %>%
+    dplyr::arrange(wk) %>%
+    dplyr::mutate(
+      cumweight = cumsum(landing_kg),
+      year      = as.character(yr),
+      is_current = (yr == current_year)
+    ) %>%
+    dplyr::ungroup() %>%
+    dplyr::left_join(
+      dplyr::select(asfis, species, dutchname, englishname) %>%
+        dplyr::mutate(species = as.character(species),
+                      dutchname   = as.character(dutchname),
+                      englishname = as.character(englishname)),
+      by = c("species_code" = "species")
+    ) %>%
+    dplyr::mutate(species_code = factor(species_code, levels = myspecies$species_code)) %>%
+    dplyr::mutate(
+      sp_name  = as.character(if (lang == "nl")
+                   dplyr::coalesce(as.character(dutchname),   as.character(species_code))
+                 else
+                   dplyr::coalesce(as.character(englishname), as.character(species_code))),
+      sp_label = paste0(sp_name, " (", species_code, ")"),
+      sp_label = factor(sp_label,
+                   levels = paste0(
+                     if (lang == "nl")
+                       dplyr::coalesce(
+                         as.character(asfis$dutchname[match(levels(species_code), as.character(asfis$species))]),
+                         levels(species_code))
+                     else
+                       dplyr::coalesce(
+                         as.character(asfis$englishname[match(levels(species_code), as.character(asfis$species))]),
+                         levels(species_code)),
+                     " (", levels(species_code), ")"))
+    )
+
+  year_levels  <- sort(unique(elog_hist$year))
+  n_yr         <- length(year_levels)
+  cur_yr_chr   <- as.character(current_year)
+  prev_yr_chr  <- as.character(current_year - 1)
+
+  yr_colours <- setNames(
+    c(rep(pal_hist_year, max(0, n_yr - 2)), pal_prev_year, pal_cur_year)[seq_len(n_yr)],
+    year_levels
+  )
+  yr_widths  <- setNames(
+    c(rep(0.4, max(0, n_yr - 1)), 1.2)[seq_len(n_yr)],
+    year_levels
+  )
+  yr_alpha   <- setNames(
+    c(rep(0.7, max(0, n_yr - 1)), 1.0)[seq_len(n_yr)],
+    year_levels
+  )
+
+  ggplot(elog_hist, aes(x = wk, y = cumweight, colour = year,
+                         linewidth = year, alpha = year)) +
+    theme_bw() +
+    theme(text = element_text(size = 10),
+          strip.background = element_rect(fill = "grey90"),
+          panel.grid.minor = element_blank()) +
+    geom_line() +
+    scale_colour_manual(txt("legend_year"),    values = yr_colours) +
+    scale_linewidth_manual(txt("legend_year"), values = yr_widths,  guide = "none") +
+    scale_alpha_manual(txt("legend_year"),     values = yr_alpha,   guide = "none") +
+    labs(
+      title = glue("{paste(setvessel, collapse='/')} — {txt(\"plot_cumul\")}"),
+      x = txt("xlab_week"), y = txt("ylab_cumul")
+    ) +
+    facet_wrap(~sp_label, scales = "free_y", ncol = ncol_species)
+}
+```
+
+_`r fig_nums("aanvoerperweekenjaar")`_
+
+\newpage
+
+\newpage
+
+```{r session_info, include=FALSE}
+# Quick note for debugging
+message(glue("Report complete: vessel={paste(setvessel, collapse=',')}, ",
+             "trip(s)={paste(settrip, collapse=',')}, ",
+             "elog={nrow(e)} rows, elog_trek={nrow(et)} rows, ",
+             "haul={nrow(h)} rows, kisten={nrow(m)} rows"))
+```
