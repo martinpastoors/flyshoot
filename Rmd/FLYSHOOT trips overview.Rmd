@@ -50,24 +50,59 @@ load(file.path(spatialdir, "world_lr_df.RData"))
 
 load(file.path(spatialdir, "asfis.RData"))
 
+# set onedrive directory
+onedrive <- get_onedrive(team="Martin Pastoors", site="FLYSHOOT - General")
+
+# datasets with price and regulated information derived from read_afslag.r
+# source("../R/read_afslag.r")
+price  <- 
+  readr::read_rds(file.path(onedrive, "rdata/prices.rds")) %>% 
+  dplyr::select(year, species, avgprice) %>% 
+  mutate(price_cat = cut(avgprice, breaks=c(0,0.5, 1,2,3,4,5,10,15,20), dig.lab=10 ))
+
+price_raw <-
+  readr::read_rds(file.path(onedrive, "rdata/prices_raw.rds")) 
+  
+regulated  <- 
+  readr::read_rds(file.path(onedrive, "rdata/prices.rds")) %>% 
+  ungroup() %>% 
+  dplyr::distinct(species, regulated) 
+
 # ===============================================================================
 #  Load and filter the trip data
 # ===============================================================================
 
-# set onedrive directory
-onedrive <- get_onedrive(team="Martin Pastoors", site="FLYSHOOT - General")
 
 # load datasets
 haul   <- loadRData(file.path(onedrive, "rdata/haul.RData"))
 kisten <- loadRData(file.path(onedrive, "rdata/kisten.RData")) 
 elog   <- loadRData(file.path(onedrive, "rdata/elog.RData")) %>% 
   mutate(species = toupper(species)) %>% 
-  mutate(species = ifelse(species=="JAX","HOM",species))
-gfw   <- loadRData(file.path(onedrive, "rdata/gfw.RData")) 
+  mutate(species = ifelse(species=="JAX","HOM",species)) %>% 
+  mutate(species = ifelse(species == "SQC", "SQR", species)) %>%
+  left_join(dplyr::select(asfis,
+                          species, scientificname, englishname, dutchname),
+            by = "species") %>%
+  mutate(species = toupper(species)) %>% 
+  
+  mutate(englishname = ifelse(englishname=="European pilchard(=Sardine)", "European pilchard", englishname)) %>% 
+  
+  left_join(regulated, by="species") %>% 
+  mutate(regulated = case_when(
+    is.na(regulated) & species %in% c("BSE","DGX","ANF","DGH","HER","PLE")             ~ "R",
+    is.na(regulated) & species %in% c("BRB","SBX","SQS","WEX","WEG","SQU","SDV",
+                                      "OCT","MUL","SCR","GAG","ANE","SQE","SQC","OCZ") ~ "NR",
+    TRUE ~ regulated
+  )) %>%  rename(division = faozone) %>% 
+  ungroup()
 
-yrs     <- 2021:2025
+# gfw   <- loadRData(file.path(onedrive, "rdata/gfw.RData")) 
+
+
+yrs     <- 2022:2026
+longyrs <- 2012:2026
 mnths   <- NA
-vessels <- c("SL9","SCH99", "Z99", "SCH135","SCH65")
+vessels <- c("SL9","SCH99", "Z99", "SCH135","SCH65", "SCH144")
 
 myyear <- max(yrs)
 
@@ -104,37 +139,44 @@ k <-
                           vessel, trip, haul, division, lat, lon, rect),
             by=c("vessel","trip","haul"))
 
+# e <- 
+#   elog %>%
+#   ungroup() %>% 
+#   {if(!is.na(all(vessels))) filter(., vessel %in% vessels) else . } %>% 
+#   {if(!is.na(all(yrs)))     filter(., year %in% yrs) else . } %>% 
+#   {if(!is.na(all(mnths)))   filter(., month %in% mnths) else .} %>% 
+#   ungroup() %>% 
+#   # mutate(species = tolower(species)) %>% 
+#   mutate(species = ifelse(species == "SQC", "SQR", species)) %>% 
+#   left_join(dplyr::select(asfis,
+#                           species, scientificname, englishname, dutchname),
+#             by = "species") %>% 
+#   mutate(species = toupper(species))  
+
 e <- 
   elog %>%
   ungroup() %>% 
-  {if(!is.na(all(vessels))) filter(., vessel %in% vessels) else . } %>% 
-  {if(!is.na(all(yrs)))     filter(., year %in% yrs) else . } %>% 
-  {if(!is.na(all(mnths)))   filter(., month %in% mnths) else .} %>% 
-  ungroup() %>% 
-  # mutate(species = tolower(species)) %>% 
-  mutate(species = ifelse(species == "SQC", "SQR", species)) %>% 
-  left_join(dplyr::select(asfis,
-                          species, scientificname, englishname, dutchname),
-            by = "species") %>% 
-  mutate(species = toupper(species))  
+  # mutate(division =tolower(division)) %>% 
+  {if(!any(is.na(vessels))) filter(., vessel %in% vessels) else . } %>% 
+  {if(!any(is.na(yrs)))     filter(., year %in% yrs) else . } %>% 
+  {if(!any(is.na(mnths)))   filter(., month %in% mnths) else .} 
 
-g <- 
-  gfw %>%
-  ungroup() %>% 
-  {if(!all(is.na(vessels))) filter(., vessel %in% vessels) else . } %>% 
-  {if(!all(is.na(yrs)))     filter(., year %in% yrs) else . } %>% 
-  {if(!all(is.na(mnths)))   filter(., month %in% mnths) else .} %>% 
-  dplyr::select(vessel, year, month, week, lon, lat)
-
-# calculate the scaling of plots
-xmin <- floor(2 * (min(e$lon, na.rm=TRUE)-0.5))/2;
-xmax <- ceiling(2 * (max(e$lon, na.rm=TRUE)+0.5))/2;
-ymin <- floor(2 * (min(e$lat, na.rm=TRUE)-0.5))/2;
-ymax <- ceiling(2* (max(e$lat, na.rm=TRUE)+0.5))/2
+# g <- 
+#   gfw %>%
+#   ungroup() %>% 
+#   {if(!all(is.na(vessels))) filter(., vessel %in% vessels) else . } %>% 
+#   {if(!all(is.na(yrs)))     filter(., year %in% yrs) else . } %>% 
+#   {if(!all(is.na(mnths)))   filter(., month %in% mnths) else .} %>% 
+#   dplyr::select(vessel, year, month, week, lon, lat)
 
 
 
-n <- 15
+
+# Determine number of years
+nyears_actual <- length(yrs)
+
+# Determine number of species
+nspecies_actual <- 12
 
 effort <-
   e %>% 
@@ -151,13 +193,34 @@ catch <-
   left_join(effort, by=c("vessel", "year")) %>% 
   mutate(catch_day = weight / ndays)
 
-top <-
-  catch %>% 
-  # filter(year == max(yrs)) %>% 
-  dplyr::group_by(species) %>% 
-  dplyr::summarize(weight     = sum(weight, na.rm=TRUE)) %>% 
-  arrange(desc(weight)) %>% 
-  slice_head(n=n)
+revenue_byweek <-
+  elog %>% 
+  left_join(price, by=c("year","species")) %>% 
+  mutate(revenue = weight * avgprice) %>% 
+  drop_na(revenue) %>% 
+  group_by(vessel, year, quarter, week, rect, division, species, scientificname, englishname, dutchname, regulated) %>% 
+  summarise(
+    weight  = sum(weight, na.rm=TRUE),
+    revenue = sum(revenue, na.rm=TRUE),
+    ndays   = n_distinct(date)
+  ) %>% 
+  # left_join(icesrect, by="rect") %>% 
+  ungroup()
+
+# get top species from "FLYSHOOT top species.R"
+# source("../R/FLYSHOOT top species.r")
+top      <- 
+  readr::read_rds(file=file.path(onedrive,"rdata", "top.rds")) %>%  
+  lowcase() %>% 
+  dplyr::select(-value, -weight) 
+
+# top <-
+#   catch %>% 
+#   # filter(year == max(yrs)) %>% 
+#   dplyr::group_by(species) %>% 
+#   dplyr::summarize(weight     = sum(weight, na.rm=TRUE)) %>% 
+#   arrange(desc(weight)) %>% 
+#   slice_head(n=nspecies_actual)
 
 # e %>% 
 #   filter(date == dmy("14/4/2025"), vessel=="SCH135") %>% 
@@ -167,13 +230,83 @@ top <-
 #   filter(is.na(presentation), year==2025) %>% 
 #   View()
 
-e %>%
-  filter(year>= 2023) %>%
-  filter(faozone %in% c("27.7.d", "27.7.e", "27.4.b","27.4.c")) %>% 
-  mutate(area = ifelse(faozone %in% c("27.7.d", "27.7.e"), "channel","northsea")) %>% 
-  group_by(species, scientificname, dutchname, area) %>% 
-  summarise(weight = sum(weight, na.rm=TRUE)) %>% 
-  writexl::write_xlsx(., path="export.xlsx")
+# e %>%
+#   filter(year>= 2023) %>%
+#   filter(faozone %in% c("27.7.d", "27.7.e", "27.4.b","27.4.c")) %>% 
+#   mutate(area = ifelse(faozone %in% c("27.7.d", "27.7.e"), "channel","northsea")) %>% 
+#   group_by(species, scientificname, dutchname, area) %>% 
+#   summarise(weight = sum(weight, na.rm=TRUE)) %>% 
+#   writexl::write_xlsx(., path="export.xlsx")
+
+# calculate the scaling of plots
+xmin <- floor(2 * (min(e$lon, na.rm=TRUE)-0.5))/2;
+xmax <- ceiling(2 * (max(e$lon, na.rm=TRUE)+0.5))/2;
+ymin <- floor(2 * (min(e$lat, na.rm=TRUE)-0.5))/2;
+ymax <- ceiling(2* (max(e$lat, na.rm=TRUE)+0.5))/2
+
+# calculate the scaling of plots
+
+lon_range <- range(e$lon, na.rm = TRUE)
+lat_range <- range(e$lat, na.rm = TRUE)
+
+# Add 10% buffer on each side
+lon_buffer <- diff(lon_range) * 0.1
+lat_buffer <- diff(lat_range) * 0.1
+
+xmin <- floor(lon_range[1] - lon_buffer)
+xmax <- ceiling(lon_range[2] + lon_buffer)
+ymin <- floor((lat_range[1] - lat_buffer) * 2) / 2
+ymax <- ceiling((lat_range[2] + lat_buffer) * 2) / 2
+
+# Calculate actual distances
+xdistance <- icosa::arcdist(p1 = c(xmin, ymin), p2 = c(xmax, ymin))
+ydistance <- icosa::arcdist(p1 = c(xmin, ymin), p2 = c(xmin, ymax))
+data_aspect <- ydistance / xdistance
+
+
+# Choose ncol based on data aspect ratio
+if (data_aspect > 1.2) {
+  # Tall maps work better with more columns
+  ncol_use_years <- min(4, ceiling(nyears_actual / 2))
+} else if (data_aspect < 0.7) {
+  # Wide maps work better with fewer columns
+  ncol_use_years <- min(2, ceiling(nyears_actual / 3))
+} else if (nyears_actual < 6) {
+  # Wide maps work better with fewer columns
+  ncol_use_years <- min(2, ceiling(nyears_actual / 3))
+} else {
+  ncol_use_years <- 3
+}
+
+# Calculate figure dimensions for Word (typical width ~6.5 inches)
+fig_width <- knitr::opts_chunk$get("fig.width")  
+nrows_years <- ceiling(nyears_actual / ncol_use_years)
+
+# Base height on aspect ratio and number of rows
+fig_height_years <- (fig_width / ncol_use_years) * data_aspect * nrows_years + 1.5  # +1.5 for legend
+fig_height_years <- min(fig_height_years, fig_width * 1.2)  # cap at reasonable height
+
+
+
+
+# Choose ncol based on data aspect ratio
+if (data_aspect > 1.2) {
+  # Tall maps work better with more columns
+  ncol_use_species <- min(4, ceiling(nspecies_actual / 2))
+} else if (data_aspect < 0.7) {
+  # Wide maps work better with fewer columns
+  ncol_use_species <- min(2, ceiling(nspecies_actual / 3))
+} else {
+  ncol_use_species <- 3
+}
+
+# Calculate figure dimensions for Word (typical width ~6.5 inches)
+fig_width <- knitr::opts_chunk$get("fig.width")  
+nrows_species <- ceiling(nspecies_actual / ncol_use_species)
+
+# Base height on aspect ratio and number of rows
+fig_height_species <- (fig_width / ncol_use_species) * data_aspect * nrows_species + 1.5  # +1.5 for legend
+fig_height_species <- min(fig_height_species, fig_width * 1.2)  # cap at reasonable height
 
 
 ```
@@ -188,7 +321,7 @@ By: Martin Pastoors
 Report generated: `r format(Sys.time(), '%d/%m/%Y')`
 
 
-```{r triptable, echo=FALSE, message=FALSE, warning=FALSE, comment=NA, fig.asp=0.6}
+```{r triptable, echo=FALSE, message=FALSE, warning=FALSE, comment=NA}
 
 tab_nums(name    = "trips", level = 1, display = FALSE, caption = "Self-sampling overview")
 
@@ -306,7 +439,7 @@ _`r tab_nums("trips")`_
 
 Totale aanvoer per schip en per week
 
-```{r echo=FALSE, message=FALSE, warning=FALSE, comment=NA, fig.asp=0.6}
+```{r echo=FALSE, message=FALSE, warning=FALSE, comment=NA, fig.asp=1.0}
 
 fig_nums(
   name    = "d", 
@@ -466,7 +599,7 @@ ee %>%
 
 Aanvoer per soort, per jaar en per week. Rode lijn is het lopende jaar. 
 
-```{r echo=FALSE, message=FALSE, warning=FALSE, comment=NA, fig.asp=1.0}
+```{r echo=FALSE, message=FALSE, warning=FALSE, comment=NA, fig.height=fig_height_species}
 
 ee <- 
   e %>%
@@ -492,7 +625,7 @@ ee %>%
   scale_alpha_manual("year", values = c(1, 1, 1, 1, 0.5), guide = "none") +
   # geom_hline(aes(yintercept=meanweight, colour=species)) +
   # geom_text(aes(x=1, y=meanweight, label=as.integer(meanweight)), hjust=0, vjust=0, nudge_y = 200) +
-  facet_wrap(~species, scales="free_y")
+  facet_wrap(~species, scales="free_y", nrow = nrows_species)
   # facet_grid(rows=vars(year), cols=vars(species), scales="free_y")
 
 
@@ -530,7 +663,7 @@ ee %>%
 
 Cumulatieve aanvoer per soort, per jaar en per week. Rode lijn is het lopende jaar. 
 
-```{r echo=FALSE, message=FALSE, warning=FALSE, comment=NA, fig.asp=1.0}
+```{r echo=FALSE, message=FALSE, warning=FALSE, comment=NA, fig.height=fig_height_species}
 
 ee <- 
   e %>%
@@ -554,7 +687,7 @@ ee %>%
   scale_alpha_manual("year", values = c(1, 1, 1, 1, 0.5), guide = "none") +
   # geom_hline(aes(yintercept=meanweight, colour=species)) +
   # geom_text(aes(x=1, y=meanweight, label=as.integer(meanweight)), hjust=0, vjust=0, nudge_y = 200) +
-  facet_wrap(~species, scales="free_y")
+  facet_wrap(~species, scales="free_y", nrow=nrows_species)
   # facet_grid(rows=vars(year), cols=vars(species), scales="free_y")
 
 
@@ -699,20 +832,237 @@ print_option <- FALSE
 
 ```
 
+**Catch rate (landings / week)**
+
+```{r cpue1, echo=FALSE, message=FALSE, warning=FALSE, comment=NA, fig.height=fig_height_species}
+
+fig_nums(
+  name    = "cpue1", 
+  level = 1, display = FALSE,
+  caption = "CPUE (landings/day, kg) on log-scale. Outliers not shown on the figures. Red dot indicates medians. Blue line is the linear slope through the medians.")
+
+# catch %>% 
+t <-
+  elog %>% 
+  filter(species %in% top$species) %>%
+  filter(year %in% longyrs) %>% 
+  mutate(englishspecies = paste(englishname, species)) %>% 
+  mutate(englishspecies = factor(englishspecies, levels=top$englishspecies)) %>% 
+  drop_na(weight) %>% 
+  group_by(vessel, englishspecies, year, date) %>% 
+  summarise(catch_day = sum(weight, na.rm=TRUE)) %>% 
+  ungroup() 
+
+# t %>% distinct(englishspecies, regulated) %>% View()
+
+# remove outliers for display
+t2 <-
+  t %>% 
+  group_by(englishspecies) %>% 
+  mutate(catch_day =   DescTools::Winsorize(catch_day, val = quantile(catch_day, probs = c(0.00, 0.9))))
+  # mutate(cutoff = quantile(catch_day, na.rm=TRUE, c(0.9))) %>% 
+  # mutate(catch_day   = ifelse(catch_day > cutoff, NA, catch_day))
+
+# t2 %>% group_by(test) %>% summarise(n=n())
+
+# median
+m <-
+  t %>% 
+  group_by(englishspecies, year) %>% 
+  summarise(median = median(catch_day, na.rm=TRUE))
+
+# slope
+s <-
+  m %>%
+  group_by(englishspecies) %>%
+  summarise(slope = scales::percent(lm(year ~ median)$coefficients[2], accuracy=1)) 
+
+pp <-
+  t2 %>%   
+  # filter(regulated =="NR") %>% 
+  
+  ggplot(aes(x=year, y=catch_day, group=year)) +
+  theme_publication() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  theme(plot.margin = margin(1,1,1,1, "mm")) +
+  theme(plot.title = element_text(hjust = 0.0)) +
+  
+  stat_summary(fun.data = calc_boxplot_stat, geom="boxplot") +  
+  geom_point(data=m, 
+             aes(x=year, y=median), 
+             colour="red", inherit.aes = FALSE) +
+  geom_smooth(data=m, 
+              aes(x=year, y=median), 
+              method="lm", colour="blue", inherit.aes = FALSE, se=FALSE) +
+  geom_text(data=s, 
+            aes(x=Inf, y=1, label=paste("slope:", slope)), 
+            inherit.aes = FALSE, hjust="left", vjust="bottom", colour="blue") +
+  
+  expand_limits(y=0) +
+  scale_x_continuous(breaks=seq(min(e$year), max(e$year),1)) +
+  scale_y_log10() +
+  labs(x="", y="landings/day (kg)", title="Average landings per day") +
+  facet_wrap(~englishspecies, nrow = nrows_species)
+
+print(pp)
+
+
+
+```
+
+_`r fig_nums("cpue1")`_
+
+\newpage
+
+**Average prices per year (euro)**
+
+
+```{r prices, echo=FALSE, message=FALSE, warning=FALSE, comment=NA, fig.height=fig_height_species}
+
+fig_nums(
+  name    = "prices", 
+  level = 1, display = FALSE,
+  caption = "Average prices of Jaczon flyshoot fleet (euro)")
+
+t <-
+  price_raw %>% 
+  filter(species %in% top$species) %>%
+  filter(year %in% longyrs) %>% 
+  mutate(englishspecies = paste(englishname, species)) %>% 
+  mutate(englishspecies = factor(englishspecies, levels=top$englishspecies)) %>% 
+  group_by(englishspecies, year) %>% 
+  summarise(
+    avgprice = weighted.mean(avgprice, weight)
+  ) %>% 
+  ungroup() 
+
+pp <-
+  t %>%   
+  # filter(regulated =="NR") %>% 
+  
+  ggplot(aes(x=year, y=avgprice)) +
+  theme_publication() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  theme(plot.margin = margin(1,1,1,1, "mm")) +
+  theme(plot.title = element_text(hjust = 0.0)) +
+  
+  geom_point() +
+  geom_line() +
+  expand_limits(y=0) +
+  scale_x_continuous(breaks=seq(min(t$year), max(t$year),1)) +
+  labs(x="", y="avg price (euro)", title="Average price per year") +
+  facet_wrap(~englishspecies, nrow = nrows_species)
+
+print(pp)
+
+
+
+```
+
+_`r fig_nums("prices")`_
+
+\newpage
+
+**Revenue per day (euro)**
+
+```{r cpue2, echo=FALSE, message=FALSE, warning=FALSE, comment=NA, fig.height=fig_height_species}
+
+fig_nums(
+  name    = "cpue2", 
+  level = 1, display = FALSE,
+  caption = "RPUE (revenue/day, kg) on log-scale. Outliers not shown on the figures. Red dot indicates medians. Blue line is the linear slope through the medians. ")
+
+# revenue %>% 
+t <-
+  revenue_byweek %>% 
+  filter(species %in% top$species) %>%
+  mutate(englishspecies = paste(englishname, species)) %>% 
+  mutate(englishspecies = factor(englishspecies, levels=top$englishspecies)) %>% 
+  group_by(vessel, englishspecies, year, week) %>% 
+  summarise(
+    revenue = sum(revenue, na.rm=TRUE),
+    ndays   = sum(ndays, na.rm=TRUE)
+  ) %>% 
+  mutate(
+    revenue_day = revenue / ndays
+  ) %>% 
+  ungroup() 
+
+# t %>% distinct(englishspecies, regulated) %>% View()
+
+# remove outliers for display
+t2 <-
+  t %>% 
+  group_by(englishspecies) %>% 
+  mutate(revenue_day =   DescTools::Winsorize(revenue_day, val = quantile(revenue_day, probs = c(0.00, 0.9))))
+  # mutate(cutoff = quantile(catch_day, na.rm=TRUE, c(0.9))) %>% 
+  # mutate(catch_day   = ifelse(catch_day > cutoff, NA, catch_day))
+
+# t2 %>% group_by(test) %>% summarise(n=n())
+
+# median
+m <-
+  t %>% 
+  group_by(englishspecies, year) %>% 
+  summarise(median = median(revenue_day, na.rm=TRUE))
+
+# slope
+s <-
+  m %>%
+  group_by(englishspecies) %>%
+  summarise(slope = scales::percent(lm(year ~ median)$coefficients[2], accuracy=1)) 
+
+pp <-
+  t2 %>%   
+  # filter(regulated =="NR") %>% 
+  
+  ggplot(aes(x=year, y=revenue_day, group=year)) +
+  theme_publication() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  theme(plot.margin = margin(1,1,1,1, "mm")) +
+  theme(plot.title = element_text(hjust = 0.0)) +
+  
+  stat_summary(fun.data = calc_boxplot_stat, geom="boxplot") +  
+  geom_point(data=m, 
+             aes(x=year, y=median), 
+             colour="red", inherit.aes = FALSE) +
+  geom_smooth(data=m, 
+              aes(x=year, y=median), 
+              method="lm", colour="blue", inherit.aes = FALSE, se=FALSE) +
+  geom_text(data=s, 
+            aes(x=Inf, y=1, label=paste("slope:", slope)), 
+            inherit.aes = FALSE, hjust="left", vjust="bottom", colour="blue") +
+  
+  expand_limits(y=0) +
+  scale_x_continuous(breaks=seq(min(elog$year), max(elog$year),1)) +
+  scale_y_log10() +
+  labs(x="", y="revenue/day (euro)", title="Average revenue per day") +
+  facet_wrap(~englishspecies, nrow = nrows_species)
+
+print(pp)
+
+
+
+```
+
+_`r fig_nums("cpue2")`_
+
+\newpage
+
 <!-- ########################################################################################## -->
 <!-- Figure: Landings per Species and per Haul (map)                                            -->
 <!-- ########################################################################################## -->
 
-```{r generating_maps, echo=FALSE, fig.align="center", fig.asp=1.0, message=FALSE, warning=FALSE}
+```{r generating_maps, echo=FALSE, fig.align="center", fig.asp=1.3, message=FALSE, warning=FALSE}
 
-# Pre-calculate everything outside the loop
-xmin <- floor(2 * (min(k$lon, na.rm=TRUE)-0.5))/2
-xmax <- ceiling(2 * (max(k$lon, na.rm=TRUE)+0.5))/2
-ymin <- 49
-ymax <- ceiling(2* (max(k$lat, na.rm=TRUE)+0.5))/2
-
-xlim <- c(xmin, xmax)
-ylim <- c(ymin, ymax)
+# # Pre-calculate everything outside the loop
+# xmin <- floor(2 * (min(k$lon, na.rm=TRUE)-0.5))/2
+# xmax <- ceiling(2 * (max(k$lon, na.rm=TRUE)+0.5))/2
+# ymin <- 49
+# ymax <- ceiling(2* (max(k$lat, na.rm=TRUE)+0.5))/2
+# 
+# xlim <- c(xmin, xmax)
+# ylim <- c(ymin, ymax)
 
 show_species <- c("MAC","SQR","CTC","MUR","WHG","HOM")
 
@@ -720,7 +1070,7 @@ show_species <- c("MAC","SQR","CTC","MUR","WHG","HOM")
 t <-
   k %>%
   filter(species %in% show_species) %>% 
-  filter(year %in% 2023:2025) %>% 
+  filter(year %in% (yrs[length(yrs)]-3):yrs[length(yrs)]) %>% 
   filter(!(lat==0 & lon == 0)) %>% 
   mutate(date = lubridate::as_date(datetime)) %>% 
   mutate(quarter = lubridate::quarter(date)) %>% 
@@ -732,17 +1082,17 @@ t <-
 world_cropped <-
   world_mr_df %>% 
   filter(
-    long >= xlim[1], 
-    long <= xlim[2],
-    lat  >= ylim[1],
-    lat  <= ylim[2]
+    long >= xmin, 
+    long <= xmax,
+    lat  >= ymin,
+    lat  <= ymax
   )
 
 # Calculate breaks once (using overall max)
 tt <- scales::trans_breaks("sqrt", function(x) x^2)(c(0, max(t$gewicht)))
 
 # Pre-filter haul data
-h_filtered <- h %>% filter(year %in% 2023:2025)
+h_filtered <- h %>% filter(year %in% (yrs[length(yrs)]-3):yrs[length(yrs)])
 
 # Split data by species once
 t_by_species <- split(t, t$species)
@@ -762,7 +1112,7 @@ for (myspecies in show_species) {
       text             = element_text(size=12),
       plot.margin      = unit(c(0,0,0,0), "cm")
     ) +
-    coord_quickmap(xlim=xlim, ylim=ylim) +
+    coord_quickmap(xlim=c(xmin, xmax), ylim=c(ymin, ymax)) +
     geom_polygon(data=world_cropped, aes(x=long, y=lat, group=group), fill = "grey75") +
     geom_point(data=h_filtered,
                aes(x=lon, y=lat, colour=as.character(year)),
@@ -804,7 +1154,7 @@ xlim <- c(xmin, xmax); ylim <- c(ymin, ymax)
 t <-
   k %>%
   filter(species %in% top$species) %>% 
-  filter(year %in% 2023:2025) %>% 
+  filter(year %in% (yrs[length(yrs)]-3):yrs[length(yrs)]) %>% 
   filter(!(lat==0 & lon == 0)) %>% 
   mutate(date = lubridate::as_date(datetime)) %>% 
   mutate(quarter = lubridate::quarter(date)) %>% 
@@ -885,7 +1235,7 @@ for (myspecies in top$species) {
 
   png(filename=file.path(onedrive, "report", "FLYSHOOT trips overview", 
                          paste0(myspecies," landings by haul.png")),
-       width=7, height=9.8, units="in", res=300)
+       width=6, height=9.8, units="in", res=300)
 
   print(p)
   

@@ -27,7 +27,7 @@ rm(list=ls())
 # setvessel<-"SL9"   ;settrip<-c("2023081600041", "2023082100042") ; comparisons <- FALSE
 # setvessel<-c("Z99", "SCH99")   ;settrip<- c( "2024174","2024175","2024176") ; comparisons <- FALSE
 
-setvessel<-c("Z99", "SCH99")   ;settrip<- c("2025265") ; comparisons <- FALSE
+setvessel<-c("Z99", "SCH99")   ;settrip<- c("2026282") ; comparisons <- FALSE
 
 # ------------------------------------------------------------
 
@@ -96,7 +96,7 @@ load(file.path(onedrive, "elog.RData"))
 load(file.path(onedrive, "elog_trek.RData"))
 load(file.path(onedrive, "trip.RData"))
 
-load(file.path(onedrive, "gfw.RData"))
+# load(file.path(onedrive, "gfw.RData"))
 
 
 # making the data selections
@@ -161,9 +161,9 @@ trip2 <-
     enddate   = max(haultime, na.rm=TRUE)
   )
 
-if(nrow(et) > 0) {
-  lon_range <- range(et$lon, na.rm = TRUE)
-  lat_range <- range(et$lat, na.rm = TRUE)
+if(nrow(h) > 0) {
+  lon_range <- range(h$lon, na.rm = TRUE)
+  lat_range <- range(h$lat, na.rm = TRUE)
 } else {
   lon_range <- range(e$lon, na.rm = TRUE)
   lat_range <- range(e$lat, na.rm = TRUE)
@@ -579,15 +579,20 @@ _`r tab_nums("vangstpersoortreisenbron")`_
 
 ```{r, echo=FALSE, message=FALSE, warning=FALSE}
 
+lat_correction <- cos(mean(c(ymin, ymax)) * pi / 180)
+data_aspect    <- ((ymax - ymin) / (xmax - xmin)) / lat_correction
+fig_width      <- 10
+fig_height     <- fig_width * data_aspect + 1.5
+fig_height     <- min(fig_height, 10)
 
 # Base height on aspect ratio
-fig_height <- knitr::opts_chunk$get("fig.width") * data_aspect + 1.5  # +1.5 for legend
-fig_height <- min(fig_height, 10)  # cap at reasonable height
+# fig_height <- knitr::opts_chunk$get("fig.width") * data_aspect + 1.5  # +1.5 for legend
+# fig_height <- min(fig_height, 10)  # cap at reasonable height
 
 ```
 
 
-```{r catchperhaul, echo=FALSE, fig.asp=1.0, fig.align="center", message=FALSE, warning=FALSE}
+```{r catchperhaul, echo=FALSE, fig.height=fig_height, fig.align="center", message=FALSE, warning=FALSE}
 
 fig_nums(
   name    = "totalcatchperhaul", level   = 1, display = FALSE,
@@ -669,6 +674,9 @@ if (data_aspect > 1.5) {
 # Calculate figure dimensions for Word (typical width ~6.5 inches)
 fig_width <- knitr::opts_chunk$get("fig.width")  
 nrows <- ceiling(nspecies_actual / ncol_use)
+
+lat_correction <- cos(mean(c(ymin, ymax)) * pi / 180)
+data_aspect    <- ((ymax - ymin) / (xmax - xmin)) / lat_correction
 
 # Base height on aspect ratio and number of rows
 fig_height <- (fig_width / ncol_use) * data_aspect * nrows + 1.5  # +1.5 for legend
@@ -757,6 +765,9 @@ if (!is.null(plot_data)) {
     geom_point(aes(x = lon, y = lat, size = gewicht, colour = as.character(trip)),
                alpha = 0.5) +
     scale_size(range = c(1, 8)) +
+    
+    geom_path(aes(x=lon, y=lat, colour=trip)) +
+
     scale_x_continuous(breaks = seq(floor(xmin), ceiling(xmax), 1)) +
     scale_y_continuous(breaks = seq(floor(2 * ymin) / 2, ceiling(2 * ymax) / 2, 0.5)) +
     labs(x = NULL, y = NULL, size = "kg aanvoer/trek", colour = "") +
@@ -859,17 +870,17 @@ fig_nums(
 
 # create list of catch by species by haul. From hm, or sph or else species = "oth"
 if (nrow(m) > 0) {
-  myspecies <-
-    m %>% 
-    group_by(species, soorten) %>% 
-    summarise(gewicht = sum(gewicht, na.rm=TRUE)) %>% 
-    ungroup() %>% 
-    arrange (desc(gewicht)) %>% 
+  myspecies2 <-
+    m %>%
+    group_by(species, soorten) %>%
+    summarise(gewicht = sum(gewicht, na.rm=TRUE)) %>%
+    ungroup() %>%
+    arrange (desc(gewicht)) %>%
     slice_head(n=nspecies)
   
   t <-
     m %>% 
-    filter(soorten %in% myspecies$soorten) %>% 
+    filter(soorten %in% myspecies2$soorten) %>% 
     group_by(vessel, trip, haul, soorten, maat) %>% 
     summarise(gewicht=sum(gewicht))
   
@@ -1012,7 +1023,7 @@ if (nrow(m) > 0) {
     
     arrange (desc(weight)) %>% 
     group_by() %>% 
-    slice_head(n=10) %>% 
+    slice_head(n=nspecies) %>% 
     left_join(dplyr::select(asfis,
                             species, englishname), 
               by=c("species")) %>% 
@@ -1239,15 +1250,24 @@ fig_nums(
   name    = "aanvoerperweekenjaartotaal", level   = 1, display = FALSE,
   caption = "Cumulatieve aanvoer per week en jaar")
 
+years <- (year(max(e$date))-4):year(max(e$date))
+  
 ee <- 
   elog %>%
-  filter(vessel %in% setvessel, year >= year(max(e$date))-3, date <= max(e$date)) %>% 
+  filter(vessel %in% setvessel, year %in% years) %>% 
   mutate(vessel = ifelse(vessel %in% c("SCH99","Z99"), "SCH99/Z99", vessel)) %>% 
   group_by(vessel, year, week) %>% 
   summarise(landingweight = sum(weight, na.rm=TRUE)) %>% 
   group_by(vessel, year) %>% 
   mutate(cumweight = cumsum(landingweight)) %>% 
-  mutate(year = as.character(year)) 
+  mutate(year = as.character(year)) %>% 
+  ungroup()
+
+# Create named vectors for each scale
+linewidth_vals <- setNames(c(0.5, 0.5, 0.5, 0.5, 1.5), as.character(years))
+colour_vals <- setNames(c("gray60", "gray40", "gray20", "blue", "red"), as.character(years))
+alpha_vals <- setNames(c(rep(1, length(years)-1), 0.5), as.character(years))
+size_vals <- setNames(c(rep(NA, length(years)-1), ifelse(ee %>% filter(year == years[[5]]) %>% summarise(n=n_distinct(week)) %>% pull() <=5, 1, NA)), as.character(years))  # up to 5 points also show point, otherwise ignore
 
 # plot catch and landings by week
 p1 <-
@@ -1256,11 +1276,14 @@ p1 <-
   theme_publication() +
   # theme(legend.position = "none") +
   geom_line(aes(x=week, y=landingweight, colour=year, linewidth=year, alpha=year)) +
-  scale_linewidth_manual("year", values = c("2020"=.5,       "2021"=.5,       "2022"=.5,       "2023"=0.5,      "2024"=0.5,    "2025"=1.5), guide = "none") +
-  scale_colour_manual   ("year", values = c("2020"="gray80", "2021"="gray60", "2022"="gray40", "2023"="gray40", "2024"="blue", "2025"="red")) +
-  scale_alpha_manual("year", values = c(1, 1, 1, 1, 1, 0.5), guide = "none") +
+  geom_point(aes(x=week, y=landingweight, colour=year, size=year, alpha=year)) +
+  scale_linewidth_manual("year", values = linewidth_vals, guide = "none") +
+  scale_colour_manual   ("year", values = colour_vals) +
+  scale_alpha_manual    ("year", values = alpha_vals, guide = "none") +
+  scale_size_manual     ("year", values = size_vals, guide="none") +
   # geom_hline(aes(yintercept=meanweight, colour=species)) +
   # geom_text(aes(x=1, y=meanweight, label=as.integer(meanweight)), hjust=0, vjust=0, nudge_y = 200) +
+  expand_limits(y=0) +
   labs(title=paste(unique(ee$vessel), "Aanvoer week en jaar"), y="aanvoer (kg)")  
   # facet_grid(rows=vars(year), cols=vars(species), scales="free_y")
 
@@ -1271,11 +1294,14 @@ p2 <-
   theme_publication() +
   # theme(legend.position = "none") +
   geom_line(aes(x=week, y=cumweight, colour=year, linewidth=year, alpha=year)) +
-  scale_linewidth_manual("year", values = c("2020"=.5,       "2021"=.5,       "2022"=.5,       "2023"=0.5,      "2024"=0.5,    "2025"=1.5), guide = "none") +
-  scale_colour_manual   ("year", values = c("2020"="gray80", "2021"="gray60", "2022"="gray40", "2023"="gray40", "2024"="blue", "2025"="red")) +
-  scale_alpha_manual("year", values = c(1, 1, 1, 1, 1, 0.5), guide = "none") +
+  geom_point(aes(x=week, y=cumweight, colour=year, size=year, alpha=year)) +
+  scale_linewidth_manual("year", values = linewidth_vals, guide = "none") +
+  scale_colour_manual   ("year", values = colour_vals) +
+  scale_alpha_manual    ("year", values = alpha_vals, guide = "none") +
+  scale_size_manual     ("year", values = size_vals, guide="none") +
   # geom_hline(aes(yintercept=meanweight, colour=species)) +
   # geom_text(aes(x=1, y=meanweight, label=as.integer(meanweight)), hjust=0, vjust=0, nudge_y = 200) +
+  expand_limits(y=0) +
   labs(title=paste(unique(ee$vessel), "cumulatieve aanvoer week en jaar"), y="aanvoer (kg, cumulatief)")  
   # facet_grid(rows=vars(year), cols=vars(species), scales="free_y")
 
@@ -1294,26 +1320,29 @@ _`r fig_nums("aanvoerperweekenjaartotaal")`_
     name    = "aanvoerperweekenjaar", level   = 1, display = FALSE,
     caption = "Cumulatieve aanvoer per soort, week en jaar")
 
-  s <-
-    elog %>% 
-    filter(vessel %in% setvessel, year >= 2023, date <= max(e$date)) %>% 
-    mutate(species = ifelse(species == "SQC", "SQR", species)) %>%  
-    
-    group_by(species) %>% 
-    summarise(weight = sum(weight, na.rm=TRUE)) %>% 
-    
-    arrange (desc(weight)) %>% 
-    group_by() %>% 
-    slice_head(n=10) %>% 
-    left_join(dplyr::select(asfis,
-                            species, englishname), 
-              by=c("species")) %>% 
-    mutate(english_species = paste(englishname, species))
+s <-
+  elog %>% 
+  filter(vessel %in% setvessel, year >= 2023, date <= max(e$date)) %>% 
+  mutate(species = ifelse(species == "SQC", "SQR", species)) %>%  
+  
+  group_by(species) %>% 
+  summarise(weight = sum(weight, na.rm=TRUE)) %>% 
+  
+  arrange (desc(weight)) %>% 
+  group_by() %>% 
+  slice_head(n=nspecies) %>% 
+  left_join(dplyr::select(asfis,
+                          species, englishname), 
+            by=c("species")) %>% 
+  mutate(english_species = paste(englishname, species))
 
 ee <- 
   elog %>%
   mutate(species = ifelse(species == "SQC", "SQR", species)) %>%  
-  filter(vessel %in% setvessel, year >= year(max(e$date))-3, date <= max(e$date), species %in% s$species) %>% 
+  filter(
+    vessel %in% setvessel, 
+    year %in% years, 
+    species %in% s$species) %>% 
   mutate(vessel = ifelse(vessel %in% c("SCH99","Z99"), "SCH99/Z99", vessel)) %>% 
   group_by(vessel, species, year, week) %>% 
   summarise(landingweight = sum(weight, na.rm=TRUE)) %>% 
@@ -1328,11 +1357,14 @@ ee %>%
   theme_publication() +
   # theme(legend.position = "none") +
   geom_line(aes(x=week, y=cumweight, colour=year, linewidth=year, alpha=year)) +
-  scale_linewidth_manual("year", values = c("2020"=.5,       "2021"=.5,       "2022"=.5,       "2023"=0.5,      "2024"=0.5,    "2025"=1.5), guide = "none") +
-  scale_colour_manual   ("year", values = c("2020"="gray80", "2021"="gray60", "2022"="gray40", "2023"="gray40", "2024"="blue", "2025"="red")) +
-  scale_alpha_manual("year", values = c(1, 1, 1, 1, 1, 0.5), guide = "none") +
+  geom_point(aes(x=week, y=cumweight, colour=year, size=year, alpha=year)) +
+  scale_linewidth_manual("year", values = linewidth_vals, guide = "none") +
+  scale_colour_manual   ("year", values = colour_vals) +
+  scale_alpha_manual    ("year", values = alpha_vals, guide = "none") +
+  scale_size_manual     ("year", values = size_vals, guide="none") +
   # geom_hline(aes(yintercept=meanweight, colour=species)) +
   # geom_text(aes(x=1, y=meanweight, label=as.integer(meanweight)), hjust=0, vjust=0, nudge_y = 200) +
+  expand_limits(y=0) +
   labs(title=paste(unique(ee$vessel), "cumulatieve aanvoer per soort, week en jaar"), y="aanvoer (kg, cumulatief)") +
   facet_wrap(~species, scales="free_y") 
   # facet_grid(rows=vars(year), cols=vars(species), scales="free_y")
