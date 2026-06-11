@@ -47,13 +47,38 @@ save_flyshoot_data <- function(data, data_type, date_range = NULL, subfolder = N
   # open_dataset() to read duplicate data from accumulating files).
   filename <- glue("{dir_path}/{data_type}.parquet")
   
-  # Remove any old parquet files in this directory (including date-suffixed
-  # legacy files from previous runs) before writing the new one.
-  old_files <- list.files(dir_path, pattern = "\\.parquet$", full.names = TRUE)
-  old_files <- old_files[old_files != filename]  # keep the target if it exists
+  # Back up the current active parquet (if it exists) before overwriting.
+  # Backup goes to raw/<type>/backup/<type>_YYYYMMDD_HHMMSS.parquet
+  # Only the 10 most recent backups are kept; older ones are deleted.
+  if (file.exists(filename)) {
+    backup_dir <- file.path(dir_path, "backup")
+    dir_create(backup_dir)
+    ts          <- format(Sys.time(), "%Y%m%d_%H%M%S")
+    backup_path <- file.path(backup_dir, glue("{data_type}_{ts}.parquet"))
+    file.copy(filename, backup_path)
+    if (isTRUE(getOption("flyshoot.verbose", default = FALSE)))
+      message(glue("  Backed up {data_type}.parquet -> backup/{data_type}_{ts}.parquet"))
+
+    # Prune: keep only the 10 most recent backups
+    existing_backups <- list.files(backup_dir, pattern = "\\.parquet$",
+                                   full.names = TRUE)
+    existing_backups <- existing_backups[order(file.mtime(existing_backups),
+                                               decreasing = TRUE)]
+    to_delete <- existing_backups[seq_len(max(0, length(existing_backups) - 10))]
+    if (length(to_delete) > 0) {
+      file.remove(to_delete)
+      message(glue("  Pruned {length(to_delete)} old backup(s) for {data_type}"))
+    }
+  }
+
+  # Remove any stale parquet files in this directory (date-suffixed legacy files
+  # from older pipeline versions). The backup subfolder is left untouched.
+  old_files <- list.files(dir_path, pattern = "\\.parquet$",
+                          full.names = TRUE, recursive = FALSE)
+  old_files <- old_files[old_files != filename]
   if (length(old_files) > 0) {
     file.remove(old_files)
-    message(glue("  Removed {length(old_files)} old parquet file(s) from {data_type}/"))
+    message(glue("  Removed {length(old_files)} stale parquet file(s) from {data_type}/"))
   }
   
   # Add metadata columns

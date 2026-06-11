@@ -22,7 +22,7 @@ rm(list=ls())
 
 # Verbosity — set TRUE to see detailed function-level messages (schema mapping,
 # column listings, haul assignment details etc.). FALSE gives a clean summary.
-verbose <- FALSE
+verbose <- TRUE
 options(flyshoot.verbose = verbose)
 
 move_files     <- FALSE # set FALSE to skip
@@ -277,15 +277,66 @@ for (i in seq_len(nrow(trip_groups))) {
 
       treklijst_file <- trip_files %>% filter(source == "treklijst") %>% pull(file)
       kisten_file    <- trip_files %>% filter(source == "kisten")    %>% pull(file)
-      quietly(trip_hauls <- get_haul_from_treklijst(treklijst_file))
-      local_tz <- if (!is.null(trip_hauls) && "timezone" %in% names(trip_hauls))
-        first(trip_hauls$timezone) else "Europe/Amsterdam"
+
+      # Step 1: Get daily haul positions from treklijst (one row per day)
+      quietly(trek_pos <- get_haul_from_treklijst(treklijst_file))
+      local_tz <- if (!is.null(trek_pos) && "timezone" %in% names(trek_pos))
+        first(trek_pos$timezone) else "Europe/Amsterdam"
+
+      # Step 2: Process kisten — sessions detected autonomously, assigned by date
       quietly({
         trip_catches <- get_catch_from_kisten(kisten_file, local_tz = local_tz,
-                                              treklijst_path = treklijst_file,
-                                              haul_data      = trip_hauls)
+                                              haul_data = trek_pos)
         trip_info    <- get_trip_info(treklijst_file)
       })
+
+      # Step 3: Build trip_hauls from kisten sessions with treklijst positions
+      if (!is.null(trip_catches) && nrow(trip_catches) > 0) {
+        # Get session positions stored by get_catch_from_kisten
+        session_pos <- attr(trip_catches, "session_positions")
+
+        if (!is.null(session_pos)) {
+          # One row per kisten session, with position from treklijst date
+          trip_hauls <- trip_catches %>%
+            dplyr::filter(!is.na(haul_id)) %>%
+            dplyr::mutate(date = as.Date(weighing_time, tz = "UTC")) %>%
+            dplyr::group_by(vessel, trip_id, haul_id, date) %>%
+            dplyr::summarise(
+              total_catch_kg = sum(weight_kg, na.rm = TRUE),
+              n_species      = dplyr::n_distinct(species_code),
+              .groups = "drop"
+            ) %>%
+            dplyr::left_join(
+              session_pos %>%
+                dplyr::select(haul_id, shoot_lat, shoot_lon),
+              by = "haul_id"
+            ) %>%
+            dplyr::mutate(
+              shoot_time         = as.POSIXct(NA_real_, origin = "1970-01-01", tz = "UTC"),
+              haul_time          = as.POSIXct(NA_real_, origin = "1970-01-01", tz = "UTC"),
+              haul_lat           = NA_real_,
+              haul_lon           = NA_real_,
+              fishing_time_hours = NA_real_,
+              gear_type          = "FLY",
+              timezone           = local_tz
+            )
+        } else {
+          # Fallback: one row per day from treklijst
+          trip_hauls <- trek_pos
+        }
+      }
+
+      # Step 4: Use elog for species composition if available
+      if ("pefa" %in% sources || "elog" %in% sources) {
+        elog_src  <- intersect(c("pefa", "elog"), sources)[1]
+        elog_file <- trip_files %>% filter(source == elog_src) %>% pull(file)
+        quietly({
+          elog_result <- get_data_from_elog(elog_file)
+          trip_elog   <- elog_result$catch
+          trip_info   <- elog_result$trip   # elog trip_info is more complete
+        })
+      }
+
       trip_elog_trek <- kisten_to_elog_trek(trip_catches, haul = trip_hauls)
 
     } else if (data_source == "kisten_pefa") {
@@ -318,6 +369,16 @@ for (i in seq_len(nrow(trip_groups))) {
       })
       message("  ⚠ No haul position data (elog only)")
 
+    } else if (data_source == "pefa_only") {
+
+      pefa_file <- trip_files %>% filter(source == "pefa") %>% pull(file)
+      quietly({
+        elog_result <- get_data_from_elog(pefa_file)
+        trip_elog   <- elog_result$catch
+        trip_info   <- elog_result$trip
+      })
+      message("  \u2139 pefa only \u2014 elog data, figures by day")
+
     } else if (data_source == "elog_by_haul") {
 
       elog_file <- trip_files %>% filter(source == "elog") %>% pull(file)
@@ -336,6 +397,27 @@ for (i in seq_len(nrow(trip_groups))) {
         trip_info    <- get_trip_info(kisten_file)
       })
       message("  ⚠ No position data (kisten only)")
+
+    } else if (data_source == "turbocatch") {
+
+      xml_folder <- trip_files %>% filter(source == "turbocatch") %>% pull(file)
+
+      # parse_ers_folder() from parse_ers.R (sourced in 00_setup.R)
+      # ers_to_* converters live in 01_flyshoot_functions.R
+      ers <- tryCatch(
+        parse_ers_folder(xml_folder, recursive = TRUE),
+        error = function(e) { message(glue("  ✗ ERS parse failed: {e$message}")); NULL }
+      )
+
+      if (!is.null(ers)) {
+        trip_hauls     <- ers_to_haul(ers)      # per_haul regime (2026+) only
+        trip_elog_trek <- ers_to_elog_trek(ers)  # per_haul regime (2026+) only
+        trip_elog      <- ers_to_elog(ers)       # daily regime (2019-2025) only
+        trip_info      <- ers_to_trip(ers)
+        if (verbose) message(glue(
+          "  TurboCatch: {nrow(trip_info)} trip(s) | hauls: {nrow(trip_hauls)} | elog_trek: {nrow(trip_elog_trek)} | elog: {nrow(trip_elog)}"
+        ))
+      }
 
     } else {
       message(glue("  ⚠ Unsupported data source: {data_source}"))
@@ -400,16 +482,23 @@ for (i in seq_len(nrow(trip_groups))) {
   }
 
   if (!is.null(canonical_trip_id)) {
-    if (verbose) message(glue("  ✓ Canonical trip_id from elog: {canonical_trip_id}"))
+    message(glue("  ✓ Canonical trip_id from elog: {canonical_trip_id}",
+                 " (grouping key was: {trip_id})"))
+
+    # trip_nr stores the human-readable grouping key (e.g. "2026W23" for SCH99,
+    # or the elog number itself for vessels that have no separate grouping key).
+    # trip_id is always the canonical elog trip_identifier.
+    grouping_key <- trip_id  # the filename-derived key used for grouping
 
     restamp <- function(df) {
       if (is.null(df) || nrow(df) == 0) return(df)
-      # Preserve the old treklijst-derived id as trip_nr if no trip_nr yet
+      # trip_nr: keep existing value if already set, otherwise use grouping key
       if ("trip_nr" %in% names(df)) {
         df <- df %>%
-          mutate(trip_nr = if_else(is.na(trip_nr), trip_id, trip_nr))
+          mutate(trip_nr = if_else(is.na(trip_nr) | trip_nr == trip_id,
+                                   grouping_key, trip_nr))
       } else {
-        df <- df %>% mutate(trip_nr = trip_id)
+        df <- df %>% mutate(trip_nr = grouping_key)
       }
       df %>% mutate(trip_id = canonical_trip_id)
     }
@@ -418,9 +507,15 @@ for (i in seq_len(nrow(trip_groups))) {
     trip_catches   <- restamp(trip_catches)
     trip_elog_trek <- restamp(trip_elog_trek)
     trip_info      <- restamp(trip_info)
-    # trip_elog itself already has the correct trip_id — just ensure trip_nr
-    if (!is.null(trip_elog) && !"trip_nr" %in% names(trip_elog)) {
-      trip_elog <- trip_elog %>% mutate(trip_nr = trip_id)
+    # trip_elog itself already has the correct trip_id — ensure trip_nr is set
+    if (!is.null(trip_elog) && nrow(trip_elog) > 0) {
+      if (!"trip_nr" %in% names(trip_elog)) {
+        trip_elog <- trip_elog %>% mutate(trip_nr = grouping_key)
+      } else {
+        trip_elog <- trip_elog %>%
+          mutate(trip_nr = if_else(is.na(trip_nr) | trip_nr == trip_id,
+                                   grouping_key, trip_nr))
+      }
     }
   }
 
@@ -469,11 +564,11 @@ if (verbose) message("=" |> rep(70) |> paste0(collapse = ""), "\n\n")
 # where available), falling back to the filename-derived trip from file_inventory.
 # This ensures safe_remove_trips() and report rendering use the correct ids.
 canonical_ids_from_data <- dplyr::bind_rows(
-  if (length(all_new_elogs)      > 0) dplyr::bind_rows(all_new_elogs)      %>% dplyr::distinct(vessel, trip_id) else tibble::tibble(),
-  if (length(all_new_hauls)      > 0) dplyr::bind_rows(all_new_hauls)      %>% dplyr::distinct(vessel, trip_id) else tibble::tibble(),
-  if (length(all_new_kisten)     > 0) dplyr::bind_rows(all_new_kisten)     %>% dplyr::distinct(vessel, trip_id) else tibble::tibble(),
-  if (length(all_new_elog_treks) > 0) dplyr::bind_rows(all_new_elog_treks) %>% dplyr::distinct(vessel, trip_id) else tibble::tibble(),
-  if (length(all_new_trips)      > 0) dplyr::bind_rows(all_new_trips)      %>% dplyr::distinct(vessel, trip_id) else tibble::tibble()
+  if (length(all_new_elogs)      > 0) dplyr::bind_rows(all_new_elogs)      %>% { if (all(c("vessel","trip_id") %in% names(.))) dplyr::distinct(., vessel, trip_id) else tibble::tibble() } else tibble::tibble(),
+  if (length(all_new_hauls)      > 0) dplyr::bind_rows(all_new_hauls)      %>% { if (all(c("vessel","trip_id") %in% names(.))) dplyr::distinct(., vessel, trip_id) else tibble::tibble() } else tibble::tibble(),
+  if (length(all_new_kisten)     > 0) dplyr::bind_rows(all_new_kisten)     %>% { if (all(c("vessel","trip_id") %in% names(.))) dplyr::distinct(., vessel, trip_id) else tibble::tibble() } else tibble::tibble(),
+  if (length(all_new_elog_treks) > 0) dplyr::bind_rows(all_new_elog_treks) %>% { if (all(c("vessel","trip_id") %in% names(.))) dplyr::distinct(., vessel, trip_id) else tibble::tibble() } else tibble::tibble(),
+  if (length(all_new_trips)      > 0) dplyr::bind_rows(all_new_trips)      %>% { if (all(c("vessel","trip_id") %in% names(.))) dplyr::distinct(., vessel, trip_id) else tibble::tibble() } else tibble::tibble()
 ) %>% dplyr::distinct(vessel, trip_id)
 
 # processed_trips: canonical ids only — used for report rendering and as the
@@ -513,16 +608,19 @@ for (i in seq_along(all_new_hauls)) {
     dplyr::transmute(
       vessel, trip_id,
       trip_nr    = trip_nr_val,
-      date       = as.Date(dplyr::coalesce(shoot_time, as.POSIXct(date))),
+      date       = as.Date(dplyr::if_else(
+                     !is.na(shoot_time),
+                     as.Date(shoot_time),
+                     as.Date(date))),
       event_type = "haul", haul_id = haul_id,
       port = NA_character_, lat = shoot_lat, lon = shoot_lon,
       distance = NA_real_, source = "treklijst")
 
-  # Departure and arrival derived from haul columns
-  dep_port  <- dplyr::first(na.omit(h_i$departure_port))
-  dep_date  <- dplyr::first(na.omit(h_i$departure_date))
-  arr_port  <- dplyr::first(na.omit(h_i$arrival_port))
-  arr_date  <- dplyr::first(na.omit(h_i$arrival_date))
+  # Departure and arrival derived from haul columns (may be absent for pefa_only)
+  dep_port  <- if ("departure_port" %in% names(h_i)) dplyr::first(na.omit(h_i$departure_port)) else NA_character_
+  dep_date  <- if ("departure_date" %in% names(h_i)) dplyr::first(na.omit(h_i$departure_date)) else NA
+  arr_port  <- if ("arrival_port"   %in% names(h_i)) dplyr::first(na.omit(h_i$arrival_port))   else NA_character_
+  arr_date  <- if ("arrival_date"   %in% names(h_i)) dplyr::first(na.omit(h_i$arrival_date))   else NA
   vessel_id <- dplyr::first(h_i$vessel)
   trip_id_v <- dplyr::first(h_i$trip_id)
 
@@ -1054,7 +1152,7 @@ if (render_reports && nrow(processed_trips) > 0) {
       )
 
       tryCatch(
-        rmarkdown::render(input = rmd_file, output_file = output_path, quiet = TRUE),
+        rmarkdown::render(input = rmd_file, output_file = output_path, quiet = FALSE),
         error = function(e) {
           if (!file.exists(output_path)) stop(e$message)
           message(paste0("  ⚠ Render warning (file still created): ", e$message))
@@ -1146,7 +1244,7 @@ if (render_reports && nrow(processed_trips) > 0) {
 
       result <- tryCatch(
         {
-          rmarkdown::render(input = rmd_file, output_file = output_path, quiet = TRUE)
+          rmarkdown::render(input = rmd_file, output_file = output_path, quiet = FALSE)
           elapsed <- round(as.numeric(difftime(Sys.time(), t0, units = "secs")), 1)
           size_kb <- round(file.size(output_path) / 1024, 1)
           message(glue("  \u2713 {output_filename} ({elapsed}s, {size_kb} KB)"))

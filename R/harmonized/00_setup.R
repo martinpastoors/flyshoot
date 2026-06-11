@@ -21,7 +21,9 @@ required_packages <- c(
   "glue",           # String interpolation
   "fs",             # File system operations
   "here",           # Find root directory
-  "jsonlite"        # JSON handling
+  "jsonlite",       # JSON handling
+  "xml2",           # ERS XML parsing (TurboCatch)
+  "RColorBrewer"    # Colour palettes (trip maps)
 )
 
 # Install missing packages
@@ -51,7 +53,10 @@ suppressPackageStartupMessages({
 cat("✓ All required packages loaded\n\n")
 
 # auto haul-ID assignment for kisten files
-source(file.path(here(), "R/harmonized", "kisten_haul_assignment.R")) 
+source(file.path(here(), "R/harmonized", "kisten_haul_assignment.R"))
+
+# TurboCatch ERS XML parser (required by ers_to_* functions in 01_flyshoot_functions.R)
+source(file.path(here(), "R/harmonized", "parse_ers.R"))
 
 # Configure OneDrive path ----
 # IMPORTANT: Set your OneDrive paths here

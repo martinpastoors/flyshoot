@@ -133,14 +133,16 @@ marelec_kisten_schema <- tribble(
   ~excel_col,    ~poseidat_name,   ~target_type,
   "lotnummer",   "lot_nr",         "integer",
   "datum",       "date",           "date",
-  "tijd",        "time_hhmm",      "time_hhmmss",  # Marelec text "HH:MM:SS" — kept as character, combined with date in get_catch_from_kisten()
+  "tijd",        "time_hhmm",      "time_hhmmss",  # Marelec text "HH:MM:SS"
   "time",        "time_hhmm",      "time_hhmmss",  # English variant
   "tijdstip",    "time_hhmm",      "time_hhmmss",  # Dutch variant
   "weegmoment",  "time_hhmm",      "time_hhmmss",  # "weighing moment"
-  "soorten",     "species_raw",    "character",   # parsed into species_code + presentation post-schema
-  "maat",        "size_class",     "character",   # "KLASSE 1" -> integer post-schema
-  "gewicht",     "weight_kg",      "weight_kg",   # "20.3 kg" -> strip unit -> double
-  "haul",        "haul_id",        "integer"      # pre-assigned haul_id from manually processed files
+  "soorten",     "species_raw",    "character",    # Dutch: parsed into species_code + presentation
+  "species",     "species_raw",    "character",    # English variant
+  "maat",        "size_class",     "character",    # Dutch: "KLASSE 1"
+  "size",        "size_class",     "character",    # English variant
+  "gewicht",     "weight_kg",      "weight_kg",    # "20.3 kg" -> strip unit -> double
+  "haul",        "haul_id",        "integer"       # pre-assigned haul_id from manually processed files
 )
 # ==============================================================================
 
@@ -711,6 +713,11 @@ detect_data_source_type <- function(trip_files) {
   if ("mcatch" %in% sources) {
     return("mcatch")
   }
+
+  # 9. TurboCatch ERS XML folder
+  if ("turbocatch" %in% sources) {
+    return("turbocatch")
+  }
   
   stop("Unable to determine data source type from available files")
 }
@@ -756,7 +763,19 @@ get_haul_from_treklijst <- function(file_path) {
     # sheet all get date filled forward by na.locf(), making a post-fill
     # date filter unreliable.
     # ------------------------------------------------------------------
-    filter(!is.na(tijdbeginuitzetten)) %>%
+    # Keep only real haul rows. Primary filter: shoot-start time filled.
+    # Fallback: if shoot time column is entirely absent or all-NA (simplified
+    # treklijst format), filter on non-NA date instead.
+    { if ("tijdbeginuitzetten" %in% names(.) &&
+          sum(!is.na(.$tijdbeginuitzetten)) > 0) {
+        dplyr::filter(., !is.na(tijdbeginuitzetten))
+      } else if ("berekentijdbeginuitzetten" %in% names(.) &&
+                 sum(!is.na(.$berekentijdbeginuitzetten)) > 0) {
+        dplyr::filter(., !is.na(berekentijdbeginuitzetten))
+      } else {
+        dplyr::filter(., !is.na(date))
+      }
+    } %>%
     # ------------------------------------------------------------------
     # Forward-fill columns that fishers only enter when something changes.
     # Order matters: date must be filled before any downstream date use.
@@ -925,17 +944,28 @@ get_haul_from_treklijst <- function(file_path) {
       "catch_height_cm", "bycatch_pct", "box_type", "photo_box"
     )))
   
-  lead_cols <- intersect(
-    c("vessel", "trip_id", "haul_id", "record_nr", "date",
-      "shoot_lat", "shoot_lon", "shoot_time",
-      "haul_lat",  "haul_lon",  "haul_time",
-      "fishing_time_hours",
-      "mesh_size_mm", "water_depth", "gear_type"),
-    names(haul_data)
+  # Haul output: geometry and effort columns only — no catch-level columns.
+  haul_cols <- c(
+    "vessel", "trip_id", "haul_id", "date",
+    "shoot_lat", "shoot_lon", "shoot_time",
+    "shoot_end_time", "next_haul_time",
+    "haul_lat", "haul_lon", "haul_time",
+    "fishing_time_hours",
+    "gear_type", "mesh_size_mm",
+    "vertical_opening_m", "cable_length_m",
+    "cable_thickness_mm", "groundrope_length_m",
+    "escape_panel",
+    "water_depth", "wind_direction", "wind_force_bft",
+    "total_catch_kg", "marketable_catch_kg",  # treklijst haul totals — OK at haul level
+    "fao_division", "ices_rect", "economic_zone",
+    "trip_nr", "skipper", "timezone",
+    "departure_date", "departure_port",
+    "arrival_date", "arrival_port",
+    "n_shots", "comments", "data_source"
   )
-  
+
   haul_data <- haul_data %>%
-    select(all_of(lead_cols), everything())
+    select(any_of(haul_cols))
   
   message(glue("    Processed {nrow(haul_data)} hauls"))
   
@@ -985,6 +1015,60 @@ read_pefa_trek <- function(file_path, elog_data = NULL) {
     rename_with(tolower)
   
   message(glue("    Original columns: {paste(names(pefa_raw), collapse = ', ')}"))
+
+  # ── File validity check ───────────────────────────────────────────────────
+  # Catch problems from incomplete downloads early rather than processing
+  # silently and getting wrong results.
+  date_col <- intersect(c("catch_date", "date"), names(pefa_raw))
+  rect_col <- intersect(c("ices_rectangle", "ices_rect"), names(pefa_raw))
+
+  file_issues <- character(0)
+
+  if (nrow(pefa_raw) < 5)
+    file_issues <- c(file_issues,
+      glue("only {nrow(pefa_raw)} data rows — likely incomplete download"))
+
+  if (length(date_col) > 0) {
+    dates <- suppressWarnings(as.Date(pefa_raw[[date_col[1]]]))
+    dates <- dates[!is.na(dates)]
+    n_days <- length(unique(dates))
+    if (n_days == 0)
+      file_issues <- c(file_issues, "no valid dates found in file")
+  }
+
+  if (length(rect_col) > 0 && length(date_col) > 0) {
+    dates <- suppressWarnings(as.Date(pefa_raw[[date_col[1]]]))
+    n_unique_hauls <- length(unique(paste(
+      format(dates, "%Y%m%d"),
+      pefa_raw[[rect_col[1]]]
+    )))
+    if (n_unique_hauls < 2 && nrow(pefa_raw) > 10)
+      file_issues <- c(file_issues,
+        glue("only {n_unique_hauls} unique date×rectangle combination(s) ",
+             "for {nrow(pefa_raw)} rows — file may be a partial download"))
+  }
+
+  # A genuine pefa_per_trek file must have a haul/trek identifier column
+  haul_col <- intersect(c("haul", "trek", "haul_id", "haulid", "trekid", "haalnr",
+                           "haalnummer", "trek_nr", "trek_id", "haulnr", "haulnumber"),
+                        names(pefa_raw))
+  if (length(haul_col) == 0)
+    file_issues <- c(file_issues,
+      glue("no haul/trek identifier column found — ",
+           "this appears to be a plain elog pefa file, not a per-trek file. ",
+           "Expected one of: haul, trek, haul_id, trekid, haalnr"))
+
+  if (length(file_issues) > 0) {
+    msg <- paste0(
+      "  \u26a0 File validation failed for ", basename(file_path), ":\n",
+      paste0("    - ", file_issues, collapse = "\n"), "\n",
+      "  Skipping this file. Re-download and try again."
+    )
+    message(msg)
+    stop(glue("Invalid pefa_trek file: {paste(file_issues, collapse='; ')}"),
+         call. = FALSE)
+  }
+  # ── End validity check ────────────────────────────────────────────────────
   
   # pefa_data <- map_pefa_columns(pefa_raw)
   # Remove session-end marker rows before column mapping
@@ -1057,9 +1141,24 @@ read_pefa_trek <- function(file_path, elog_data = NULL) {
     mutate(
       vessel  = vessel_id,
       trip_id = trip_id,
-      
-      haul_id_orig = if ("haul_id_orig" %in% names(.)) as.integer(haul_id_orig) else NA_integer_,
-      date         = if ("date" %in% names(.)) as.Date(date) else NA_Date_,
+      date    = if ("date" %in% names(.)) as.Date(date) else NA_Date_,
+
+      # When no haul_id column exists, derive haul from date + position
+      # so that each unique (date, ices_rectangle) combination becomes a haul.
+      # This is the standard PEFA elog format where catch is reported per day/rect.
+      haul_id_orig = if ("haul_id_orig" %in% names(.)) {
+        as.integer(haul_id_orig)
+      } else {
+        # Build a surrogate haul key from date + ICES rectangle (or just date)
+        rect_col <- intersect(c("ices_rectangle", "ices_rect"), names(.))
+        if (length(rect_col) > 0) {
+          as.integer(factor(paste(format(date, "%Y%m%d"),
+                                  .data[[rect_col[1]]],
+                                  sep = "_")))
+        } else {
+          as.integer(factor(format(date, "%Y%m%d")))
+        }
+      },
       shoot_lat    = if ("shoot_lat" %in% names(.)) as.numeric(shoot_lat) else NA_real_,
       shoot_lon    = if ("shoot_lon" %in% names(.)) as.numeric(shoot_lon) else NA_real_,
       haul_lat     = if ("haul_lat" %in% names(.)) as.numeric(haul_lat)
@@ -1144,8 +1243,13 @@ read_pefa_trek <- function(file_path, elog_data = NULL) {
   #    Sort chronologically, then number 1..N per trip
   # ------------------------------------------------------------------
   haul_key <- full_data %>%
-    distinct(vessel, trip_id, haul_id_orig, date, shoot_time) %>%
-    arrange(vessel, trip_id, date, shoot_time) %>%
+    group_by(vessel, trip_id, haul_id_orig) %>%
+    summarise(
+      date       = dplyr::first(na.omit(date)),
+      shoot_time = dplyr::first(na.omit(shoot_time)),
+      .groups = "drop"
+    ) %>%
+    arrange(vessel, trip_id, date, shoot_time, haul_id_orig) %>%
     group_by(vessel, trip_id) %>%
     mutate(haul_id = row_number()) %>%
     ungroup() %>%
@@ -1154,17 +1258,37 @@ read_pefa_trek <- function(file_path, elog_data = NULL) {
   # ------------------------------------------------------------------
   # 3. Haul output: one row per haul with renumbered haul_id
   # ------------------------------------------------------------------
+  # Haul output: geometry and effort columns only.
+  # Catch-level columns (species_code, weight_kg, presentation, etc.) are
+  # intentionally excluded here — they belong in the elog_trek/catch output
+  # below, not in the haul table. Using everything() would carry through
+  # whichever species happened to be slice(1) for that haul, which is
+  # meaningless at haul level and creates 70-column haul parquets.
+  haul_cols <- c(
+    "vessel", "trip_id", "haul_id", "date",
+    "shoot_lat", "shoot_lon", "shoot_time",
+    "shoot_end_time", "next_haul_time",
+    "haul_lat", "haul_lon", "haul_time",
+    "fishing_time_hours",
+    "gear_type", "mesh_size_mm",
+    "vertical_opening_m", "cable_length_m",
+    "cable_thickness_mm", "groundrope_length_m",
+    "escape_panel",
+    "water_depth", "wind_direction", "wind_force_bft",
+    "fao_division", "ices_rect", "economic_zone",
+    "trip_nr", "skipper",
+    "departure_date", "departure_port",
+    "arrival_date", "arrival_port",
+    "n_shots", "data_source"
+  )
+
   haul_data <- full_data %>%
     group_by(vessel, trip_id, haul_id_orig) %>%
     slice(1) %>%
     ungroup() %>%
     left_join(haul_key, by = c("vessel", "trip_id", "haul_id_orig")) %>%
     select(-haul_id_orig) %>%
-    select(vessel, trip_id, haul_id, date,
-           shoot_lat, shoot_lon, shoot_time,
-           haul_lat, haul_lon, haul_time,
-           fishing_time_hours, gear_type,
-           everything())
+    select(any_of(haul_cols))
   
   message(glue("    Processed {nrow(haul_data)} hauls"))
   
@@ -1517,7 +1641,7 @@ get_catch_from_kisten <- function(file_path,
   
   # ── 5. AUTO HAUL ASSIGNMENT from treklijst ───────────────────────────────
   # Auto-detect the treklijst in the same directory as the kisten file.
-  # Files share a VESSEL_YEAR_TRIP prefix (e.g. "SCH99_2026_283_").
+  # Files share a VESSEL_ISOWEEK prefix (e.g. "SCH99_2026W23").
   # treklijst_path can also be supplied explicitly by the caller.
   if (is.null(treklijst_path) || is.na(treklijst_path)) {
     treklijst_path <- find_treklijst_for_kisten(file_path)
@@ -1539,24 +1663,94 @@ get_catch_from_kisten <- function(file_path,
     # Build trek_haul_sheet: prefer already-processed haul_data (avoids re-reading
     # the Excel file and bypasses the col_types="list" POSIXct parsing issue),
     # fall back to read_treklijst_for_kisten if haul_data not supplied.
+    # Determine haul assignment strategy
+    use_date_assignment <- FALSE
     trek_haul_sheet <- if (!is.null(haul_data) && nrow(haul_data) > 0 &&
                             all(c("haul_id", "shoot_time", "total_catch_kg") %in%
                                 names(haul_data))) {
-      # Convert already-processed haul tibble to the format assign_haul_ids_from_treklijst expects
-      haul_data %>%
-        dplyr::filter(!is.na(shoot_time)) %>%
-        dplyr::transmute(
-          haul          = as.integer(haul_id),
-          shoot_datetime = shoot_time,   # already POSIXct in UTC
-          catch_kg      = as.numeric(total_catch_kg)
-        )
+      hauls_with_time <- haul_data %>% dplyr::filter(!is.na(shoot_time))
+      if (nrow(hauls_with_time) > 0) {
+        # Normal path: use shoot_time for precise kisten assignment
+        hauls_with_time %>%
+          dplyr::transmute(
+            haul           = as.integer(haul_id),
+            shoot_datetime = shoot_time,
+            catch_kg       = as.numeric(total_catch_kg)
+          )
+      } else if ("date" %in% names(haul_data) && sum(!is.na(haul_data$date)) > 0) {
+        # Simplified treklijst: flag for date-based assignment below
+        use_date_assignment <- TRUE
+        NULL
+      } else { NULL }
     } else if (!is.null(treklijst_path) && !is.na(treklijst_path)) {
       read_treklijst_for_kisten(treklijst_path)
     } else {
       NULL
     }
 
-    if (!is.null(trek_haul_sheet)) {
+    if (use_date_assignment) {
+      # Date-based assignment for simplified treklijst:
+      # 1. First detect kisten sessions by time gap (same as normal path)
+      # 2. Number sessions sequentially as haul_ids
+      # 3. Join treklijst position for each session's date
+      message("    \u2139 No shoot times \u2014 using session-based haul numbering with date positions")
+
+      # Detect sessions by time gap
+      catch_data <- catch_data %>%
+        dplyr::arrange(weighing_time) %>%
+        dplyr::mutate(
+          time_gap_min = as.numeric(difftime(weighing_time,
+                                             dplyr::lag(weighing_time),
+                                             units = "mins")),
+          new_session  = is.na(time_gap_min) |
+                         time_gap_min > KISTEN_GAP_THRESHOLD_MIN,
+          session_id   = cumsum(new_session)
+        )
+
+      n_sessions <- dplyr::n_distinct(catch_data$session_id)
+      message(glue("    {n_sessions} weighing sessions detected"))
+
+      # Number sessions sequentially as haul_ids
+      session_dates <- catch_data %>%
+        dplyr::group_by(session_id) %>%
+        dplyr::summarise(
+          session_date = as.Date(dplyr::first(weighing_time), tz = "UTC"),
+          .groups = "drop"
+        ) %>%
+        dplyr::arrange(session_id) %>%
+        dplyr::mutate(haul_id = dplyr::row_number())
+
+      # Build date position lookup from treklijst
+      date_lookup <- haul_data %>%
+        dplyr::filter(!is.na(date)) %>%
+        dplyr::group_by(date) %>%
+        dplyr::summarise(haul_id = dplyr::first(haul_id), .groups = "drop")
+
+      # Join session date to treklijst position via date
+      session_pos <- session_dates %>%
+        dplyr::left_join(
+          haul_data %>%
+            dplyr::filter(!is.na(date)) %>%
+            dplyr::select(date, shoot_lat, shoot_lon) %>%
+            dplyr::distinct(date, .keep_all = TRUE),
+          by = c("session_date" = "date")
+        )
+
+      # Apply session haul_ids to catch_data
+      catch_data <- catch_data %>%
+        dplyr::left_join(
+          session_dates %>% dplyr::select(session_id, haul_id),
+          by = "session_id"
+        ) %>%
+        dplyr::select(-session_id, -time_gap_min, -new_session)
+
+      message(glue("    Kisten assigned by session+date: ",
+                   "{sum(!is.na(catch_data$haul_id))}/{nrow(catch_data)} rows matched"))
+
+      # Store session positions for use in trip_hauls (accessible via attribute)
+      attr(catch_data, "session_positions") <- session_pos
+
+    } else if (!is.null(trek_haul_sheet)) {
       result     <- assign_haul_ids_from_treklijst(
         kisten       = catch_data,
         treklijst    = trek_haul_sheet,
@@ -2259,21 +2453,21 @@ extract_vessel_trip <- function(file_path) {
   vessel <- str_extract(filename, "^[A-Z]{2,3}[0-9]+")
   
   # Extract trip identifier — patterns tried in priority order:
-  # 1. ISO week    : _YYYYWWW or " YYYYWWW"  (e.g. SCH65_2026W13 or SCH144 2026W16)
+  # 1. ISO week    : _YYYYWWW or " YYYYWWW"  (e.g. SCH65_2026W13, SCH99_2026W23)
   # 2. Date range  : _YYYYMMDD_YYYYMMDD_ (underscore-separated)
   # 3. Date range  : YYYYMMDD-YYYYMMDD   (hyphen-separated, with leading space)
-  # 4. Year + trip : " YYYY_TTT"         (SCH99 space style)
-  # 5. Legacy year : _YYYY_
+  # 4. Legacy year : _YYYY_
+  # NOTE: The old SCH99 "space style" (" YYYY_TTT") is retired.
+  #       All SCH99 files now use ISO week naming (SCH99_2026W23 ...) so they
+  #       match pattern 1, identical to SCH65 and other vessels.
 
   trip_id <- NA
 
-  iso_week_match       <- str_extract(filename, "_[0-9]{4}W[0-9]{2}(?=[^0-9]|$)")
+  iso_week_match        <- str_extract(filename, "_[0-9]{4}W[0-9]{2}(?=[^0-9]|$)")
   date_range_underscore <- str_extract(filename, "_[0-9]{8}_[0-9]{8}_")
   date_range_hyphen     <- str_extract(filename, " [0-9]{8}-[0-9]{8}")
-  space_year_trip       <- str_extract(filename, " [0-9]{4}_[0-9]{1,4}")
 
   if (!is.na(iso_week_match)) {
-    # ISO week format: _2026W13 -> "2026W13"
     trip_id <- str_remove(iso_week_match, "^_")
 
   } else if (!is.na(date_range_underscore)) {
@@ -2281,9 +2475,6 @@ extract_vessel_trip <- function(file_path) {
 
   } else if (!is.na(date_range_hyphen)) {
     trip_id <- str_remove_all(date_range_hyphen, "[ -]")
-
-  } else if (!is.na(space_year_trip)) {
-    trip_id <- str_remove_all(space_year_trip, "[ _]")
 
   } else {
     # Fallback: legacy underscore year pattern
@@ -2412,18 +2603,16 @@ get_file_inventory <- function(input_dir = NULL, file_patterns = NULL) {
         trip_from_filename <- FALSE  # Track if trip came from filename dates
         
         # Patterns tried in priority order (same as extract_vessel_trip):
-        # 1. ISO week    : _YYYYWWW or " YYYYWWW"  (e.g. SCH65_2026W13 or SCH144 2026W16)
+        # 1. ISO week    : _YYYYWWW or " YYYYWWW"  (e.g. SCH65_2026W13, SCH99_2026W23)
         # 2. Date range  : _YYYYMMDD_YYYYMMDD_
         # 3. Date range  : YYYYMMDD-YYYYMMDD (with space)
-        # 4. Year + trip : " YYYY_TTT "
-        # 5. Legacy year : _YYYY_
+        # 4. Legacy year : _YYYY_
+        # NOTE: old SCH99 " YYYY_TTT" space style is retired.
         iso_week_match        <- str_extract(filename, "_[0-9]{4}W[0-9]{2}(?=[^0-9]|$)")
         date_range_underscore <- str_extract(filename, "_[0-9]{8}_[0-9]{8}_")
         date_range_hyphen     <- str_extract(filename, " [0-9]{8}-[0-9]{8}")
-        trip_range_match      <- str_extract(filename, " [0-9]{4}_[0-9]{1,4} ")
 
         if (!is.na(iso_week_match)) {
-          # ISO week: _2026W13 -> "2026W13"
           trip <- str_remove(iso_week_match, "^_")
 
         } else if (!is.na(date_range_underscore)) {
@@ -2433,9 +2622,6 @@ get_file_inventory <- function(input_dir = NULL, file_patterns = NULL) {
         } else if (!is.na(date_range_hyphen)) {
           trip_from_filename <- TRUE
           trip <- str_remove_all(date_range_hyphen, "[ -]")
-
-        } else if (!is.na(trip_range_match)) {
-          trip <- str_remove_all(trip_range_match, "_") %>% str_trim()
 
         } else {
           # Fallback: legacy underscore year pattern (e.g., _2024_)
@@ -2483,12 +2669,36 @@ get_file_inventory <- function(input_dir = NULL, file_patterns = NULL) {
     }
   }
   
+  # --- TurboCatch ERS XML: detect vessel subfolders containing .xml files
+  # Expected structure: _te verwerken/CC545762/*.xml
+  # The folder name IS the vessel ID; trip_id will be resolved from ELOG TN
+  # during processing, so a placeholder is used here.
+  vessel_xml_dirs <- list.dirs(input_dir, recursive = FALSE, full.names = TRUE)
+  for (vessel_dir in vessel_xml_dirs) {
+    vessel_id_dir <- basename(vessel_dir)
+    if (!grepl("^[A-Z]{2,3}[0-9]+$", vessel_id_dir)) next  # only vessel-ID folders
+    xml_files <- list.files(vessel_dir, pattern = "\\.xml$",
+                            full.names = TRUE, recursive = TRUE)
+    if (length(xml_files) == 0) next
+
+    inventory <- inventory %>%
+      add_row(
+        vessel   = vessel_id_dir,
+        trip     = glue("turbocatch_{vessel_id_dir}"),  # placeholder
+        source   = "turbocatch",
+        file     = vessel_dir,                           # folder, not individual file
+        filename = basename(vessel_dir),
+        modified = max(file.mtime(xml_files))
+      )
+    message(glue("  Detected turbocatch folder: {vessel_id_dir} ({length(xml_files)} XML files)"))
+  }
+
   if (nrow(inventory) > 0) {
-    message(glue("✓ Found {nrow(inventory)} files to process"))
+    message(glue("\u2713 Found {nrow(inventory)} files to process"))
     inventory <- inventory %>%
       arrange(vessel, trip, source)
   } else {
-    message("⚠ No files found to process")
+    message("\u26a0 No files found to process")
   }
   
   return(inventory)
@@ -2551,15 +2761,15 @@ KISTEN_FLAG_MIN          <- 30   # offset beyond which to flag for review
 KISTEN_EARLY_START_MIN   <- 10   # how many minutes before haul end a session may start
 
 #' Auto-detect the treklijst file that accompanies a kisten file.
-#' Both files share a VESSEL_YEAR_TRIP prefix in the same directory.
-#' e.g. "SCH99_2026_283_kisten-reis-283-trek-26.xlsx"
-#'      "SCH99_2026_283_treklijst_week12.xlsx"
+#' Both files share a VESSEL_ISOWEEK prefix in the same directory.
+#' e.g. "SCH99_2026W23 kisten-reis-3-trek-32 wk23.xlsx"
+#'      "SCH99_2026W23 treklijst wk23.xlsx"
 #' Returns NULL (with message) if no treklijst is found.
 find_treklijst_for_kisten <- function(kisten_path) {
   dir      <- dirname(kisten_path)
   filename <- basename(kisten_path)
 
-  # Extract the VESSEL_YEAR_TRIP prefix (everything before "_kisten" or " kisten")
+  # Extract the VESSEL_ISOWEEK prefix (everything before "_kisten" or " kisten")
   prefix <- sub("[_ ]kisten.*$", "", filename, ignore.case = TRUE)
 
   message(glue("    [find_treklijst] kisten dir  : {dir}"))
@@ -3579,6 +3789,464 @@ diagnose_weighing_time <- function() {
 
 
 # ==============================================================================
+# DIAGNOSTIC: diagnose_parquet_coverage
+# ==============================================================================
+#' Compare kisten/haul parquet coverage against each other and optionally
+#' against old RData files, to understand why discard trend plots look sparse.
+#'
+#' Run interactively:
+#'   diagnose_parquet_coverage("SCH99")
+#'   diagnose_parquet_coverage("SCH99",
+#'     rdata_haul_path   = "path/to/haul.RData",
+#'     rdata_kisten_path = "path/to/kisten.RData")
+#'
+#' @param vessel_id           Vessel to diagnose
+#' @param flyshoot_root       Path to parquet root (default ONEDRIVE_FLYSHOOT env var)
+#' @param rdata_haul_path     Optional path to old haul.RData file
+#' @param rdata_kisten_path   Optional path to old kisten.RData file
+#' @param rdata_haul_obj      Name of haul object inside haul.RData (default "haul")
+#' @param rdata_kisten_obj    Name of kisten object inside kisten.RData (default "kisten")
+diagnose_parquet_coverage <- function(
+    vessel_id,
+    flyshoot_root       = Sys.getenv("ONEDRIVE_FLYSHOOT"),
+    rdata_haul_path     = NULL,
+    rdata_kisten_path   = NULL,
+    rdata_haul_obj      = "haul",
+    rdata_kisten_obj    = "kisten"
+) {
+  sep  <- strrep("=", 70)
+  sep2 <- strrep("-", 50)
+  message(sep)
+  message(glue("PARQUET COVERAGE DIAGNOSTICS  |  {vessel_id}"))
+  message(sep)
+
+  # ── 1. Load parquet data ──────────────────────────────────────────────────
+  haul_pq   <- load_flyshoot_data("haul",   vessel_ids = vessel_id)
+  kisten_pq <- load_flyshoot_data("kisten", vessel_ids = vessel_id)
+
+  message(glue("\nParquet haul  : {nrow(haul_pq)} rows | ",
+               "{min(haul_pq$date, na.rm=TRUE)} to {max(haul_pq$date, na.rm=TRUE)}"))
+  message(glue("Parquet kisten: {nrow(kisten_pq)} rows | ",
+               "{min(kisten_pq$date, na.rm=TRUE)} to {max(kisten_pq$date, na.rm=TRUE)}"))
+
+  # ── 2. Weekly coverage: how many haul weeks have matching kisten weeks ────
+  haul_weeks <- haul_pq %>%
+    dplyr::filter(!is.na(total_catch_kg), total_catch_kg > 0) %>%
+    dplyr::mutate(yr = lubridate::year(date), wk = lubridate::isoweek(date)) %>%
+    dplyr::distinct(trip_id, yr, wk) %>%
+    dplyr::mutate(has_haul = TRUE)
+
+  kisten_weeks <- kisten_pq %>%
+    dplyr::filter(!is.na(haul_id)) %>%
+    dplyr::mutate(yr = lubridate::year(date), wk = lubridate::isoweek(date)) %>%
+    dplyr::distinct(trip_id, yr, wk) %>%
+    dplyr::mutate(has_kisten = TRUE)
+
+  coverage <- haul_weeks %>%
+    dplyr::full_join(kisten_weeks, by = c("trip_id", "yr", "wk")) %>%
+    dplyr::mutate(
+      has_haul   = tidyr::replace_na(has_haul,   FALSE),
+      has_kisten = tidyr::replace_na(has_kisten, FALSE),
+      status = dplyr::case_when(
+        has_haul & has_kisten  ~ "both",
+        has_haul & !has_kisten ~ "haul only (no kisten)",
+        !has_haul & has_kisten ~ "kisten only (no haul)",
+        TRUE                   ~ "unknown"
+      )
+    )
+
+  message(glue("\n{sep2}"))
+  message("Coverage by year (trip-weeks with haul data):")
+  message(sep2)
+  coverage %>%
+    dplyr::group_by(yr, status) %>%
+    dplyr::summarise(n_weeks = dplyr::n(), .groups = "drop") %>%
+    tidyr::pivot_wider(names_from = status, values_from = n_weeks,
+                       values_fill = 0L) %>%
+    dplyr::arrange(yr) %>%
+    print(n = 20)
+
+  # ── 3. Trip ID format check ───────────────────────────────────────────────
+  message(glue("\n{sep2}"))
+  message("Trip ID format samples (first 5 per source):")
+  message(sep2)
+  message("Haul trip_ids  : ",
+          paste(head(sort(unique(haul_pq$trip_id)), 5), collapse = ", "))
+  message("Kisten trip_ids: ",
+          paste(head(sort(unique(kisten_pq$trip_id)), 5), collapse = ", "))
+
+  # Check for format mismatches (e.g. "2023W05" vs "2023052")
+  haul_fmt   <- unique(nchar(haul_pq$trip_id))
+  kisten_fmt <- unique(nchar(kisten_pq$trip_id))
+  if (!all(haul_fmt %in% kisten_fmt))
+    message(glue("  \u26a0 trip_id length mismatch: haul={paste(sort(haul_fmt),collapse=',')} ",
+                 "kisten={paste(sort(kisten_fmt),collapse=',')}"))
+
+  # ── 4. Optional RData comparison ─────────────────────────────────────────
+  has_rdata <- (!is.null(rdata_haul_path)   && file.exists(rdata_haul_path)) ||
+               (!is.null(rdata_kisten_path) && file.exists(rdata_kisten_path))
+
+  if (has_rdata) {
+    message(glue("\n{sep2}"))
+    message("Comparing against RData files:")
+    message(sep2)
+
+    # Load haul RData
+    if (!is.null(rdata_haul_path) && file.exists(rdata_haul_path)) {
+      env_haul <- new.env()
+      load(rdata_haul_path, envir = env_haul)
+      if (rdata_haul_obj %in% ls(env_haul)) {
+        haul_old <- get(rdata_haul_obj, envir = env_haul)
+        # Filter to vessel if column exists
+        if ("vessel" %in% names(haul_old))
+          haul_old <- haul_old %>% dplyr::filter(vessel == vessel_id)
+        message(glue("RData haul  : {nrow(haul_old)} rows | ",
+                     "{min(haul_old$date, na.rm=TRUE)} to ",
+                     "{max(haul_old$date, na.rm=TRUE)}"))
+        message(glue("Parquet haul: {nrow(haul_pq)} rows | ",
+                     "{min(haul_pq$date, na.rm=TRUE)} to ",
+                     "{max(haul_pq$date, na.rm=TRUE)}"))
+        # Weeks in RData but not parquet
+        missing_haul <- haul_old %>%
+          dplyr::mutate(yr = lubridate::year(date),
+                        wk = lubridate::isoweek(date)) %>%
+          dplyr::distinct(yr, wk) %>%
+          dplyr::anti_join(
+            haul_pq %>%
+              dplyr::mutate(yr = lubridate::year(date),
+                            wk = lubridate::isoweek(date)) %>%
+              dplyr::distinct(yr, wk),
+            by = c("yr", "wk")
+          ) %>%
+          dplyr::arrange(yr, wk)
+        if (nrow(missing_haul) > 0) {
+          message(glue("  \u26a0 {nrow(missing_haul)} year-week(s) in RData haul ",
+                       "but NOT in parquet:"))
+          print(missing_haul, n = 50)
+        } else {
+          message("  \u2713 All RData haul year-weeks present in parquet")
+        }
+      } else {
+        message(glue("  \u26a0 Object '{rdata_haul_obj}' not found in {basename(rdata_haul_path)}"))
+        message(glue("    Available objects: {paste(ls(env_haul), collapse=', ')}"))
+      }
+    }
+
+    # Load kisten RData
+    if (!is.null(rdata_kisten_path) && file.exists(rdata_kisten_path)) {
+      env_kisten <- new.env()
+      load(rdata_kisten_path, envir = env_kisten)
+      if (rdata_kisten_obj %in% ls(env_kisten)) {
+        kisten_old <- get(rdata_kisten_obj, envir = env_kisten)
+        if ("vessel" %in% names(kisten_old))
+          kisten_old <- kisten_old %>% dplyr::filter(vessel == vessel_id)
+        # Find the date column — may be named differently in old data
+        date_col_old <- intersect(c("date", "datum", "Date"), names(kisten_old))
+        message(glue("  Kisten RData columns: {paste(names(kisten_old), collapse=', ')}"))
+        if (length(date_col_old) > 0) {
+          d_sample <- kisten_old[[date_col_old[1]]][!is.na(kisten_old[[date_col_old[1]]])][1:3]
+          message(glue("  Date column '{date_col_old[1]}': class={class(d_sample)[1]}, ",
+                       "sample={paste(d_sample, collapse=', ')}"))
+
+          # Robust date parsing — handles DD/MM/YYYY, DD-MM-YYYY, DD-MM-YY, ISO
+          d_raw2 <- as.character(kisten_old[[date_col_old[1]]])
+          parsed2 <- dplyr::case_when(
+            grepl("^\\d{1,2}/\\d{1,2}/\\d{4}$", d_raw2) ~
+              as.Date(d_raw2, format = "%d/%m/%Y"),
+            grepl("^\\d{1,2}/\\d{1,2}/\\d{2}$",  d_raw2) ~
+              as.Date(d_raw2, format = "%d/%m/%y"),
+            grepl("^\\d{1,2}-\\d{1,2}-\\d{4}$",  d_raw2) ~
+              as.Date(d_raw2, format = "%d-%m-%Y"),
+            grepl("^\\d{1,2}-\\d{1,2}-\\d{2}$",  d_raw2) ~
+              as.Date(sub("^(\\d{1,2}-\\d{1,2}-)(\\d{2})$","\\120\\2", d_raw2),
+                      format = "%d-%m-%Y"),
+            grepl("^\\d{4}-\\d{2}-\\d{2}", d_raw2) ~
+              as.Date(substr(d_raw2, 1, 10)),
+            TRUE ~ NA_Date_
+          )
+          kisten_old$date <- parsed2
+
+          n_na <- sum(is.na(kisten_old$date))
+          if (n_na > 0)
+            message(glue("  \u26a0 {n_na} rows with unparseable dates (filtered out)"))
+
+          kisten_old <- kisten_old %>% dplyr::filter(!is.na(date))
+
+          # Find trip column
+          trip_col_old <- intersect(c("trip_id", "trip", "reis"), names(kisten_old))
+          if (length(trip_col_old) > 0 && trip_col_old[1] != "trip_id")
+            kisten_old <- kisten_old %>%
+              dplyr::rename(trip_id = !!trip_col_old[1])
+        } else {
+          message("  \u26a0 No date column found. Available: ",
+                  paste(names(kisten_old), collapse = ", "))
+        }
+        message(glue("RData kisten  : {nrow(kisten_old)} rows | ",
+                     "{min(kisten_old$date, na.rm=TRUE)} to ",
+                     "{max(kisten_old$date, na.rm=TRUE)}"))
+        message(glue("Parquet kisten: {nrow(kisten_pq)} rows | ",
+                     "{min(kisten_pq$date, na.rm=TRUE)} to ",
+                     "{max(kisten_pq$date, na.rm=TRUE)}"))
+        # Weeks in RData but not parquet
+        missing_kisten <- kisten_old %>%
+          dplyr::mutate(yr = lubridate::year(date),
+                        wk = lubridate::isoweek(date)) %>%
+          dplyr::distinct(yr, wk) %>%
+          dplyr::anti_join(
+            kisten_pq %>%
+              dplyr::mutate(yr = lubridate::year(date),
+                            wk = lubridate::isoweek(date)) %>%
+              dplyr::distinct(yr, wk),
+            by = c("yr", "wk")
+          ) %>%
+          dplyr::arrange(yr, wk)
+        if (nrow(missing_kisten) > 0) {
+          message(glue("  ⚠ {nrow(missing_kisten)} year-week(s) in RData kisten ",
+                       "but NOT in parquet:"))
+          missing_kisten %>%
+            dplyr::filter(!is.na(yr), !is.na(wk)) %>%
+            as.data.frame() %>%
+            print(row.names = FALSE)
+        } else {
+          message("  ✓ All RData kisten year-weeks present in parquet")
+        }
+
+        # Trip-level row count comparison
+        message(glue("\n  Trip-level kisten row counts (RData vs parquet):"))
+        trip_col_old <- intersect(c("trip_id", "trip", "reis"), names(kisten_old))
+        trip_col_pq  <- "trip_id"
+        if (length(trip_col_old) > 0) {
+          counts_old <- kisten_old %>%
+            dplyr::rename(trip_id = !!trip_col_old[1]) %>%
+            dplyr::count(trip_id, name = "n_rdata")
+          counts_pq <- kisten_pq %>%
+            dplyr::count(trip_id, name = "n_parquet")
+          trip_diff <- counts_old %>%
+            dplyr::full_join(counts_pq, by = "trip_id") %>%
+            dplyr::mutate(
+              n_rdata   = tidyr::replace_na(n_rdata, 0L),
+              n_parquet = tidyr::replace_na(n_parquet, 0L),
+              diff      = n_parquet - n_rdata
+            ) %>%
+            dplyr::filter(diff != 0) %>%
+            dplyr::arrange(diff)
+          if (nrow(trip_diff) > 0) {
+            message(glue("  \u26a0 {nrow(trip_diff)} trip(s) with different row counts ",
+                         "(negative diff = missing from parquet):"))
+            trip_diff %>%
+              dplyr::filter(!is.na(trip_id)) %>%
+              as.data.frame() %>%
+              print(row.names = FALSE)
+          } else {
+            message("  \u2713 All trips have matching row counts")
+          }
+        }
+      } else {
+        message(glue("  \u26a0 Object '{rdata_kisten_obj}' not found in {basename(rdata_kisten_path)}"))
+        message(glue("    Available objects: {paste(ls(env_kisten), collapse=', ')}"))
+      }
+    }
+  }
+
+  message(glue("\n{sep}"))
+  invisible(list(haul = haul_pq, kisten = kisten_pq, coverage = coverage))
+}
+
+
+# ==============================================================================
+# UTILITY: backfill_kisten_from_rdata
+# ==============================================================================
+#' Backfill kisten parquet from old RData file.
+#' Maps old column names to the current parquet schema and writes missing trips.
+#'
+#' Run interactively:
+#'   backfill_kisten_from_rdata(
+#'     rdata_path    = "path/to/kisten.RData",
+#'     flyshoot_root = Sys.getenv("ONEDRIVE_FLYSHOOT"),
+#'     vessel_id     = "SCH99",   # NULL = all vessels
+#'     dry_run       = TRUE       # set FALSE to actually write
+#'   )
+#'
+#' @param rdata_path    Path to kisten.RData file
+#' @param flyshoot_root Path to parquet root (default ONEDRIVE_FLYSHOOT env var)
+#' @param vessel_id     Vessel to backfill (NULL = all vessels in RData)
+#' @param dry_run       If TRUE (default) print what would be written without writing
+#' @param rdata_obj     Name of kisten object inside RData (default "kisten")
+backfill_kisten_from_rdata <- function(
+    rdata_path,
+    flyshoot_root = Sys.getenv("ONEDRIVE_FLYSHOOT"),
+    vessel_id     = NULL,
+    dry_run       = TRUE,
+    rdata_obj     = "kisten"
+) {
+  stopifnot(file.exists(rdata_path))
+  sep <- strrep("=", 70)
+
+  message(sep)
+  message(glue("KISTEN BACKFILL FROM RDATA{if (dry_run) ' (DRY RUN)' else ''}"))
+  message(glue("  Source: {basename(rdata_path)}"))
+  message(sep)
+
+  # ── 1. Load old RData ──────────────────────────────────────────────────────
+  env_old <- new.env()
+  load(rdata_path, envir = env_old)
+  if (!rdata_obj %in% ls(env_old)) {
+    stop(glue("Object '{rdata_obj}' not found. Available: ",
+              "{paste(ls(env_old), collapse=', ')}"))
+  }
+  kisten_old <- get(rdata_obj, envir = env_old)
+  message(glue("  RData rows: {nrow(kisten_old)} | cols: ",
+               "{paste(names(kisten_old), collapse=', ')}"))
+
+  if (!is.null(vessel_id))
+    kisten_old <- kisten_old %>% dplyr::filter(vessel %in% vessel_id)
+
+  # ── 2. Map old columns to parquet schema ──────────────────────────────────
+  # Old: lotnummer, soorten, maat, gewicht, vessel, trip, datetime,
+  #      time_diff, haul2, haul, source, species, datum, tijd
+  # New: lot_nr, species_code, size_category, weight_kg, vessel, trip_id,
+  #      weighing_time, haul_id, date, time_hhmm, session_id, haul_flag
+
+  # Find trip column
+  trip_col <- intersect(c("trip_id", "trip", "reis"), names(kisten_old))
+  if (length(trip_col) == 0) stop("No trip column found in old kisten data")
+
+  # Find haul column
+  haul_col <- intersect(c("haul", "haul_id", "haul2"), names(kisten_old))
+  haul_col <- haul_col[1]  # prefer "haul" over "haul2"
+
+  # Find date column and parse it
+  date_col <- intersect(c("datum", "date", "Date"), names(kisten_old))
+  if (length(date_col) == 0) stop("No date column found in old kisten data")
+
+  # Find datetime column for weighing_time
+  dt_col <- intersect(c("datetime", "weighing_time", "weegmoment"), names(kisten_old))
+
+  message(glue("  Column mapping: trip={trip_col[1]}, haul={haul_col}, ",
+               "date={date_col[1]}, datetime={if(length(dt_col)>0) dt_col[1] else 'none'}"))
+
+  # ── Parse date column separately ──────────────────────────────────────────
+  d_raw <- as.character(kisten_old[[date_col[1]]])
+  parsed_dates <- dplyr::case_when(
+    grepl("^\\d{1,2}/\\d{1,2}/\\d{4}$", d_raw) ~
+      as.Date(d_raw, format = "%d/%m/%Y"),
+    grepl("^\\d{1,2}/\\d{1,2}/\\d{2}$", d_raw) ~
+      as.Date(d_raw, format = "%d/%m/%y"),
+    grepl("^\\d{1,2}-\\d{1,2}-\\d{4}$", d_raw) ~
+      as.Date(d_raw, format = "%d-%m-%Y"),
+    grepl("^\\d{1,2}-\\d{1,2}-\\d{2}$", d_raw) ~
+      as.Date(sub("^(\\d{1,2}-\\d{1,2}-)(\\d{2})$", "\\120\\2", d_raw),
+              format = "%d-%m-%Y"),
+    grepl("^\\d{4}-\\d{2}-\\d{2}", d_raw) ~
+      as.Date(substr(d_raw, 1, 10)),
+    TRUE ~ NA_Date_
+  )
+  n_parsed <- sum(!is.na(parsed_dates))
+  message(glue("  Date parsing: {n_parsed}/{length(d_raw)} rows parsed successfully"))
+  message(glue("  Sample dates: {paste(head(parsed_dates[!is.na(parsed_dates)], 3), collapse=', ')}"))
+  kisten_old$date_parsed <- parsed_dates
+
+  kisten_mapped <- kisten_old %>%
+    dplyr::rename(trip_id = !!trip_col[1]) %>%
+    dplyr::mutate(
+      date = date_parsed,
+
+      # Weighing time from datetime column if available
+      weighing_time = if (length(dt_col) > 0)
+        as.POSIXct(as.numeric(.data[[dt_col[1]]]),
+                   origin = "1970-01-01", tz = "UTC")
+      else
+        as.POSIXct(as.numeric(as.POSIXct(date, tz = "UTC")),
+                   origin = "1970-01-01", tz = "UTC"),
+
+      # Species: prefer "species" (3-letter code), fall back to "soorten"
+      species_code = dplyr::coalesce(
+        if ("species"  %in% names(.)) as.character(species)  else NA_character_,
+        if ("soorten"  %in% names(.)) as.character(soorten)  else NA_character_
+      ),
+
+      # Size category from "maat"
+      size_category = if ("maat" %in% names(.)) as.character(maat) else NA_character_,
+
+      # Weight
+      weight_kg = if ("gewicht" %in% names(.)) as.double(gewicht)
+                  else if ("weight_kg" %in% names(.)) as.double(weight_kg)
+                  else NA_real_,
+
+      # Haul ID
+      haul_id = as.integer(.data[[haul_col]]),
+
+      # Required columns that may be absent
+      session_id   = NA_integer_,
+      haul_flag    = FALSE,
+      lot_nr       = if ("lotnummer" %in% names(.)) as.integer(lotnummer) else NA_integer_,
+      time_hhmm    = if ("tijd"      %in% names(.)) as.character(tijd)    else NA_character_,
+
+      # Save metadata
+      save_date      = Sys.Date(),
+      save_timestamp = Sys.time()
+    ) %>%
+    dplyr::select(vessel, trip_id, haul_id, date, weighing_time,
+                  species_code, size_category, weight_kg,
+                  lot_nr, time_hhmm, session_id, haul_flag,
+                  save_date, save_timestamp) %>%
+    dplyr::filter(!is.na(date), !is.na(vessel), !is.na(trip_id))
+
+  message(glue("  Mapped rows: {nrow(kisten_mapped)} | ",
+               "date range: {min(kisten_mapped$date, na.rm=TRUE)} to ",
+               "{max(kisten_mapped$date, na.rm=TRUE)}"))
+
+  # ── 3. Find trips missing from parquet ────────────────────────────────────
+  kisten_pq <- tryCatch(
+    load_flyshoot_data("kisten", vessel_ids = vessel_id),
+    error = function(e) tibble::tibble()
+  )
+
+  existing_trips <- unique(kisten_pq$trip_id)
+  new_trips      <- unique(kisten_mapped$trip_id)
+  missing_trips  <- setdiff(new_trips, existing_trips)
+
+  message(glue("\n  Trips in RData:   {length(new_trips)}"))
+  message(glue("  Trips in parquet: {length(existing_trips)}"))
+  message(glue("  Missing trips:    {length(missing_trips)}"))
+
+  if (length(missing_trips) == 0) {
+    message("  \u2713 All trips already present in parquet — nothing to backfill")
+    return(invisible(NULL))
+  }
+
+  kisten_to_add <- kisten_mapped %>%
+    dplyr::filter(trip_id %in% missing_trips)
+
+  message(glue("  Rows to add: {nrow(kisten_to_add)} across {length(missing_trips)} trips"))
+  message(glue("  Date range to add: {min(kisten_to_add$date, na.rm=TRUE)} to ",
+               "{max(kisten_to_add$date, na.rm=TRUE)}"))
+
+  if (dry_run) {
+    message(glue("\n  DRY RUN — no changes written."))
+    message("  Re-run with dry_run = FALSE to apply.")
+    message(glue("\n  First 10 missing trips:"))
+    kisten_to_add %>%
+      dplyr::count(trip_id, date = as.Date(date)) %>%
+      dplyr::arrange(date) %>%
+      head(10) %>%
+      print()
+    return(invisible(kisten_to_add))
+  }
+
+  # ── 4. Combine and save ───────────────────────────────────────────────────
+  combined <- dplyr::bind_rows(kisten_pq, kisten_to_add) %>%
+    dplyr::arrange(vessel, trip_id, date, weighing_time)
+
+  save_flyshoot_data(combined, "kisten")
+  message(glue("  \u2713 Backfill complete: added {nrow(kisten_to_add)} rows, ",
+               "total now {nrow(combined)} rows"))
+
+  invisible(kisten_to_add)
+}
+
+
+# ==============================================================================
 # DIAGNOSTIC: debug_haul_assignment
 # ==============================================================================
 #' Diagnose the kisten-to-haul assignment for a specific trip.
@@ -3834,4 +4502,530 @@ debug_haul_assignment <- function(kisten_file,
 
   message(sep)
   invisible(list(hauls = haul_rows, sessions = sessions, comparison = comparison))
+}
+
+# ==============================================================================
+# TURBOCATCH / ERS CONVERTERS
+# ==============================================================================
+# These functions convert the output of parse_ers_folder() (from parse_ers.R)
+# into the standard flyshoot pipeline schema (haul, elog_trek, trip tables).
+#
+# parse_ers.R must be sourced before these functions are called.
+# Add to 00_setup.R:
+#   source(file.path(here(), "R/turbocatch", "parse_ers.R"))
+#
+# Mapping:
+#   haul      ← FAR message (one row per haul)
+#   elog_trek ← FAR species rows (one row per species per haul)
+#   trip      ← DEP + RTP + FAR summary (one row per trip)
+#   kisten    ← not applicable (no Marelec box data in ERS)
+#   elog      ← not applicable (trip-level LAN not used; FAR is authoritative)
+# ==============================================================================
+
+# ── shared haul-ID helper ─────────────────────────────────────────────────────
+# One XML file = one FAR message = one haul (per_haul regime, 2026+).
+# source_file is the unique key; hauls are numbered by date/time within trip.
+.ers_haul_lookup <- function(far_df) {
+  far_df %>%
+    dplyr::filter(!is_correction) %>%
+    dplyr::distinct(trip_id, source_file, haul_date, haul_time, lat, lon) %>%
+    dplyr::arrange(trip_id, haul_date, haul_time) %>%
+    dplyr::group_by(trip_id) %>%
+    dplyr::mutate(haul_id = dplyr::row_number()) %>%
+    dplyr::ungroup()
+}
+
+# ── FAR regime detection ──────────────────────────────────────────────────────
+# Two distinct TurboCatch reporting practices exist:
+#   "daily"    — one FAR per day covering multiple shots (avg n_shots > 3)
+#                Used 2019–2025. Equivalent to elog (daily catch report).
+#   "per_haul" — one FAR per haul, 1-2 shots each (avg n_shots <= 3)
+#                Used 2026+. Equivalent to elog_trek (haul-level catch).
+# Regime is detected per trip from avg_shots_per_far in the trip summary.
+
+.ers_trip_regime <- function(ers_data, trip_id_val) {
+  if (!is.null(ers_data$trips) && "far_regime" %in% names(ers_data$trips)) {
+    regime <- ers_data$trips %>%
+      dplyr::filter(trip_id == trip_id_val) %>%
+      dplyr::pull(far_regime)
+    if (length(regime) > 0 && !is.na(regime[1])) return(regime[1])
+  }
+  # Fallback: check avg shots directly from FAR data
+  far_trip <- ers_data$far %>%
+    dplyr::filter(!is_correction, trip_id == trip_id_val)
+  if (nrow(far_trip) == 0) return("no_far")
+  avg <- mean(far_trip$n_shots, na.rm = TRUE)
+  if_else(avg > 3, "daily", "per_haul")
+}
+
+# ── ers_to_haul ───────────────────────────────────────────────────────────────
+
+#' Convert ERS FAR data to pipeline haul format (one row per FAR message).
+#' Only meaningful for per_haul regime (2026+) where one FAR = one haul.
+#' For daily regime trips, haul positions are not available from ERS.
+#' @param ers_data  output of parse_ers_folder()
+#' @return tibble matching the haul parquet schema (per_haul trips only)
+ers_to_haul <- function(ers_data) {
+  if (is.null(ers_data$far) || nrow(ers_data$far) == 0) {
+    message("  No FAR records found — haul table will be empty")
+    return(tibble::tibble())
+  }
+
+  far <- ers_data$far %>% dplyr::filter(!is_correction)
+
+  # Only process per_haul trips for the haul table
+  # daily = one FAR per day (2019-2025), no_far = no catch messages
+  trip_regimes <- ers_data$trips %>%
+    dplyr::select(trip_id, far_regime) %>%
+    dplyr::filter(!is.na(far_regime))
+
+  per_haul_trips <- trip_regimes %>%
+    dplyr::filter(far_regime == "per_haul") %>%
+    dplyr::pull(trip_id)
+
+  if (length(per_haul_trips) == 0) {
+    message("  No per_haul trips — no haul-level positions available")
+    return(tibble::tibble())
+  }
+
+  far_ph <- far %>% dplyr::filter(trip_id %in% per_haul_trips)
+  if (nrow(far_ph) == 0) return(tibble::tibble())
+
+  lookup <- .ers_haul_lookup(far_ph)
+
+  far_ph %>%
+    dplyr::left_join(lookup,
+                     by = c("trip_id", "source_file",
+                            "haul_date", "haul_time", "lat", "lon")) %>%
+    dplyr::mutate(
+      shoot_time         = as.POSIXct(paste(haul_date, haul_time),
+                                       format = "%Y-%m-%d %H:%M", tz = "UTC"),
+      fishing_time_hours = duration_min / 60,
+      data_source        = "turbocatch"
+    ) %>%
+    dplyr::group_by(trip_id, vessel_id, haul_id, haul_date, haul_time) %>%
+    dplyr::slice(1) %>%
+    dplyr::ungroup() %>%
+    dplyr::transmute(
+      vessel             = vessel_id,
+      trip_id            = trip_id,
+      trip_nr            = trip_id,
+      haul_id            = haul_id,
+      date               = as.Date(haul_date),
+      shoot_lat          = lat,
+      shoot_lon          = lon,
+      shoot_time         = shoot_time,
+      haul_lat           = NA_real_,
+      haul_lon           = NA_real_,
+      haul_time          = NA_POSIXct_,
+      fishing_time_hours = fishing_time_hours,
+      gear_type          = gear_type,
+      mesh_size_mm       = as.integer(mesh_mm),
+      water_depth        = NA_integer_,
+      n_shots            = n_shots,
+      ices_rect          = ices_rect,
+      fao_division       = fao_area,
+      economic_zone      = eez,
+      data_source        = "turbocatch"
+    )
+}
+
+# ── ers_to_elog_trek ──────────────────────────────────────────────────────────
+
+#' Convert ERS FAR species rows to pipeline elog_trek format.
+#' Only for per_haul regime (2026+): one FAR = one haul = one row per species.
+#' @param ers_data  output of parse_ers_folder()
+#' @return tibble matching the elog_trek parquet schema
+ers_to_elog_trek <- function(ers_data) {
+  if (is.null(ers_data$far) || nrow(ers_data$far) == 0) return(tibble::tibble())
+
+  per_haul_trips <- ers_data$trips %>%
+    dplyr::filter(!is.na(far_regime), far_regime == "per_haul") %>%
+    dplyr::pull(trip_id)
+
+  if (length(per_haul_trips) == 0) return(tibble::tibble())
+
+  far <- ers_data$far %>%
+    dplyr::filter(!is_correction, trip_id %in% per_haul_trips)
+  if (nrow(far) == 0) return(tibble::tibble())
+
+  lookup <- .ers_haul_lookup(far)
+
+  far %>%
+    dplyr::left_join(lookup,
+                     by = c("trip_id", "source_file",
+                            "haul_date", "haul_time", "lat", "lon")) %>%
+    dplyr::transmute(
+      vessel            = vessel_id,
+      trip_id           = trip_id,
+      trip_nr           = trip_id,
+      trip_nr_elog      = trip_id,
+      haul_id           = haul_id,
+      date              = as.Date(haul_date),
+      weighing_time     = as.POSIXct(paste(haul_date, haul_time),
+                                      format = "%Y-%m-%d %H:%M", tz = "UTC"),
+      species_code      = species,
+      presentation      = presentation,
+      size_category     = "LSC",
+      weight_kg         = weight_kg,
+      box_count         = n_boxes,
+      conversion_factor = conv_factor,
+      shoot_lat         = lat,
+      shoot_lon         = lon,
+      ices_rect         = ices_rect,
+      gear_type         = gear_type,
+      mesh_size_mm      = as.integer(mesh_mm),
+      data_source       = "turbocatch"
+    ) %>%
+    dplyr::filter(!is.na(species_code), !is.na(weight_kg))
+}
+
+# ── ers_to_elog ───────────────────────────────────────────────────────────────
+
+#' Convert ERS FAR data to pipeline elog format.
+#' Only for daily regime (2019-2025): one FAR per day, n_shots = hauls that day.
+#' Stored in elog (daily catch report), not elog_trek.
+#' @param ers_data  output of parse_ers_folder()
+#' @return tibble matching the elog parquet schema
+ers_to_elog <- function(ers_data) {
+  if (is.null(ers_data$far) || nrow(ers_data$far) == 0) return(tibble::tibble())
+
+  daily_trips <- ers_data$trips %>%
+    dplyr::filter(!is.na(far_regime), far_regime == "daily") %>%
+    dplyr::pull(trip_id)
+
+  if (length(daily_trips) == 0) return(tibble::tibble())
+
+  far <- ers_data$far %>%
+    dplyr::filter(!is_correction, trip_id %in% daily_trips)
+  if (nrow(far) == 0) return(tibble::tibble())
+
+  far %>%
+    dplyr::transmute(
+      vessel            = vessel_id,
+      trip_id           = trip_id,
+      trip_nr           = trip_id,
+      trip_nr_elog      = trip_id,
+      date              = as.Date(haul_date),
+      species_code      = species,
+      presentation      = presentation,
+      size_category     = "LSC",          # ERS does not distinguish undersized
+      weight_kg         = weight_kg,
+      box_count         = n_boxes,
+      conversion_factor = conv_factor,
+      shoot_lat         = lat,
+      shoot_lon         = lon,
+      ices_rect         = ices_rect,
+      fao_division      = fao_area,
+      economic_zone     = eez,
+      gear_type         = gear_type,
+      mesh_size_mm      = as.integer(mesh_mm),
+      n_hauls           = n_shots,         # number of hauls covered by this daily FAR
+      data_source       = "turbocatch"
+    ) %>%
+    dplyr::filter(!is.na(species_code), !is.na(weight_kg))
+}
+
+# ── ers_to_trip ───────────────────────────────────────────────────────────────
+
+#' Convert ERS trip summary to pipeline trip format (one row per trip)
+#' @param ers_data  output of parse_ers_folder()
+#' @return tibble matching the trip parquet schema
+ers_to_trip <- function(ers_data) {
+  if (is.null(ers_data$trips) || nrow(ers_data$trips) == 0) {
+    message("  No complete trips found")
+    return(tibble::tibble())
+  }
+
+  ers_data$trips %>%
+    dplyr::transmute(
+      vessel            = vessel_id,
+      trip_id           = trip_id,
+      trip_nr           = trip_id,
+      departure_date    = as.Date(dep_date),
+      departure_port    = dep_port,
+      arrival_date      = as.Date(rtp_date),
+      arrival_port      = rtp_port,
+      gears_declared    = gears_declared,
+      gear_type         = stringr::str_extract(gears_declared, "^[A-Z]+"),
+      far_kg_total      = far_kg_total,
+      n_far_msgs        = n_far_msgs,
+      n_hauls           = n_hauls,
+      avg_shots_per_far = avg_shots_per_far,
+      far_regime        = far_regime,
+      trip_type         = dplyr::case_when(
+        far_regime == "no_far"   ~ "non_fishing",
+        far_regime == "daily"    ~ "fishing_daily_far",
+        far_regime == "per_haul" ~ "fishing_per_haul",
+        TRUE                     ~ NA_character_
+      ),
+      fishing_areas     = fishing_areas,
+      mesh_size_mm      = as.integer(stringr::str_extract(gears_declared, "[0-9]+(?=mm)")),
+      data_source       = "turbocatch"
+    )
+}
+
+# ==============================================================================
+# PARQUET COVERAGE
+# ==============================================================================
+
+#' Coverage overview for one or more pipeline parquet tables.
+#' Shows number of rows (or unique days) per vessel, with years as columns.
+#'
+#' @param tables       Table name(s), or NULL for all (haul, elog, elog_trek, trip).
+#' @param value        "n_obs"  = total row count per vessel/year (default)
+#'                     "n_days" = number of distinct days per vessel/year
+#' @param pipeline_dir Path to the raw parquet folder (default from config).
+#'
+#' @return Named list of tibbles (one per table), invisibly.
+#'         Each tibble: one row per vessel, one column per year.
+#'
+#' @examples
+#' parquet_coverage()                   # all tables, row counts
+#' parquet_coverage(value = "n_days")   # all tables, unique days
+#' parquet_coverage("elog")             # one table
+#' parquet_coverage(c("elog", "trip"))  # two tables
+parquet_coverage <- function(
+    tables       = NULL,
+    value        = "n_obs",
+    pipeline_dir = config$raw_data_path
+) {
+  .table_date_col <- c(
+    haul      = "date",
+    elog      = "date",
+    elog_trek = "date",
+    trip      = "departure_date"
+  )
+
+  if (is.null(tables)) tables <- names(.table_date_col)
+
+  results <- list()
+
+  for (tbl in tables) {
+    path <- file.path(pipeline_dir, tbl, paste0(tbl, ".parquet"))
+
+    if (!file.exists(path)) {
+      message(glue("  {tbl}.parquet not found — skipping"))
+      next
+    }
+
+    df       <- arrow::read_parquet(path)
+    date_col <- .table_date_col[[tbl]]
+
+    if (!date_col %in% names(df)) {
+      message(glue("  {tbl}: column '{date_col}' not found — skipping"))
+      next
+    }
+
+    summary <- df %>%
+      dplyr::mutate(
+        date = as.Date(.data[[date_col]]),
+        year = lubridate::year(date)
+      ) %>%
+      dplyr::group_by(vessel, year, date) %>%
+      dplyr::summarise(n = dplyr::n(), .groups = "drop") %>%
+      dplyr::group_by(vessel, year) %>%
+      dplyr::summarise(
+        n_obs  = sum(n),
+        n_days = dplyr::n_distinct(date),
+        .groups = "drop"
+      ) %>%
+      dplyr::select(vessel, year, val = dplyr::all_of(value)) %>%
+      tidyr::pivot_wider(names_from = year, values_from = val) %>%
+      dplyr::arrange(vessel) %>%
+      # Sort year columns chronologically
+      { yr_cols <- sort(as.integer(intersect(names(.), as.character(2010:2035))))
+        dplyr::select(., vessel, dplyr::any_of(as.character(yr_cols))) }
+
+    results[[tbl]] <- summary
+
+    message(glue("\n{strrep('=', 60)}"))
+    message(glue("TABLE: {tbl}  |  value: {value}"))
+    message(strrep("=", 60))
+    print(summary, n = Inf)
+  }
+
+  invisible(results)
+}
+
+
+# ==============================================================================
+# COLUMN STANDARDISATION
+# ==============================================================================
+#' Rename legacy/duplicate column names to canonical names and drop columns
+#' that belong to a different parquet (e.g. catch-level columns on haul).
+#'
+#' Call this just before save_flyshoot_data() in the pipeline, or once on
+#' existing parquets via standardise_all_parquets().
+#'
+#' Decisions based on glimpse() analysis 2026-06-05:
+#'
+#'  SPATIAL ZONES
+#'    Keep : fao_division, ices_rect, economic_zone
+#'    Drop  : area, division, rect, economiczone  (generic names, same data)
+#'    Drop  : fao_area, fao_subarea (always NA in haul — not populated)
+#'    Drop  : ices_rectangle, fao_zone, ices_area (legacy input names that
+#'             leaked through; fao_division is the canonical output name)
+#'    Drop  : latitude (duplicate of shoot_lat, always NA in haul)
+#'
+#'  PEOPLE
+#'    Keep : skipper  (populated in elog; captain always NA)
+#'    Drop : captain  (elog schema already maps captain -> skipper)
+#'
+#'  BOX COUNTS
+#'    Keep : box_count  (one box per lot/row in kisten and elog_trek — always 1)
+#'    Keep : lot_nr     (unique box identifier in kisten/elog_trek)
+#'    Drop : boxes      (legacy elog input name, mapped to box_count in schema)
+#'    Drop : box_number (legacy pefa name, mapped to box_count in schema)
+#'    Note : box_count in haul is always NA — remove from haul
+#'
+#'  LEGACY CATCH COLS ON HAUL (all NA — belong in elog/kisten only)
+#'    Drop from haul: species, species_code, weight_kg, catch_kg, box_count,
+#'    record_nr, presentation, preservation, freshness, size, conversion_factor,
+#'    loss_grams, boxes, weight_undersized, boxes_undersized, discard_reason
+#'
+#'  LEGACY IDENTIFIERS ON HAUL (all NA — belong in trip only)
+#'    Drop from haul: vessel_number, trip_identifier, captain
+#'
+#'  MESH SIZE
+#'    Keep : mesh_size_mm  (explicit unit in name)
+#'    Drop : mesh_size     (ambiguous unit, always NA in haul)
+#'
+#' @param df       data frame to standardise
+#' @param dataset  one of "haul","elog","elog_trek","kisten","trip","vessel_movement"
+#' @return standardised data frame
+standardise_columns <- function(df, dataset) {
+
+  # ── 1. Universal renames (apply to any dataset that has these columns) ──────
+  universal_renames <- c(
+    # spatial: canonical name on left, legacy aliases on right
+    "fao_division" = "fao_zone",        # fao_zone -> fao_division
+    "fao_division" = "faozone",
+    "ices_rect"    = "ices_rectangle",  # ices_rectangle -> ices_rect
+    "economic_zone"= "economiczone",    # economiczone -> economic_zone
+    "skipper"      = "captain",         # captain -> skipper
+    "box_count"    = "boxes",           # boxes -> box_count
+    "box_count"    = "box_number",      # box_number -> box_count
+    "mesh_size_mm" = "mesh_size",       # mesh_size -> mesh_size_mm
+    "haul_id"      = "haul",            # elog: haul -> haul_id
+    "haul_id"      = "record_nr"        # haul: record_nr -> haul_id (where used)
+  )
+
+  for (canonical in unique(names(universal_renames))) {
+    aliases <- universal_renames[names(universal_renames) == canonical]
+    for (alias in aliases) {
+      if (alias %in% names(df) && !canonical %in% names(df)) {
+        df <- dplyr::rename(df, !!canonical := !!alias)
+      } else if (alias %in% names(df) && canonical %in% names(df)) {
+        # Both exist: coalesce into canonical, drop alias
+        df[[canonical]] <- dplyr::coalesce(df[[canonical]], df[[alias]])
+        df <- dplyr::select(df, -dplyr::all_of(alias))
+      }
+    }
+  }
+
+  # ── 2. Drop redundant spatial columns (always duplicated by canonical names) ─
+  spatial_redundant <- c(
+    "area", "division", "rect",          # too generic; same as fao/ices equivalents
+    "fao_area", "fao_subarea",           # never populated in any parquet
+    "ices_area",                         # never populated
+    "latitude"                           # duplicate of shoot_lat, always NA
+  )
+  df <- dplyr::select(df, -dplyr::any_of(spatial_redundant))
+
+  # ── 3. Dataset-specific column drops ─────────────────────────────────────────
+  if (dataset == "haul") {
+    # These are catch-level columns that belong in elog/kisten, not haul.
+    # They appear on haul only because bind_rows() fills NA across sources.
+    catch_cols_on_haul <- c(
+      "species", "species_code", "weight_kg", "catch_kg",
+      "presentation", "preservation", "freshness", "size",
+      "conversion_factor", "loss_grams", "boxes_undersized",
+      "weight_undersized", "box_count", "record_nr", "discard_reason"
+    )
+    # Legacy trip-context identifiers that are always NA on haul rows
+    legacy_id_on_haul <- c(
+      "vessel_number", "trip_identifier"
+    )
+    df <- dplyr::select(df,
+                        -dplyr::any_of(c(catch_cols_on_haul, legacy_id_on_haul)))
+  }
+
+  if (dataset == "elog_trek") {
+    # boxes_undersized always NA in elog_trek; undersized rows are pivoted to BMS
+    df <- dplyr::select(df, -dplyr::any_of(c("boxes_undersized")))
+  }
+
+  # ── 4. Ensure haul_id is character ───────────────────────────────────────────
+  if ("haul_id" %in% names(df) && !is.character(df$haul_id)) {
+    df$haul_id <- as.character(df$haul_id)
+  }
+
+  df
+}
+
+
+#' Apply standardise_columns() to all parquets on disk and overwrite in place.
+#'
+#' Run once after pipeline changes, then the pipeline functions will keep
+#' columns clean going forward via standardise_columns() before each save.
+#'
+#' @param parquet_dir  root raw data directory (contains haul/, elog/, etc.)
+#' @param dry_run      if TRUE, report changes without writing
+standardise_all_parquets <- function(
+    parquet_dir = file.path("C:/Users/MartinPastoors/Martin Pastoors",
+                            "FLYSHOOT - General/data/raw"),
+    dry_run     = FALSE
+) {
+  library(arrow)
+  library(dplyr)
+  library(glue)
+
+  datasets <- c("haul", "elog", "elog_trek", "kisten", "trip", "vessel_movement")
+
+  for (ds in datasets) {
+    pq_path <- file.path(parquet_dir, ds, paste0(ds, ".parquet"))
+    if (!file.exists(pq_path)) {
+      message(glue("  SKIP {ds} — file not found"))
+      next
+    }
+
+    df_orig <- arrow::read_parquet(pq_path)
+    df_new  <- standardise_columns(df_orig, ds)
+
+    dropped  <- setdiff(names(df_orig), names(df_new))
+    renamed  <- character(0)  # renames already reflected in df_new column names
+    n_before <- ncol(df_orig)
+    n_after  <- ncol(df_new)
+
+    message(glue("\n{ds}: {n_before} cols -> {n_after} cols"))
+    if (length(dropped) > 0)
+      message(glue("  dropped : {paste(dropped, collapse=', ')}"))
+
+    # Check for renames by comparing with original
+    orig_names <- names(df_orig)
+    new_names  <- names(df_new)
+    added <- setdiff(new_names, orig_names)
+    if (length(added) > 0)
+      message(glue("  renamed -> : {paste(added, collapse=', ')}"))
+
+    if (!dry_run) {
+      # Write to a temp file first, then replace the original.
+      # arrow::read_parquet() memory-maps the source file, keeping it locked
+      # until the object is garbage-collected. Writing directly to pq_path
+      # while df_orig is still in scope causes Windows error 1224.
+      # Fix: write to sibling .tmp, rm() both frames, gc() to drop the map,
+      # then rename .tmp -> pq_path (now unlocked).
+      tmp_path <- paste0(pq_path, ".tmp")
+      arrow::write_parquet(df_new, tmp_path)
+      rm(df_orig, df_new)
+      gc()
+      file.rename(tmp_path, pq_path)
+      message(glue("  Written."))
+    } else {
+      message(glue("  (dry run — not written)"))
+    }
+  }
+
+  invisible(NULL)
 }

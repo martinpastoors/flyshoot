@@ -1,0 +1,759 @@
+---
+output:
+  word_document:
+    reference_docx: report_template.dotx
+---
+
+```{r setup, include=FALSE}
+
+# ==========================================================================================================
+# FLYSHOOT Observer Comparison Tripreport
+# Updated: April 2026
+#
+# Compares self-sampling data with observer (waarnemer) estimates for a single trip.
+# Two comparisons are produced:
+#   1. Species composition of landings (self-sampling vs. observer)
+#   2. Total discards and total landings per haul (self-sampling vs. observer)
+#
+# Requires:
+#   - Standard FLYSHOOT data (haul, kisten) loaded via load_flyshoot_data()
+#   - Observer Excel file (waarnemer vangst) with sheets "totaal" and "per trek"
+# ==========================================================================================================
+
+# ==========================================================================================================
+# LIBRARIES
+# ==========================================================================================================
+
+library(withr)
+library(tidyverse)
+library(lubridate)
+library(arrow)
+library(jsonlite)
+library(glue)
+library(flextable)
+library(officer)
+library(captioner)
+library(readxl)
+
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE,
+                      comment = "", fig.width = 10)
+options(dplyr.summarise.inform = FALSE)
+knitr::opts_chunk$set(ft.align = "left")
+
+# ==========================================================================================================
+# PARAMETER HANDLING
+# ==========================================================================================================
+
+setvessel   <- getOption("flyshoot.vessel",      default = "SCH99")
+startdate   <- getOption("flyshoot.startdate",   default = lubridate::dmy("08/02/2026"))
+enddate     <- getOption("flyshoot.enddate",     default = lubridate::dmy("12/02/2026"))
+lang        <- getOption("flyshoot.lang",        default = "nl")
+max_species <- getOption("flyshoot.max_species", default = 12)
+
+# Path to the observer Excel file — update if needed
+observer_file <- getOption(
+  "flyshoot.observer_file",
+  default = "C:/Users/MartinPastoors/Martin Pastoors/FLYSHOOT - General/tripdata/SCH99/SCH99 2026_277 waarnemer vangst.xlsx"
+)
+
+cat(glue("\n  ▶ Rendering vessel: {setvessel} | {format(startdate,'%d/%m/%Y')} – {format(enddate,'%d/%m/%Y')}\n"))
+
+# ==========================================================================================================
+# LANGUAGE STRINGS — all UI text goes through txt("key")
+# ==========================================================================================================
+
+strings <- list(
+  nl = list(
+    cap_samenvatting   = "Samenvatting van de reis",
+    col_trip           = "Trip",
+    col_from           = "Van",
+    col_to             = "Tot",
+    col_days           = "Dagen",
+    col_hauls          = "Trekken",
+    col_hauls_day      = "Tr/dag",
+    col_species        = "Soort",
+    col_code           = "Code",
+    col_total_kg       = "Totaal (kg)",
+    col_ss_kg          = "Self-sampling (kg)",
+    col_obs_kg         = "Waarnemer (kg)",
+    col_diff_kg        = "Verschil (kg)",
+    col_diff_pct       = "Verschil (%)",
+    total_row          = "TOTAAL",
+    hdr_report         = "Reisoverzicht (waarnemer vergelijking)",
+    plot_trip_lbl      = "Reis:",
+    hdr_generated      = "Rapport gegenereerd",
+    lbl_selfsampling   = "Self-sampling",
+    lbl_observer       = "Waarnemer",
+    lbl_aanvoer        = "Aanvoer",
+    lbl_discards       = "Discards",
+    xlab_haul          = "Trek",
+    ylab_weight        = "Gewicht (kg)",
+    ylab_pct           = "Aandeel aanvoer (%)",
+    cap_species_comp   = "Soortsamenstelling aanvoer: self-sampling vs. waarnemer (%)",
+    cap_haul_comp      = "Totale discards en aanvoer per trek: self-sampling vs. waarnemer (kg)",
+    cap_species_table  = "Vergelijking aanvoer per soort: self-sampling vs. waarnemer (kg)"
+  ),
+  en = list(
+    cap_samenvatting   = "Trip summary",
+    col_trip           = "Trip",
+    col_from           = "From",
+    col_to             = "To",
+    col_days           = "Days",
+    col_hauls          = "Hauls",
+    col_hauls_day      = "Hauls/day",
+    col_species        = "Species",
+    col_code           = "Code",
+    col_total_kg       = "Total (kg)",
+    col_ss_kg          = "Self-sampling (kg)",
+    col_obs_kg         = "Observer (kg)",
+    col_diff_kg        = "Difference (kg)",
+    col_diff_pct       = "Difference (%)",
+    total_row          = "TOTAL",
+    hdr_report         = "Tripreport (observer comparison)",
+    plot_trip_lbl      = "Trip:",
+    hdr_generated      = "Report generated",
+    lbl_selfsampling   = "Self-sampling",
+    lbl_observer       = "Observer",
+    lbl_aanvoer        = "Landings",
+    lbl_discards       = "Discards",
+    xlab_haul          = "Haul",
+    ylab_weight        = "Weight (kg)",
+    ylab_pct           = "Share of landings (%)",
+    cap_species_comp   = "Species composition of landings: self-sampling vs. observer (%)",
+    cap_haul_comp      = "Total discards and landings per haul: self-sampling vs. observer (kg)",
+    cap_species_table  = "Landings by species comparison: self-sampling vs. observer (kg)"
+  )
+)
+txt <- function(key) {
+  v <- strings[[lang]][[key]]
+  if (is.null(v)) stop("Unknown key: ", key)
+  v
+}
+
+# ==========================================================================================================
+# PROJECT ROOT & CONFIG
+# ==========================================================================================================
+
+project_root <- Sys.getenv("FLYSHOOT_PROJECT")
+if (project_root == "") {
+  stop(
+    "Environment variable FLYSHOOT_PROJECT is not set.\n\n",
+    "  1. Run:  usethis::edit_r_environ()\n",
+    "  2. Add:  FLYSHOOT_PROJECT=C:/GIT/flyshoot\n",
+    "  3. Save, then restart R: Session > Restart R\n",
+    "  4. Knit again."
+  )
+}
+p <- function(...) file.path(project_root, ...)
+
+# Copy Word template next to the Rmd so pandoc can find it
+local({
+  template_src <- p("report_template.dotx")
+  rmd_input    <- knitr::current_input(dir = TRUE)
+  if (!is.null(rmd_input) && file.exists(template_src)) {
+    template_dest <- file.path(dirname(rmd_input), "report_template.dotx")
+    if (!identical(template_src, template_dest))
+      file.copy(template_src, template_dest, overwrite = TRUE)
+  }
+})
+
+# Guard against output file being open in Word
+local({
+  rmd_input <- knitr::current_input(dir = TRUE)
+  if (!is.null(rmd_input)) {
+    docx_out <- paste0(tools::file_path_sans_ext(rmd_input), ".docx")
+    if (file.exists(docx_out)) {
+      locked <- tryCatch({ con <- file(docx_out, open = "ab"); close(con); FALSE },
+                         error = function(e) TRUE)
+      if (locked) stop("Output file is open in Word — please close it before knitting:\n  ", docx_out)
+    }
+  }
+})
+
+if (!file.exists(p("config.json")))
+  stop("config.json not found at: ", p("config.json"), "\nPlease run 00_setup.R first.")
+
+config <- jsonlite::read_json(p("config.json"))
+
+# Source into the global environment (local = FALSE) so all functions, including
+# parse_marelec_species(), are available in every subsequent chunk.
+# withr::with_dir sets the working directory so plain file.exists("config.json")
+# checks inside the sourced files resolve correctly.
+withr::with_dir(project_root, {
+  source(p("R", "harmonized", "01_flyshoot_functions.R"), local = FALSE)
+  source(p("R", "harmonized", "02_storage_functions.R"), local = FALSE)
+  source(p("R", "FLYSHOOT utils.R"),                     local = FALSE)
+})
+
+# ==========================================================================================================
+# ASFIS SPECIES TABLE  (needed for Dutch/English names)
+# ==========================================================================================================
+
+asfis <- loadRData(file.path(config$spatial_data, "asfis.RData")) %>%
+  rename_with(tolower)
+
+species_name_col <- if (lang == "nl") "dutchname" else "englishname"
+
+# ==========================================================================================================
+# CAPTIONER SETUP
+# ==========================================================================================================
+
+tab_prefix <- if (lang == "nl") "Tabel " else "Table "
+fig_prefix <- if (lang == "nl") "Figuur " else "Figure "
+tab_nums   <- captioner::captioner(prefix = tab_prefix, levels = 1, type = "n", infix = ".")
+fig_nums   <- captioner::captioner(prefix = fig_prefix, levels = 1, type = "n", infix = ".")
+
+# flextable defaults
+flextable::set_flextable_defaults(
+  font.family  = "Calibri",
+  font.size    = 9,
+  border.color = "#AAAAAA",
+  padding      = 3,
+  theme_fun    = theme_vanilla
+)
+
+# ==========================================================================================================
+# DATA LOADING
+# ==========================================================================================================
+
+safe_load <- function(type) {
+  tryCatch(
+    load_flyshoot_data(type, vessel_ids = setvessel),
+    error = function(e) { message(glue("  ⚠ Could not load {type}: {e$message}")); tibble() }
+  )
+}
+
+haul   <- safe_load("haul")
+kisten <- safe_load("kisten")
+elog   <- safe_load("elog")
+
+# ==========================================================================================================
+# TRIP RESOLUTION
+# ==========================================================================================================
+
+resolve_settrip <- function(df) {
+  df %>%
+    dplyr::filter(vessel %in% setvessel, date >= startdate, date <= enddate) %>%
+    dplyr::distinct(trip_id) %>%
+    dplyr::pull(trip_id)
+}
+
+settrip <- if (nrow(elog) > 0 && length(resolve_settrip(elog)) > 0) {
+  resolve_settrip(elog)
+} else if (nrow(haul) > 0 && length(resolve_settrip(haul)) > 0) {
+  resolve_settrip(haul)
+} else if (nrow(kisten) > 0 && length(resolve_settrip(kisten)) > 0) {
+  resolve_settrip(kisten)
+} else {
+  stop(glue("No data found for vessel {setvessel} between ",
+            "{format(startdate,'%d/%m/%Y')} and {format(enddate,'%d/%m/%Y')}"))
+}
+
+# ==========================================================================================================
+# FILTER TO TRIP
+# ==========================================================================================================
+
+harmonise_species <- function(x) dplyr::case_when(x == "SQC" ~ "SQR", TRUE ~ x)
+
+h <- if (nrow(haul) > 0) {
+  haul %>% dplyr::filter(vessel %in% setvessel, trip_id %in% settrip)
+} else { tibble() }
+
+m <- if (nrow(kisten) > 0) {
+  kisten %>%
+    dplyr::filter(vessel %in% setvessel, trip_id %in% settrip) %>%
+    dplyr::mutate(
+      species_code = toupper(species_code),
+      species_code = harmonise_species(species_code)
+    ) %>%
+    dplyr::distinct()
+} else { tibble() }
+
+has_haul   <- nrow(h) > 0
+has_kisten <- nrow(m) > 0
+
+if (!has_haul && !has_kisten)
+  stop(glue("No haul or kisten data for vessel {setvessel}, trip(s) {paste(settrip, collapse=',')}"))
+
+# Derive report date range from haul data
+report_start <- if (has_haul) min(h$date, na.rm = TRUE) else startdate
+report_end   <- if (has_haul) max(h$date, na.rm = TRUE) else enddate
+
+# ==========================================================================================================
+# OBSERVER DATA — waarnemer vangst
+# ==========================================================================================================
+
+if (!file.exists(observer_file))
+  stop("Observer file not found:\n  ", observer_file,
+       "\n\nUpdate the 'observer_file' path in the parameter section above.")
+
+# Sheet "totaal": total landings + discards per species for the whole trip
+wn_totaal_raw <- readxl::read_excel(
+  observer_file,
+  sheet      = "totaal",
+  col_names  = TRUE,
+  .name_repair = ~make.names(., unique = TRUE)
+)
+
+# Resolve observer Dutch species names to FAO 3-alpha codes.
+# Strategy (two-step, most robust to avoid scoping issues):
+#   1. parse_marelec_species() — the standard FLYSHOOT name parser
+#   2. Fuzzy fallback via asfis dutchname lookup (case-insensitive) for any
+#      names that step 1 could not resolve (e.g. abbreviated or variant names)
+#   3. If still unresolved, flag with "?" prefix for manual inspection
+
+# Build asfis Dutch-name lookup (lowercased for case-insensitive matching)
+asfis_nl_lkp <- asfis %>%
+  dplyr::filter(!is.na(dutchname), dutchname != "") %>%
+  dplyr::mutate(dutchname_lower = tolower(trimws(dutchname))) %>%
+  dplyr::select(species_code = species, dutchname_lower) %>%
+  dplyr::distinct(dutchname_lower, .keep_all = TRUE)
+
+wn_totaal <- wn_totaal_raw %>%
+  dplyr::mutate(
+    species_name_nl_raw = species_name_nl,
+    species_name_upper  = toupper(trimws(species_name_nl)),
+    # Step 1: parse_marelec_species()
+    species_code_parsed = parse_marelec_species(species_name_upper)$species_code
+  ) %>%
+  # Step 2: asfis Dutch-name fallback for rows that step 1 left empty
+  dplyr::mutate(dutchname_lower = tolower(trimws(species_name_nl))) %>%
+  dplyr::left_join(asfis_nl_lkp, by = "dutchname_lower") %>%
+  dplyr::rename(species_code_asfis = species_code) %>%
+  dplyr::mutate(
+    species_code = dplyr::case_when(
+      !is.na(species_code_parsed) & species_code_parsed != "" ~ species_code_parsed,
+      !is.na(species_code_asfis)                              ~ species_code_asfis,
+      # Step 3: flag unresolved names
+      TRUE ~ paste0("?", toupper(substr(trimws(species_name_nl), 1, 3)))
+    ),
+    source = "observer"
+  ) %>%
+  dplyr::select(-dutchname_lower, -species_code_parsed, -species_code_asfis)
+
+# Sheet "per trek": landings + discards per haul
+# "#N/A" cells (hauls with no observer coverage) become NA after as.numeric()
+wn_pertrek <- readxl::read_excel(
+  observer_file,
+  sheet      = "per trek",
+  col_names  = TRUE,
+  .name_repair = ~make.names(., unique = TRUE)
+) %>%
+  dplyr::rename(haul_id = haul) %>%
+  dplyr::mutate(dplyr::across(c(discards, aanvoer),
+                               ~suppressWarnings(as.numeric(.)))) %>%
+  tidyr::pivot_longer(cols      = c(discards, aanvoer),
+                      names_to  = "category",
+                      values_to = "weight_kg") %>%
+  dplyr::filter(!is.na(weight_kg)) %>%
+  dplyr::mutate(source = "observer")
+
+# ==========================================================================================================
+# COMBINED DATASET 1: species composition of landings  (aligned on species_code)
+# ==========================================================================================================
+
+# Self-sampling: species-level landings from kisten, keyed on species_code
+ss_totaal_aanvoer <- m %>%
+  dplyr::group_by(species_code) %>%
+  dplyr::summarise(weight_kg = sum(weight_kg, na.rm = TRUE), .groups = "drop") %>%
+  dplyr::mutate(category = "aanvoer", source = "selfsampling")
+
+# Observer: aanvoer rows only, already has species_code resolved above
+obs_totaal_aanvoer <- wn_totaal %>%
+  dplyr::filter(category == "aanvoer") %>%
+  dplyr::group_by(species_code) %>%
+  dplyr::summarise(weight_kg = sum(weight_kg, na.rm = TRUE), .groups = "drop") %>%
+  dplyr::mutate(category = "aanvoer", source = "observer")
+
+# Shared species label lookup: prefer Dutch/English name from asfis, fall back to code.
+# Use a plain if() — lang is a scalar, not a vector, so dplyr::if_else() would fail here.
+name_col <- if (lang == "nl") "dutchname" else "englishname"
+sp_labels <- asfis %>%
+  dplyr::select(species, dplyr::all_of(name_col)) %>%
+  dplyr::rename(sp_label_raw = dplyr::all_of(name_col)) %>%
+  dplyr::mutate(sp_label = dplyr::coalesce(sp_label_raw, as.character(species))) %>%
+  dplyr::select(species_code = species, sp_label)
+
+# Bind both sources and attach a consistent display label
+comb_totaal_aanvoer <- dplyr::bind_rows(ss_totaal_aanvoer, obs_totaal_aanvoer) %>%
+  dplyr::mutate(weight_kg = dplyr::coalesce(weight_kg, 0)) %>%
+  dplyr::left_join(sp_labels, by = "species_code") %>%
+  dplyr::mutate(
+    sp_label = dplyr::coalesce(sp_label, species_code)   # fallback for unknown codes
+  ) %>%
+  dplyr::group_by(source) %>%
+  dplyr::mutate(pct = round(100 * weight_kg / sum(weight_kg, na.rm = TRUE), 1)) %>%
+  dplyr::ungroup() %>%
+  dplyr::mutate(source = factor(source, levels = c("selfsampling", "observer")))
+
+# ==========================================================================================================
+# COMBINED DATASET 2: discards + landings per haul
+# ==========================================================================================================
+
+# Self-sampling: total_catch_kg from haul; landings from kisten
+ss_pertrek <- dplyr::left_join(
+  h %>% dplyr::select(haul_id, total_catch_kg),
+  m %>%
+    dplyr::group_by(haul_id) %>%
+    dplyr::summarise(aanvoer = sum(weight_kg, na.rm = TRUE), .groups = "drop"),
+  by = "haul_id"
+) %>%
+  dplyr::mutate(
+    aanvoer  = dplyr::coalesce(aanvoer, 0),
+    discards = pmax(total_catch_kg - aanvoer, 0)
+  ) %>%
+  tidyr::pivot_longer(cols      = c(discards, aanvoer),
+                      names_to  = "category",
+                      values_to = "weight_kg") %>%
+  dplyr::filter(!is.na(weight_kg)) %>%
+  dplyr::mutate(source = "selfsampling")
+
+comb_pertrek <- dplyr::bind_rows(
+  dplyr::select(ss_pertrek,  haul_id, category, weight_kg, source),
+  dplyr::select(wn_pertrek,  haul_id, category, weight_kg, source)
+) %>%
+  dplyr::mutate(
+    source   = factor(source,   levels = c("selfsampling", "observer")),
+    category = factor(category, levels = c("aanvoer", "discards"))
+  )
+
+# ==========================================================================================================
+# COLOUR PALETTE
+# ==========================================================================================================
+
+pal_aanvoer  <- "#5B8DB8"   # steel blue  — landings
+pal_discards <- "#D96B4F"   # terracotta  — discards
+pal_header   <- "#D5E8F0"   # light blue  — table headers
+
+# Shared flextable styling helper
+style_ft <- function(ft, caption = NULL) {
+  ft <- flextable::bold(ft, part = "header")
+  ft <- flextable::bg(ft, part = "header", bg = pal_header)
+  ft <- flextable::hline_top(ft, part = "header",
+         border = officer::fp_border(color = "#2E75B6", width = 1.5))
+  ft <- flextable::hline_bottom(ft, part = "header",
+         border = officer::fp_border(color = "#2E75B6", width = 1.5))
+  ft <- flextable::hline_bottom(ft, part = "body",
+         border = officer::fp_border(color = "#AAAAAA", width = 0.5))
+  ft <- flextable::autofit(ft)
+  ft <- flextable::set_table_properties(
+    ft, opts_word = list(split = FALSE, keep_with_next = TRUE))
+  if (!is.null(caption)) ft <- flextable::set_caption(ft, caption)
+  ft
+}
+```
+
+# `r paste(setvessel, collapse = ", ")` — `r txt("hdr_report")`
+
+### `r txt("plot_trip_lbl")` `r paste(settrip, collapse = ", ")` | `r format(report_start, "%d %b")` – `r format(report_end, "%d %b %Y")`
+
+`r txt("hdr_generated")`: `r format(Sys.time(), '%d/%m/%Y')`
+
+&nbsp;
+
+<!-- ########################################################################################## -->
+<!-- Table 1: Trip summary                                                                     -->
+<!-- ########################################################################################## -->
+
+```{r tab_samenvatting}
+
+tab_nums("samenvatting", display = FALSE, caption = txt("cap_samenvatting"))
+
+if (has_haul) {
+  c1 <- h %>%
+    dplyr::group_by(vessel, trip_id) %>%
+    dplyr::summarise(
+      nhauls    = dplyr::n_distinct(haul_id),
+      startdate = min(date, na.rm = TRUE),
+      enddate   = max(date, na.rm = TRUE),
+      .groups   = "drop"
+    ) %>%
+    dplyr::mutate(
+      ndays       = as.numeric(difftime(enddate, startdate, units = "days")) + 1,
+      hauls_p_day = round(nhauls / ndays, 1),
+      startdate   = format(startdate, "%d/%m/%Y"),
+      enddate     = format(enddate,   "%d/%m/%Y")
+    ) %>%
+    dplyr::rename(
+      !!txt("col_trip")      := trip_id,
+      !!txt("col_from")      := startdate,
+      !!txt("col_to")        := enddate,
+      !!txt("col_days")      := ndays,
+      !!txt("col_hauls")     := nhauls,
+      !!txt("col_hauls_day") := hauls_p_day
+    ) %>%
+    dplyr::select(-vessel)
+
+  style_ft(flextable::flextable(c1), caption = tab_nums("samenvatting"))
+}
+```
+
+&nbsp;
+
+<!-- ########################################################################################## -->
+<!-- Table 2: Landings by species — self-sampling vs. observer                                -->
+<!-- ########################################################################################## -->
+
+```{r tab_species_comparison}
+
+tab_nums("species_comparison", display = FALSE, caption = txt("cap_species_table"))
+
+# Build wide comparison table keyed on species_code — aligned across both sources
+tbl_species <- dplyr::bind_rows(
+  ss_totaal_aanvoer %>% dplyr::select(species_code, weight_kg) %>%
+    dplyr::mutate(source = "selfsampling"),
+  obs_totaal_aanvoer %>% dplyr::select(species_code, weight_kg) %>%
+    dplyr::mutate(source = "observer")
+) %>%
+  tidyr::pivot_wider(names_from = source, values_from = weight_kg, values_fill = 0) %>%
+  dplyr::left_join(sp_labels, by = "species_code") %>%
+  dplyr::mutate(
+    sp_label = dplyr::coalesce(sp_label, species_code),
+    diff_kg  = observer - selfsampling,
+    diff_pct = dplyr::if_else(
+      selfsampling > 0,
+      round(100 * (observer - selfsampling) / selfsampling, 1),
+      NA_real_
+    )
+  ) %>%
+  dplyr::arrange(desc(pmax(selfsampling, observer))) %>%
+  dplyr::select(sp_label, species_code, selfsampling, observer, diff_kg, diff_pct) %>%
+  dplyr::rename(
+    !!txt("col_species") := sp_label,
+    !!txt("col_code")    := species_code,
+    !!txt("col_ss_kg")   := selfsampling,
+    !!txt("col_obs_kg")  := observer,
+    !!txt("col_diff_kg") := diff_kg,
+    !!txt("col_diff_pct"):= diff_pct
+  )
+
+# Total row
+total_row <- tbl_species %>%
+  dplyr::summarise(dplyr::across(where(is.numeric), ~sum(.x, na.rm = TRUE))) %>%
+  dplyr::mutate(!!txt("col_species") := txt("total_row"), .before = 1) %>%
+  dplyr::mutate(!!txt("col_diff_pct") := NA_real_)   # % difference not meaningful for total
+
+tbl_species <- dplyr::bind_rows(tbl_species, total_row)
+n_data <- nrow(tbl_species) - 1
+
+num_cols <- setdiff(names(tbl_species), txt("col_species"))
+
+ft_sp <- flextable::flextable(tbl_species) %>%
+  flextable::set_caption(tab_nums("species_comparison")) %>%
+  flextable::bold(part = "header") %>%
+  flextable::bold(i = nrow(tbl_species), part = "body") %>%
+  flextable::bg(part = "header", bg = pal_header) %>%
+  flextable::bg(i = nrow(tbl_species), bg = "#F0F0F0", part = "body") %>%
+  flextable::hline_top(part = "header",
+    border = officer::fp_border(color = "#2E75B6", width = 1.5)) %>%
+  flextable::hline_bottom(part = "header",
+    border = officer::fp_border(color = "#2E75B6", width = 1.5)) %>%
+  flextable::hline(i = n_data, part = "body",
+    border = officer::fp_border(color = "#2E75B6", width = 1.0)) %>%
+  flextable::hline_bottom(part = "body",
+    border = officer::fp_border(color = "#AAAAAA", width = 0.5)) %>%
+  flextable::colformat_num(j = c(txt("col_ss_kg"), txt("col_obs_kg"),
+                                  txt("col_diff_kg")), big.mark = ",") %>%
+  flextable::colformat_num(j = txt("col_diff_pct"), digits = 1, suffix = "%",
+                           na_str = "—") %>%
+  flextable::align(j = num_cols, align = "right", part = "all") %>%
+  flextable::align(j = txt("col_species"), align = "left", part = "all") %>%
+  # Highlight rows where difference > 20% in either direction
+  flextable::bg(
+    i   = ~ !is.na(get(txt("col_diff_pct"))) & abs(get(txt("col_diff_pct"))) > 20,
+    j   = txt("col_diff_pct"),
+    bg  = "#FFF2CC",
+    part = "body"
+  ) %>%
+  flextable::autofit()
+
+ft_sp
+```
+
+\newpage
+
+<!-- ########################################################################################## -->
+<!-- Figure 1: Species composition of landings — self-sampling vs. observer                   -->
+<!-- ########################################################################################## -->
+
+```{r fig_species_composition, fig.width=10, fig.height=7}
+
+fig_nums("species_comp", display = FALSE, caption = txt("cap_species_comp"))
+
+if (nrow(comb_totaal_aanvoer) > 0) {
+
+  # Order species by combined total weight across both sources (largest at top)
+  sp_order <- comb_totaal_aanvoer %>%
+    dplyr::group_by(sp_label) %>%
+    dplyr::summarise(tot = sum(weight_kg), .groups = "drop") %>%
+    dplyr::arrange(desc(tot)) %>%
+    dplyr::pull(sp_label)
+
+  source_levels <- c(txt("lbl_selfsampling"), txt("lbl_observer"))
+
+  plot_data <- comb_totaal_aanvoer %>%
+    dplyr::mutate(
+      sp_label   = factor(sp_label, levels = rev(sp_order)),
+      source_lbl = dplyr::recode(as.character(source),
+        selfsampling = txt("lbl_selfsampling"),
+        observer     = txt("lbl_observer")),
+      source_lbl = factor(source_lbl, levels = source_levels)
+    )
+
+  ggplot(plot_data, aes(x = sp_label, y = pct, fill = source_lbl)) +
+    theme_bw() +
+    theme(
+      legend.position    = "none",           # source shown as facet label
+      panel.grid.minor   = element_blank(),
+      panel.grid.major.y = element_blank(),
+      strip.background   = element_rect(fill = "grey92", colour = "grey60"),
+      strip.text         = element_text(face = "bold", size = 10),
+      axis.text          = element_text(size = 9)
+    ) +
+    geom_col(width = 0.72, alpha = 0.88) +
+    geom_text(aes(label = paste0(pct, "%")),
+              hjust = -0.1, size = 2.8) +
+    coord_flip() +
+    scale_fill_manual(
+      values = setNames(c(pal_aanvoer, "#E8983A"), source_levels)
+    ) +
+    scale_y_continuous(
+      expand = expansion(mult = c(0, 0.20)),
+      labels = scales::label_percent(scale = 1)
+    ) +
+    facet_wrap(~source_lbl, ncol = 2) +
+    labs(
+      title    = glue("{paste(setvessel, collapse = '/')} — ",
+                      "{if (lang == 'nl') 'soortsamenstelling aanvoer' else 'species composition of landings'}"),
+      subtitle = glue("{txt('plot_trip_lbl')} {paste(settrip, collapse = ', ')} | ",
+                      "{format(report_start, '%d %b')} – {format(report_end, '%d %b %Y')}"),
+      x       = if (lang == "nl") "Soort" else "Species",
+      y       = txt("ylab_pct"),
+      caption = fig_nums("species_comp")
+    ) +
+    theme(plot.caption = element_text(size = 9, face = "italic", hjust = 0))
+}
+```
+
+_`r fig_nums("species_comp")`_
+
+\newpage
+
+<!-- ########################################################################################## -->
+<!-- Figure 2: Discards + landings per haul — self-sampling vs. observer                      -->
+<!-- ########################################################################################## -->
+
+```{r fig_haul_comparison_setup}
+n_hauls_comp <- dplyr::n_distinct(comb_pertrek$haul_id)
+fig_h_comp   <- max(5, min(n_hauls_comp * 0.40 + 2.5, 20))
+```
+
+```{r fig_haul_comparison, fig.width=10, fig.height=fig_h_comp}
+
+fig_nums("haul_comp", display = FALSE, caption = txt("cap_haul_comp"))
+
+if (nrow(comb_pertrek) > 0) {
+
+  source_levels <- c(txt("lbl_selfsampling"), txt("lbl_observer"))
+  cat_levels    <- c(txt("lbl_aanvoer"), txt("lbl_discards"))
+
+  plot_pert <- comb_pertrek %>%
+    dplyr::mutate(
+      source_lbl   = dplyr::recode(as.character(source),
+        selfsampling = txt("lbl_selfsampling"),
+        observer     = txt("lbl_observer")),
+      category_lbl = dplyr::recode(as.character(category),
+        aanvoer  = txt("lbl_aanvoer"),
+        discards = txt("lbl_discards")),
+      source_lbl   = factor(source_lbl,   levels = source_levels),
+      category_lbl = factor(category_lbl, levels = rev(cat_levels)),
+      haul_lbl     = factor(haul_id, levels = rev(sort(unique(haul_id))))
+    )
+
+  # ── Per-haul discard % labels (placed at right edge of each stacked bar) ──
+  haul_totals <- plot_pert %>%
+    dplyr::group_by(source_lbl, haul_lbl) %>%
+    dplyr::summarise(
+      total_kg    = sum(weight_kg, na.rm = TRUE),
+      discard_kg  = sum(weight_kg[category_lbl == txt("lbl_discards")], na.rm = TRUE),
+      .groups = "drop"
+    ) %>%
+    dplyr::mutate(
+      discard_pct = dplyr::if_else(
+        total_kg > 0, round(100 * discard_kg / total_kg), 0L),
+      pct_lbl = dplyr::if_else(discard_kg > 0, paste0(discard_pct, "%"), NA_character_)
+    )
+
+  # ── Per-trip (per-facet) overall discard % — placed in top-right corner ──
+  trip_totals <- plot_pert %>%
+    dplyr::group_by(source_lbl) %>%
+    dplyr::summarise(
+      total_kg   = sum(weight_kg, na.rm = TRUE),
+      discard_kg = sum(weight_kg[category_lbl == txt("lbl_discards")], na.rm = TRUE),
+      .groups = "drop"
+    ) %>%
+    dplyr::mutate(
+      trip_pct = round(100 * discard_kg / total_kg),
+      lbl      = glue(
+        "{if (lang == 'nl') 'Totaal discards' else 'Overall discards'}: {trip_pct}%"
+      ),
+      # x_pos placed near the largest bar in each facet for the annotation
+      x_pos = max(haul_totals$total_kg, na.rm = TRUE) * 0.97
+    )
+
+  ggplot(plot_pert,
+         aes(y = haul_lbl, x = weight_kg, fill = category_lbl)) +
+    theme_bw() +
+    theme(
+      panel.grid.minor   = element_blank(),
+      panel.grid.major.y = element_blank(),
+      strip.background   = element_rect(fill = "grey92", colour = "grey60"),
+      strip.text         = element_text(face = "bold", size = 10),
+      legend.position    = "bottom",
+      legend.box         = "horizontal",
+      axis.text          = element_text(size = 8)
+    ) +
+    geom_col(width = 0.72, alpha = 0.88) +
+    # Per-haul discard % at the right end of each bar
+    geom_text(
+      data    = dplyr::filter(haul_totals, !is.na(pct_lbl)),
+      aes(y = haul_lbl, x = total_kg, label = pct_lbl),
+      hjust   = -0.15, size = 2.6, colour = "grey20",
+      inherit.aes = FALSE
+    ) +
+    # Overall trip discard % in top-right corner of each facet
+    geom_text(
+      data    = trip_totals,
+      aes(y = Inf, x = x_pos, label = lbl),
+      hjust   = 1, vjust = 1.5, size = 3, fontface = "bold",
+      colour  = pal_discards, inherit.aes = FALSE
+    ) +
+    scale_fill_manual(
+      name   = if (lang == "nl") "Categorie" else "Category",
+      values = setNames(c(pal_aanvoer, pal_discards), cat_levels)
+    ) +
+    scale_x_continuous(expand = expansion(mult = c(0, 0.15))) +
+    facet_wrap(~source_lbl, ncol = 2, scales = "free_x") +
+    labs(
+      title    = glue("{paste(setvessel, collapse = '/')} — ",
+                      "{if (lang == 'nl') 'aanvoer en discards per trek' else 'landings and discards per haul'}"),
+      subtitle = glue("{txt('plot_trip_lbl')} {paste(settrip, collapse = ', ')} | ",
+                      "{format(report_start, '%d %b')} – {format(report_end, '%d %b %Y')}"),
+      y       = txt("xlab_haul"),
+      x       = txt("ylab_weight"),
+      caption = fig_nums("haul_comp")
+    ) +
+    theme(plot.caption = element_text(size = 9, face = "italic", hjust = 0))
+}
+```
+
+_`r fig_nums("haul_comp")`_
+
+```{r session_info, include=FALSE}
+message(glue(
+  "Observer comparison complete: vessel={paste(setvessel, collapse=',')}, ",
+  "trip(s)={paste(settrip, collapse=',')}, ",
+  "haul={nrow(h)} rows, kisten={nrow(m)} rows, ",
+  "observer species={nrow(wn_totaal)}, observer hauls={dplyr::n_distinct(wn_pertrek$haul_id)}"
+))
+```
